@@ -23,7 +23,7 @@ async-trait = "0.1"
 
 # HTTP client for Anthropic API (replaces @anthropic-ai/sdk fetch calls)
 # socks: SOCKS5 proxy support; rustls-tls: pure-Rust TLS (no openssl dep)
-reqwest = { version = "0.12", features = ["json", "stream", "socks", "multipart"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "socks", "multipart", "rustls-tls"] }
 
 # SSE streaming for API responses
 eventsource-stream = "0.2"
