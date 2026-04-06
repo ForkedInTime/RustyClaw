@@ -1,6 +1,6 @@
 # RustyClaw — quick reference
 
-Rust port of rustyclaw. Native binary, no Node/Bun required.
+Rust port of Clawd-Code. Native binary, no Node/Bun required.
 
 ## Run
 
