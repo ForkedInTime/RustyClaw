@@ -1,6 +1,6 @@
 # RustyClaw
 
-A Rust port of [rustyclaw](../rustyclaw/) — a personal fork of [Claude Code](https://github.com/anthropics/claude-code), Anthropic's official CLI for Claude.
+A Rust port of [Clawd-Code](../rustyclaw/) — a personal fork of [Claude Code](https://github.com/anthropics/claude-code), Anthropic's official CLI for Claude.
 
 Provides the same capabilities as rustyclaw (Anthropic Claude + native Ollama) in a single native binary with no Node.js/Bun runtime dependency.
 
