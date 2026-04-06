@@ -1,0 +1,108 @@
+name: Claude Code version watch
+
+on:
+  schedule:
+    # Runs every Monday at 09:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch: {}   # allow manual trigger from GitHub UI
+
+jobs:
+  check-claude-version:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get latest Claude Code version from npm registry
+        id: npm
+        run: |
+          # npm/pnpm/bun all publish to the same registry — npm view is authoritative
+          LATEST=$(npm view @anthropic-ai/claude-code version 2>/dev/null)
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+
+      - name: Get reviewed version from source
+        id: reviewed
+        run: |
+          REVIEWED=$(grep 'BUILT_AGAINST_CLAUDE_VERSION' src/main.rs \
+            | grep -oP '"\K[^"]+' | head -1)
+          echo "reviewed=$REVIEWED" >> "$GITHUB_OUTPUT"
+
+      - name: Compare and open issue if newer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST:   ${{ steps.npm.outputs.latest }}
+          REVIEWED: ${{ steps.reviewed.outputs.reviewed }}
+        run: |
+          if [ -z "$LATEST" ]; then
+            echo "Could not fetch npm version — skipping"
+            exit 0
+          fi
+
+          if [ "$LATEST" = "$REVIEWED" ]; then
+            echo "Claude Code v$LATEST — no change (reviewed: v$REVIEWED)"
+            exit 0
+          fi
+
+          # Check if an issue for this version already exists
+          EXISTING=$(gh issue list \
+            --label "upstream-update" \
+            --state open \
+            --search "Claude Code v${LATEST} released" \
+            --json number --jq '.[0].number' 2>/dev/null)
+
+          if [ -n "$EXISTING" ]; then
+            echo "Issue already open (#$EXISTING) — skipping"
+            exit 0
+          fi
+
+          echo "New Claude Code version detected: v$LATEST (reviewed: v$REVIEWED)"
+
+          gh issue create \
+            --title "Claude Code v${LATEST} released — review for RustyClaw" \
+            --label "upstream-update" \
+            --body "$(cat <<EOF
+## Claude Code upstream update
+
+| | Version |
+|---|---|
+| Latest npm release | \`$LATEST\` |
+| Last reviewed in RustyClaw | \`$REVIEWED\` |
+
+### What to do
+
+1. Check the Claude Code changelog:
+   https://github.com/anthropics/claude-code/releases
+
+2. Review for anything that affects RustyClaw:
+   - New slash commands or changed command behavior
+   - New API parameters (model names, effort levels, etc.)
+   - Changes to \`CLAUDE.md\` format or tool use protocol
+   - MCP protocol changes
+
+3. Implement relevant changes in RustyClaw.
+
+4. Update \`BUILT_AGAINST_CLAUDE_VERSION\` in \`src/main.rs\` to \`$LATEST\`.
+
+5. Close this issue.
+
+### Upgrade commands (use whichever you installed with)
+
+\`\`\`bash
+# pnpm
+pnpm add -g @anthropic-ai/claude-code
+
+# bun
+bun add -g @anthropic-ai/claude-code
+
+# npm
+npm update -g @anthropic-ai/claude-code
+\`\`\`
+
+---
+*Opened automatically by the claude-version-watch workflow.*
+EOF
+)"

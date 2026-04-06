@@ -1,0 +1,413 @@
+/// Session persistence — port of history.ts / session storage.
+///
+/// Each session is stored as two files in ~/.claude/sessions/:
+///   <uuid>.jsonl  — one Message per line (full API history)
+///   <uuid>.meta   — JSON with name, created_at, first_preview
+
+use crate::api::types::{ContentBlock, Message, Role};
+use crate::tui::app::ChatEntry;
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use tokio::fs;
+use tokio::io::AsyncWriteExt;
+use uuid::Uuid;
+
+// ── Metadata ──────────────────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct SessionMeta {
+    pub id: String,
+    pub name: String,
+    pub created_at: u64, // unix seconds
+    pub preview: String, // first user message (truncated)
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+impl SessionMeta {
+    fn path_for(id: &str) -> PathBuf {
+        crate::config::Config::sessions_dir().join(format!("{id}.meta"))
+    }
+
+    /// Synchronously load just the tags for a session (for display in commands).
+    pub fn tags_for(id: &str) -> Vec<String> {
+        let path = Self::path_for(id);
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<SessionMeta>(&s).ok())
+            .map(|m| m.tags)
+            .unwrap_or_default()
+    }
+
+    async fn save(&self) -> Result<()> {
+        let path = Self::path_for(&self.id);
+        fs::write(&path, serde_json::to_string(self)?).await?;
+        Ok(())
+    }
+
+    async fn load(id: &str) -> Result<Self> {
+        let path = Self::path_for(id);
+        let s = fs::read_to_string(&path).await?;
+        Ok(serde_json::from_str(&s)?)
+    }
+}
+
+// ── Session ───────────────────────────────────────────────────────────────────
+
+pub struct Session {
+    pub id: String,
+    pub meta: SessionMeta,
+    path: PathBuf,
+}
+
+impl Session {
+    fn jsonl_path(id: &str) -> PathBuf {
+        crate::config::Config::sessions_dir().join(format!("{id}.jsonl"))
+    }
+
+    /// Create a new empty session with a human-readable default name.
+    pub async fn new() -> Result<Self> {
+        let id = Uuid::new_v4().to_string();
+        fs::create_dir_all(crate::config::Config::sessions_dir()).await?;
+        let meta = SessionMeta {
+            id: id.clone(),
+            name: human_session_name(),
+            created_at: unix_now(),
+            preview: String::new(),
+            tags: Vec::new(),
+        };
+        meta.save().await?;
+        Ok(Self { id: id.clone(), meta, path: Self::jsonl_path(&id) })
+    }
+
+    /// Resume an existing session by ID — loads meta, returns Session + messages.
+    pub async fn resume(id: &str) -> Result<(Self, Vec<Message>)> {
+        let meta = SessionMeta::load(id).await
+            .with_context(|| format!("Session '{id}' not found"))?;
+        let messages = Self::load_messages(id).await?;
+        let s = Self { id: id.to_string(), meta, path: Self::jsonl_path(id) };
+        Ok((s, messages))
+    }
+
+    /// Append new messages to the session file.
+    pub async fn append(&mut self, new_messages: &[Message]) -> Result<()> {
+        if new_messages.is_empty() { return Ok(()); }
+
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .await?;
+
+        for msg in new_messages {
+            let line = serde_json::to_string(msg)?;
+            file.write_all(line.as_bytes()).await?;
+            file.write_all(b"\n").await?;
+        }
+
+        // Update preview from first user message if not yet set
+        if self.meta.preview.is_empty() {
+            if let Some(preview) = first_user_preview(new_messages) {
+                self.meta.preview = preview;
+                self.meta.save().await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Overwrite the session file with a completely new set of messages.
+    /// Used after compaction to keep the on-disk file consistent.
+    pub async fn overwrite(&self, messages: &[Message]) -> Result<()> {
+        // Pre-allocate ~256 bytes per message to reduce re-allocs
+        let mut content = String::with_capacity(messages.len() * 256);
+        for msg in messages {
+            content.push_str(&serde_json::to_string(msg)?);
+            content.push('\n');
+        }
+        fs::write(&self.path, content).await?;
+        Ok(())
+    }
+
+    /// Rename the session.
+    pub async fn rename(&mut self, name: &str) -> Result<()> {
+        self.meta.name = name.to_string();
+        self.meta.save().await
+    }
+
+    /// Add a tag to the session (no-op if already tagged).
+    pub async fn add_tag(&mut self, tag: &str) -> Result<()> {
+        let tag = tag.to_string();
+        if !self.meta.tags.contains(&tag) {
+            self.meta.tags.push(tag);
+            self.meta.save().await?;
+        }
+        Ok(())
+    }
+
+    /// Remove a tag from the session.
+    pub async fn remove_tag(&mut self, tag: &str) -> Result<()> {
+        self.meta.tags.retain(|t| t != tag);
+        self.meta.save().await
+    }
+
+    /// Load all messages from a session file.
+    pub async fn load_messages(id: &str) -> Result<Vec<Message>> {
+        let path = Self::jsonl_path(id);
+        if !path.exists() { return Ok(Vec::new()); }
+        let content = fs::read_to_string(&path).await?;
+        content
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str::<Message>(l).map_err(anyhow::Error::from))
+            .collect()
+    }
+
+    /// List all saved sessions, newest first.
+    /// Backfills empty previews from session messages (for older sessions).
+    pub async fn list() -> Result<Vec<SessionMeta>> {
+        let dir = crate::config::Config::sessions_dir();
+        if !dir.exists() { return Ok(Vec::new()); }
+
+        let mut entries = fs::read_dir(&dir).await?;
+        let mut sessions: Vec<(u64, SessionMeta)> = Vec::new();
+
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("meta") {
+                let id = path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                if !id.is_empty() {
+                    if let Ok(mut meta) = SessionMeta::load(&id).await {
+                        // Backfill empty preview from session messages
+                        if meta.preview.is_empty() {
+                            if let Ok(msgs) = Self::load_messages(&id).await {
+                                if let Some(preview) = first_user_preview(&msgs) {
+                                    meta.preview = preview;
+                                    let _ = meta.save().await;
+                                }
+                            }
+                        }
+                        sessions.push((meta.created_at, meta));
+                    }
+                }
+            }
+        }
+
+        sessions.sort_by(|a, b| b.0.cmp(&a.0));
+        Ok(sessions.into_iter().map(|(_, m)| m).collect())
+    }
+
+    /// Delete a session (both .jsonl and .meta).
+    pub async fn delete(id: &str) -> Result<()> {
+        let jsonl = Self::jsonl_path(id);
+        let meta  = SessionMeta::path_for(id);
+        if jsonl.exists() { fs::remove_file(&jsonl).await?; }
+        if meta.exists()  { fs::remove_file(&meta).await?; }
+        Ok(())
+    }
+
+    /// Export session to a markdown file, returns the path written.
+    pub async fn export(id: &str, dest: &std::path::Path) -> Result<PathBuf> {
+        let messages = Self::load_messages(id).await?;
+        let meta = SessionMeta::load(id).await.ok();
+        let name = meta.map(|m| m.name).unwrap_or_else(|| id.to_string());
+
+        let mut out = format!("# Session: {name}\n\n");
+        for msg in &messages {
+            let role = match msg.role { Role::User => "You", Role::Assistant => "Claude" };
+            for block in &msg.content {
+                match block {
+                    ContentBlock::Text { text } => {
+                        out.push_str(&format!("**{role}:** {text}\n\n"));
+                    }
+                    ContentBlock::ToolUse { name, .. } => {
+                        out.push_str(&format!("**Tool:** {name}\n\n"));
+                    }
+                    ContentBlock::ToolResult { .. } => {}
+                    _ => {}
+                }
+            }
+        }
+
+        fs::write(dest, &out).await?;
+        Ok(dest.to_path_buf())
+    }
+
+    /// Export session to a markdown string (used for clipboard export).
+    pub async fn export_to_string(id: &str) -> Result<String> {
+        let messages = Self::load_messages(id).await?;
+        let meta = SessionMeta::load(id).await.ok();
+        let name = meta.map(|m| m.name).unwrap_or_else(|| id.to_string());
+
+        let mut out = format!("# Session: {name}\n\n");
+        for msg in &messages {
+            let role = match msg.role { Role::User => "You", Role::Assistant => "Claude" };
+            for block in &msg.content {
+                match block {
+                    ContentBlock::Text { text } => {
+                        out.push_str(&format!("**{role}:** {text}\n\n"));
+                    }
+                    ContentBlock::ToolUse { name, .. } => {
+                        out.push_str(&format!("**Tool:** {name}\n\n"));
+                    }
+                    ContentBlock::ToolResult { .. } => {}
+                    _ => {}
+                }
+            }
+        }
+        Ok(out)
+    }
+}
+
+/// Reconstruct ChatEntry display list from a saved message history.
+pub fn entries_from_messages(messages: &[Message]) -> Vec<ChatEntry> {
+    let mut entries = Vec::new();
+    for msg in messages {
+        match msg.role {
+            Role::User => {
+                for block in &msg.content {
+                    match block {
+                        ContentBlock::Text { text } => {
+                            entries.push(ChatEntry::user(text.clone()));
+                        }
+                        ContentBlock::ToolResult { content, is_error, .. } => {
+                            let text = content.iter()
+                                .map(|c| { let crate::api::types::ToolResultContent::Text { text } = c; text.as_str() })
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            let preview = if text.len() > 300 { format!("{}…", &text[..300]) } else { text };
+                            if is_error.unwrap_or(false) {
+                                entries.push(ChatEntry::error(preview));
+                            } else {
+                                entries.push(ChatEntry::tool_result(preview));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Role::Assistant => {
+                let mut text_parts: Vec<String> = Vec::new();
+                for block in &msg.content {
+                    match block {
+                        ContentBlock::Text { text } if !text.trim().is_empty() => {
+                            text_parts.push(text.clone());
+                        }
+                        ContentBlock::ToolUse { id: _, name, input } => {
+                            let args = serde_json::to_string(input).unwrap_or_default();
+                            let preview = crate::tui::app::format_tool_preview_pub(name, &args);
+                            entries.push(ChatEntry::tool_call(format!("{name}  {preview}")));
+                        }
+                        _ => {}
+                    }
+                }
+                if !text_parts.is_empty() {
+                    entries.push(ChatEntry::assistant(text_parts.join("\n")));
+                }
+            }
+        }
+    }
+    entries
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Generate a tmux-friendly session name with hostname prefix.
+/// Format: "hostname-adjective-animal"
+/// Used when launching with --tmux so the pane has a recognisable title.
+pub fn generate_tmux_session_name() -> String {
+    const ADJECTIVES: &[&str] = &[
+        "bold", "bright", "calm", "crisp", "dawn", "deft", "early", "eager",
+        "fair", "fast", "fierce", "free", "glad", "gold", "grand", "great",
+        "keen", "kind", "light", "lush", "mild", "neat", "nimble", "noble",
+        "prime", "pure", "quick", "quiet", "rapid", "sharp", "sleek", "smart",
+        "soft", "steady", "still", "strong", "swift", "true", "vivid", "warm",
+    ];
+    const ANIMALS: &[&str] = &[
+        "badger", "bear", "bison", "boar", "capybara", "cat", "crane", "deer",
+        "dolphin", "dove", "eagle", "elk", "falcon", "finch", "fox", "gecko",
+        "goose", "heron", "ibis", "jaguar", "jay", "kite", "kiwi", "leopard",
+        "lion", "lynx", "mink", "moose", "newt", "orca", "otter", "owl",
+        "panda", "panther", "parrot", "puma", "raven", "seal", "shark", "stag",
+        "swift", "tiger", "toucan", "turtle", "viper", "vole", "wolf", "wren",
+    ];
+
+    let hostname = std::fs::read_to_string("/etc/hostname")
+        .ok()
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            std::process::Command::new("hostname")
+                .output().ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or_else(|| "host".to_string());
+
+    // Use current timestamp as seed for deterministic but varied names
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as usize)
+        .unwrap_or(42);
+
+    let adj    = ADJECTIVES[seed % ADJECTIVES.len()];
+    let animal = ANIMALS[(seed / ADJECTIVES.len()) % ANIMALS.len()];
+
+    format!("{hostname}-{adj}-{animal}")
+}
+
+/// Generate a human-readable default session name in local time.
+/// Format: "Thu Apr 3, 6:51 PM"
+/// Uses the system `date` command so the timezone is always correct.
+fn human_session_name() -> String {
+    std::process::Command::new("date")
+        .arg("+%a %b %-d, %-I:%M %p")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "New session".to_string())
+}
+
+/// Convert days since 1970-01-01 to (year, month, day). No external crate.
+fn days_to_ymd(days: u64) -> (u64, u64, u64) {
+    // Algorithm from http://howardhinnant.github.io/date_algorithms.html
+    let z = days as i64 + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y   = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp  = (5 * doy + 2) / 153;
+    let d   = doy - (153 * mp + 2) / 5 + 1;
+    let m   = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y   = if m <= 2 { y + 1 } else { y };
+    (y as u64, m as u64, d as u64)
+}
+
+fn first_user_preview(messages: &[Message]) -> Option<String> {
+    for msg in messages {
+        if matches!(msg.role, Role::User) {
+            for block in &msg.content {
+                if let ContentBlock::Text { text } = block {
+                    let preview = text.chars().take(60).collect::<String>();
+                    let preview = preview.replace('\n', " ");
+                    return Some(preview);
+                }
+            }
+        }
+    }
+    None
+}
