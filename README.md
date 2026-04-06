@@ -102,6 +102,12 @@ rustyclaw
 
 `.env` files are auto-loaded from `$CWD/.env`, `~/.env`, or `~/.config/rustyclaw/.env`.
 
+### /doctor — everything green on Arch
+
+Run `/doctor` to verify your setup. API keys, voice, MCP plugins, system tools — all checked in one shot.
+
+![Doctor diagnostics](assets/doctor.png)
+
 ---
 
 ## Ollama (Local Models)
