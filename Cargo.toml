@@ -1,0 +1,86 @@
+[package]
+name = "rustyclaw"
+version = "0.1.0"
+edition = "2024"
+description = "RustyClaw — a Rust-native Claude Code CLI"
+
+[[bin]]
+name = "rustyclaw"
+path = "src/main.rs"
+
+[dependencies]
+# CLI argument parsing (replaces commander)
+clap = { version = "4", features = ["derive", "env"] }
+
+# Random number generation (spinner verbs, completion verbs)
+rand = "0.9"
+
+# Async runtime (replaces Node.js event loop)
+tokio = { version = "1", features = ["full"] }
+
+# Async fn in trait objects (required for dyn Tool)
+async-trait = "0.1"
+
+# HTTP client for Anthropic API (replaces @anthropic-ai/sdk fetch calls)
+# socks: SOCKS5 proxy support; rustls-tls: pure-Rust TLS (no openssl dep)
+reqwest = { version = "0.12", features = ["json", "stream", "socks", "multipart"] }
+
+# SSE streaming for API responses
+eventsource-stream = "0.2"
+futures-util = "0.3"
+
+# JSON serialization (replaces JSON.parse / zod)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling (replaces try/catch chains)
+anyhow = "1"
+thiserror = "2"
+
+# Config / settings (replaces utils/config.ts)
+config = "0.15"
+
+# Async filesystem operations (replaces fs/promises)
+tokio-fs = "0.1"
+
+# Glob pattern matching (replaces GlobTool)
+glob = "0.3"
+
+# Regex (replaces GrepTool)
+regex = "1"
+
+# Terminal colors (replaces chalk)
+colored = "2"
+
+# Recursive directory walking
+walkdir = "2"
+
+# HTML to plain text (for WebFetchTool)
+html2text = "0.12"
+
+# URL parsing
+url = "2"
+
+# Terminal UI (Phase 3 — replaces React/Ink)
+ratatui = { version = "0.29", features = ["unstable-rendered-line-info"] }
+crossterm = { version = "0.28", features = ["event-stream"] }
+
+# Async event stream for crossterm
+tokio-stream = "0.1"
+
+# Cross-platform home directory (~)
+dirs = "6"
+
+# UUID for session/turn IDs
+uuid = { version = "1", features = ["v4"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"

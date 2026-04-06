@@ -1,0 +1,148 @@
+/// MCP protocol types — JSON-RPC 2.0 + Model Context Protocol.
+
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+// ── Server configuration (from settings.json mcpServers) ─────────────────────
+
+/// One entry in the mcpServers map.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum McpServerConfig {
+    Stdio(StdioServerConfig),
+    Http(HttpServerConfig),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StdioServerConfig {
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpServerConfig {
+    pub url: String,
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+}
+
+// ── JSON-RPC 2.0 ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+pub struct JsonRpcRequest {
+    pub jsonrpc: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<u64>,
+    pub method: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<serde_json::Value>,
+}
+
+impl JsonRpcRequest {
+    pub fn new(id: u64, method: impl Into<String>, params: serde_json::Value) -> Self {
+        Self {
+            jsonrpc: "2.0",
+            id: Some(id),
+            method: method.into(),
+            params: Some(params),
+        }
+    }
+
+    pub fn notification(method: impl Into<String>) -> Self {
+        Self {
+            jsonrpc: "2.0",
+            id: None,
+            method: method.into(),
+            params: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct JsonRpcResponse {
+    pub jsonrpc: String,
+    pub id: Option<serde_json::Value>,
+    pub result: Option<serde_json::Value>,
+    pub error: Option<JsonRpcError>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct JsonRpcError {
+    pub code: i64,
+    pub message: String,
+    pub data: Option<serde_json::Value>,
+}
+
+// ── MCP tool definition (from tools/list) ────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpToolDef {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(rename = "inputSchema", default = "default_schema")]
+    pub input_schema: serde_json::Value,
+    /// Server-provided metadata — may contain "anthropic/maxResultSizeChars"
+    #[serde(rename = "_meta", default)]
+    pub meta: Option<serde_json::Value>,
+}
+
+impl McpToolDef {
+    /// Returns the server-declared max result size in chars, if any.
+    /// Falls back to a conservative default of 25_000.
+    pub fn max_result_chars(&self) -> usize {
+        self.meta
+            .as_ref()
+            .and_then(|m| m.get("anthropic/maxResultSizeChars"))
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize)
+            .unwrap_or(25_000)
+    }
+}
+
+fn default_schema() -> serde_json::Value {
+    serde_json::json!({ "type": "object", "properties": {} })
+}
+
+// ── Tool call result ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct McpCallResult {
+    #[serde(default)]
+    pub content: Vec<McpContentItem>,
+    #[serde(rename = "isError", default)]
+    pub is_error: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct McpContentItem {
+    #[serde(rename = "type")]
+    pub content_type: String,
+    #[serde(default)]
+    pub text: String,
+}
+
+// ── MCP resource (from resources/list) ───────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpResource {
+    pub uri: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(rename = "mimeType", default)]
+    pub mime_type: String,
+}
+
+// ── Status (for /mcp command) ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct McpServerStatus {
+    pub name: String,
+    pub transport: &'static str, // "stdio" | "http"
+    pub tool_count: usize,
+}
