@@ -55,6 +55,7 @@ fn model_pricing(model: &str) -> (f64, f64) {
 // ── Command action ────────────────────────────────────────────────────────────
 
 /// What the run-loop should do after a slash command is dispatched.
+#[allow(dead_code)] // some variants are built but not yet wired to commands
 pub enum CommandAction {
     /// Display a system message in the chat panel
     Message(String),
@@ -190,6 +191,7 @@ pub enum CommandAction {
 
 // ── Context passed to every command ──────────────────────────────────────────
 
+#[allow(dead_code)] // fields prepared for future commands that will use them
 pub struct CommandContext<'a> {
     pub config: &'a Config,
     pub tokens_in: u64,
@@ -652,7 +654,7 @@ fn cmd_files(ctx: &CommandContext) -> CommandAction {
     ))
 }
 
-fn cmd_model(args: &str, ctx: &CommandContext) -> CommandAction {
+fn cmd_model(args: &str, _ctx: &CommandContext) -> CommandAction {
     if args.is_empty() {
         CommandAction::ListModels
     } else {
@@ -1977,7 +1979,7 @@ fn cmd_help(args: &str) -> CommandAction {
 
 // ── New commands (gap fill) ───────────────────────────────────────────────────
 
-fn cmd_commit(args: &str, ctx: &CommandContext) -> CommandAction {
+fn cmd_commit(args: &str, _ctx: &CommandContext) -> CommandAction {
     let msg = args.trim();
     if msg.is_empty() {
         // Ask Claude to generate a commit
@@ -2212,7 +2214,7 @@ fn cmd_advisor(args: &str) -> CommandAction {
     }
 }
 
-fn cmd_brief(ctx: &CommandContext) -> CommandAction {
+fn cmd_brief(_ctx: &CommandContext) -> CommandAction {
     CommandAction::ToggleBriefMode
 }
 

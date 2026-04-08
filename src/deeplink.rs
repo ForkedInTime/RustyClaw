@@ -24,6 +24,7 @@ pub fn protocol_name() -> String {
 
 /// Parsed deep link parameters.
 #[derive(Debug)]
+#[allow(dead_code)] // fields parsed from URI, will be used by deep link handler
 pub struct DeepLinkParams {
     /// The prompt / query string from `q=`
     pub query: String,

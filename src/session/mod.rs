@@ -30,16 +30,6 @@ impl SessionMeta {
         crate::config::Config::sessions_dir().join(format!("{id}.meta"))
     }
 
-    /// Synchronously load just the tags for a session (for display in commands).
-    pub fn tags_for(id: &str) -> Vec<String> {
-        let path = Self::path_for(id);
-        std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str::<SessionMeta>(&s).ok())
-            .map(|m| m.tags)
-            .unwrap_or_default()
-    }
-
     async fn save(&self) -> Result<()> {
         let path = Self::path_for(&self.id);
         fs::write(&path, serde_json::to_string(self)?).await?;
@@ -133,22 +123,6 @@ impl Session {
     /// Rename the session.
     pub async fn rename(&mut self, name: &str) -> Result<()> {
         self.meta.name = name.to_string();
-        self.meta.save().await
-    }
-
-    /// Add a tag to the session (no-op if already tagged).
-    pub async fn add_tag(&mut self, tag: &str) -> Result<()> {
-        let tag = tag.to_string();
-        if !self.meta.tags.contains(&tag) {
-            self.meta.tags.push(tag);
-            self.meta.save().await?;
-        }
-        Ok(())
-    }
-
-    /// Remove a tag from the session.
-    pub async fn remove_tag(&mut self, tag: &str) -> Result<()> {
-        self.meta.tags.retain(|t| t != tag);
         self.meta.save().await
     }
 
@@ -379,22 +353,6 @@ fn human_session_name() -> String {
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|| "New session".to_string())
-}
-
-/// Convert days since 1970-01-01 to (year, month, day). No external crate.
-fn days_to_ymd(days: u64) -> (u64, u64, u64) {
-    // Algorithm from http://howardhinnant.github.io/date_algorithms.html
-    let z = days as i64 + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y   = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp  = (5 * doy + 2) / 153;
-    let d   = doy - (153 * mp + 2) / 5 + 1;
-    let m   = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y   = if m <= 2 { y + 1 } else { y };
-    (y as u64, m as u64, d as u64)
 }
 
 fn first_user_preview(messages: &[Message]) -> Option<String> {

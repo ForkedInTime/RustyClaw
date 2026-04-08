@@ -20,6 +20,7 @@ pub struct WorktreeSession {
     pub original_cwd: PathBuf,
 }
 
+#[allow(dead_code)] // factory used when worktree tools are registered
 pub fn new_worktree_state() -> WorktreeState {
     Arc::new(Mutex::new(None))
 }

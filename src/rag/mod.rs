@@ -127,6 +127,7 @@ impl RagDb {
     }
 
     /// Delete all chunks for a given file (before re-indexing it).
+    #[allow(dead_code)] // public API, used in tests, will be called by incremental re-index
     pub fn delete_file_chunks(&self, path: &str) -> Result<()> {
         self.conn.execute("DELETE FROM code_chunks WHERE file_path = ?1", [path])?;
         Ok(())

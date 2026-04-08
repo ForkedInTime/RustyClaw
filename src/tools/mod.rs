@@ -50,6 +50,7 @@ pub fn new_read_cache() -> ReadCache {
 
 /// Permission mode for the session — mirrors PermissionMode in types/permissions.ts
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)] // variants wired to CLI flags, not all exposed yet
 pub enum PermissionMode {
     Default,
     AutoEdit,

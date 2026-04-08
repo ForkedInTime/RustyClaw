@@ -10,17 +10,6 @@
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
-use tokio::sync::oneshot;
-
-/// A pending permission request sent from the tool executor to the TUI.
-pub struct PermissionRequest {
-    /// Tool name, e.g. "Bash"
-    pub tool_name: String,
-    /// Human-readable description of what the tool will do
-    pub description: String,
-    /// Channel to send the user's decision back
-    pub reply: oneshot::Sender<PermissionDecision>,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PermissionDecision {
@@ -65,12 +54,6 @@ impl PermissionState {
         Self {
             inner: Arc::new(Mutex::new(inner)),
         }
-    }
-
-    /// Check if a tool call can proceed without asking.
-    /// Supports `Bash(prefix:git )` style rules that match on command prefix.
-    pub fn check(&self, tool_name: &str) -> CheckResult {
-        self.check_with_input(tool_name, None)
     }
 
     /// Check with optional tool input for prefix-rule matching.

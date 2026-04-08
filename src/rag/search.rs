@@ -114,6 +114,7 @@ pub fn search(db: &RagDb, query: &str, limit: i64) -> Result<Vec<SearchResult>> 
 
 /// Search specifically for a symbol by name (exact or prefix match).
 /// Useful for "find me the function called X" queries.
+#[allow(dead_code)] // public API for future /rag symbol command
 pub fn search_symbol(db: &RagDb, name: &str, limit: i64) -> Result<Vec<SearchResult>> {
     let mut stmt = db.conn.prepare(
         "SELECT

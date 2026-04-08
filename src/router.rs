@@ -220,15 +220,6 @@ pub fn detect_complexity(input: &str) -> Complexity {
 
 // ─── Router state (shared across turns) ─────────────────────────────────────
 
-/// Tracks which model was actually used per turn (for cost reporting).
-#[derive(Debug, Clone)]
-pub struct RoutedTurn {
-    pub model: String,
-    pub complexity: Complexity,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

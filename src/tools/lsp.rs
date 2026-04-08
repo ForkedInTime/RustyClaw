@@ -5,7 +5,7 @@
 
 use super::{async_trait, Tool, ToolContext, ToolOutput};
 use anyhow::{anyhow, Result};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -14,7 +14,7 @@ use std::sync::{
     Arc,
 };
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{ChildStdin, ChildStdout};
+use tokio::process::ChildStdin;
 use tokio::sync::{oneshot, Mutex};
 
 pub struct LSPTool;

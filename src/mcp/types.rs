@@ -62,6 +62,7 @@ impl JsonRpcRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // fields populated by JSON-RPC deserialization
 pub struct JsonRpcResponse {
     pub jsonrpc: String,
     pub id: Option<serde_json::Value>,
@@ -70,6 +71,7 @@ pub struct JsonRpcResponse {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // fields populated by JSON-RPC deserialization
 pub struct JsonRpcError {
     pub code: i64,
     pub message: String,
@@ -118,6 +120,7 @@ pub struct McpCallResult {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // fields populated by MCP tool result deserialization
 pub struct McpContentItem {
     #[serde(rename = "type")]
     pub content_type: String,

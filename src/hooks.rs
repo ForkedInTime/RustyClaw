@@ -145,26 +145,6 @@ pub async fn run_user_prompt_hooks(
     if additional.is_empty() { None } else { Some(additional.join("\n")) }
 }
 
-/// Run all Notification hooks. Non-blocking.
-pub async fn run_notification_hooks(
-    hooks: &HooksConfig,
-    message: &str,
-    session_id: &str,
-    cwd: &std::path::Path,
-) {
-    for hook in &hooks.notification {
-        execute_hook(hook, HookEnvVars {
-            event: "Notification",
-            tool_name: None,
-            tool_input: None,
-            tool_result: None,
-            prompt: Some(message),
-            session_id,
-            cwd,
-        }).await;
-    }
-}
-
 /// Run Stop hooks when the session ends.
 pub async fn run_stop_hooks(
     hooks: &HooksConfig,

@@ -75,27 +75,6 @@ pub async fn list_ollama_models(base_url: &str) -> Vec<String> {
 }
 
 /// Check whether `model` (bare, without prefix) exists in Ollama.
-pub async fn validate_ollama_model(base_url: &str, model: &str) -> Result<()> {
-    let known = list_ollama_models(base_url).await;
-    let full = format!("{OLLAMA_PREFIX}{model}");
-    if known.is_empty() {
-        return Err(anyhow!(
-            "Cannot reach Ollama at {base_url}. Is it running?\n  Start with: ollama serve"
-        ));
-    }
-    if !known.contains(&full) {
-        return Err(anyhow!(
-            "Model '{model}' not found in Ollama.\n  Install with: ollama pull {model}\n  Available: {}",
-            known
-                .iter()
-                .map(|m| strip_ollama_prefix(m))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    Ok(())
-}
-
 // ─── Ollama client ────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -122,6 +101,7 @@ impl OllamaClient {
     }
 
     /// Returns true if this model has been detected as not supporting tools.
+    #[allow(dead_code)]
     pub fn tools_disabled(&self) -> bool {
         self.no_tools.load(Ordering::Relaxed)
     }

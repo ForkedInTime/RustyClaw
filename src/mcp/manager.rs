@@ -44,12 +44,6 @@ impl McpManager {
         Self { clients }
     }
 
-    /// Start all MCP servers listed in the merged settings.
-    /// Errors per-server are logged; the manager is always returned.
-    pub async fn start(settings: &Settings) -> Self {
-        Self::start_with_extra(settings, &std::collections::HashMap::new()).await
-    }
-
     async fn connect_one(name: String, cfg: &McpServerConfig) -> anyhow::Result<McpClient> {
         match cfg {
             McpServerConfig::Stdio(s) => {
@@ -73,8 +67,4 @@ impl McpManager {
             .collect()
     }
 
-    /// Total number of MCP tools across all connected servers.
-    pub fn tool_count(&self) -> usize {
-        self.clients.iter().map(|c| c.tools.len()).sum()
-    }
 }

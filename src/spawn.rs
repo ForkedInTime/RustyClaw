@@ -29,6 +29,7 @@ pub enum SpawnStatus {
 
 /// Note: not Clone because of cancel_tx (oneshot::Sender is not Clone).
 #[derive(Debug)]
+#[allow(dead_code)] // fields populated at spawn time, read by merge/review handlers
 pub struct SpawnedAgent {
     pub id: String,
     pub description: String,

@@ -13,7 +13,7 @@ pub mod types;
 
 pub use client::McpClient;
 pub use manager::McpManager;
-pub use types::McpServerStatus;
+// McpServerStatus is imported directly by consumers from types::
 
 use crate::api::types::ToolDefinition;
 use crate::tools::{async_trait, DynTool, Tool, ToolContext, ToolOutput};

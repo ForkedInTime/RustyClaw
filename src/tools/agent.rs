@@ -26,6 +26,7 @@ struct AgentInput {
     subagent_type: Option<String>,
     /// Whether to run the agent in the background (not yet implemented).
     #[serde(default)]
+    #[allow(dead_code)] // deserialized from LLM tool call, background agent WIP
     run_in_background: Option<bool>,
 }
 
