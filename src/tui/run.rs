@@ -2452,6 +2452,73 @@ async fn handle_key(
                         }
                         app.scroll_to_bottom();
                     }
+                    CommandAction::RagStatus => {
+                        let cwd = config.cwd.clone();
+                        match crate::rag::RagDb::open(&cwd) {
+                            Ok(db) => {
+                                let chunks = db.chunk_count().unwrap_or(0);
+                                let files = db.file_count().unwrap_or(0);
+                                let size_bytes = db.db_size();
+                                let size = if size_bytes > 1_048_576 {
+                                    format!("{:.1} MB", size_bytes as f64 / 1_048_576.0)
+                                } else {
+                                    format!("{:.0} KB", size_bytes as f64 / 1024.0)
+                                };
+                                // Get language breakdown
+                                let lang_breakdown = db.conn.prepare(
+                                    "SELECT language, COUNT(*) FROM code_chunks GROUP BY language ORDER BY COUNT(*) DESC"
+                                ).ok().map(|mut stmt| {
+                                    stmt.query_map([], |row| {
+                                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                                    }).ok().map(|rows| {
+                                        rows.filter_map(|r| r.ok())
+                                            .map(|(lang, count)| format!("  {lang}: {count} chunks"))
+                                            .collect::<Vec<_>>()
+                                            .join("\n")
+                                    }).unwrap_or_default()
+                                }).unwrap_or_default();
+
+                                let mut text = format!(
+                                    "RAG Index Status\n\
+                                     ─────────────────\n\
+                                     Files indexed: {files}\n\
+                                     Code chunks:   {chunks}\n\
+                                     Database size: {size}\n\
+                                     DB path:       {}", db.db_path.display()
+                                );
+                                if !lang_breakdown.is_empty() {
+                                    text.push_str(&format!("\n\nLanguages:\n{lang_breakdown}"));
+                                }
+                                app.entries.push(ChatEntry::system(text));
+                            }
+                            Err(e) => {
+                                app.entries.push(ChatEntry::system(format!("RAG database error: {e}")));
+                            }
+                        }
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::RagClear => {
+                        let cwd = config.cwd.clone();
+                        match crate::rag::RagDb::open(&cwd) {
+                            Ok(db) => {
+                                let old_chunks = db.chunk_count().unwrap_or(0);
+                                match db.clear() {
+                                    Ok(()) => {
+                                        app.entries.push(ChatEntry::system(
+                                            format!("RAG index cleared — {old_chunks} chunks deleted.\nRun /index or /rag rebuild to re-index.")
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        app.entries.push(ChatEntry::system(format!("Failed to clear RAG index: {e}")));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                app.entries.push(ChatEntry::system(format!("RAG database error: {e}")));
+                            }
+                        }
+                        app.scroll_to_bottom();
+                    }
                     CommandAction::SetBudget(amount) => {
                         match amount {
                             None => {
@@ -2787,6 +2854,19 @@ async fn handle_key(
                     .join("snapshots")
                     .join(format!("turn-{}", *turn_counter))
             );
+
+            // Background incremental re-index: pick up any files changed since last index.
+            // Fire-and-forget — doesn't block the user's message from being sent.
+            {
+                let cwd = config.cwd.clone();
+                tokio::spawn(async move {
+                    let _ = tokio::task::spawn_blocking(move || {
+                        if let Ok(db) = crate::rag::RagDb::open(&cwd) {
+                            let _ = crate::rag::indexer::index_project(&db, &cwd, false);
+                        }
+                    }).await;
+                });
+            }
 
             let c2 = client.clone();
             let tvec = tools.to_vec();
