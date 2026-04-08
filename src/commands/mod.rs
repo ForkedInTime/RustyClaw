@@ -150,6 +150,10 @@ pub enum CommandAction {
     IndexProject { force: bool },
     /// Search the RAG index and display results
     RagSearch(String),
+    /// Show RAG index statistics
+    RagStatus,
+    /// Clear the RAG index
+    RagClear,
     /// Set session budget limit in USD
     SetBudget(Option<f64>),
     /// Toggle smart model router on/off, or configure tiers
@@ -792,10 +796,7 @@ fn cmd_index(args: &str) -> CommandAction {
     let args = args.trim();
     match args {
         "force" | "--force" | "-f" => CommandAction::IndexProject { force: true },
-        "stats" | "status" => {
-            // Stats are shown by the run_loop handler (needs async access to db)
-            CommandAction::IndexProject { force: false }
-        }
+        "stats" | "status" => CommandAction::RagStatus,
         "" => CommandAction::IndexProject { force: false },
         _ => CommandAction::Message(
             "Usage: /index [force|stats]\n\
@@ -809,17 +810,22 @@ fn cmd_index(args: &str) -> CommandAction {
 
 fn cmd_rag(args: &str) -> CommandAction {
     let query = args.trim();
-    if query.is_empty() {
-        return CommandAction::Message(
-            "Usage: /rag <query>\n\
-             \n  Search the codebase index for relevant code.\
-             \n  Example: /rag authentication middleware\
-             \n  Example: /rag how does the streaming API work\
-             \n\n  Run /index first to build the index."
+    match query {
+        "" => CommandAction::Message(
+            "Usage: /rag <query|status|rebuild|clear>\n\
+             \n  /rag <query>   — search the codebase index\
+             \n  /rag status    — show index statistics\
+             \n  /rag rebuild   — force full re-index\
+             \n  /rag clear     — delete the index\
+             \n\n  Example: /rag authentication middleware\
+             \n  Example: /rag how does the streaming API work"
                 .into(),
-        );
+        ),
+        "status" | "stats" | "info" => CommandAction::RagStatus,
+        "rebuild" | "reindex" | "force" => CommandAction::IndexProject { force: true },
+        "clear" | "reset" | "delete" => CommandAction::RagClear,
+        _ => CommandAction::RagSearch(query.to_string()),
     }
-    CommandAction::RagSearch(query.to_string())
 }
 
 fn cmd_budget(args: &str) -> CommandAction {

@@ -508,8 +508,8 @@ impl QueryEngine {
             return String::new();
         }
 
-        // Search for relevant code chunks
-        let results = match rag::search::search(&db, user_input, 10) {
+        // Fetch more candidates, then filter by relevance threshold
+        let results = match rag::search::search(&db, user_input, 20) {
             Ok(r) => r,
             Err(e) => {
                 debug!("RAG search failed: {e}");
@@ -521,10 +521,23 @@ impl QueryEngine {
             return String::new();
         }
 
-        // Build context block, capped at 8KB to avoid blowing up the prompt
-        let context = rag::search::build_context(&results, 8192);
+        // Filter: only keep results with a decent relevance score.
+        // FTS5 rank is negative (closer to 0 = more relevant); discard weak matches.
+        let top_rank = results[0].rank;
+        let threshold = if top_rank < -5.0 { top_rank * 0.3 } else { top_rank * 0.5 };
+        let filtered: Vec<_> = results.into_iter()
+            .filter(|r| r.rank <= threshold || r.rank <= top_rank * 0.8)
+            .take(10) // cap at 10 injected chunks
+            .collect();
+
+        if filtered.is_empty() {
+            return String::new();
+        }
+
+        // Context budget: ~12KB for rich models, keeps well within token limits
+        let context = rag::search::build_context(&filtered, 12288);
         if !context.is_empty() {
-            debug!("RAG injected {} results ({} chars)", results.len(), context.len());
+            debug!("RAG injected {} results ({} chars)", filtered.len(), context.len());
         }
         context
     }
