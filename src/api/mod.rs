@@ -1,6 +1,7 @@
 /// Anthropic API client — port of services/api/claude.ts
 
 pub mod ollama;
+pub mod openai_compat;
 pub mod types;
 
 use anyhow::{anyhow, Context, Result};
@@ -13,6 +14,9 @@ use tracing::{debug, warn};
 pub use ollama::{
     is_ollama_model, list_ollama_models, strip_ollama_prefix, validate_ollama_model,
     OllamaClient, OLLAMA_PREFIX,
+};
+pub use openai_compat::{
+    is_openai_compat_model, parse_provider_model, provider_prefixes, OpenAiCompatClient, PROVIDERS,
 };
 pub use types::*;
 
@@ -256,21 +260,24 @@ pub fn default_max_tokens() -> u32 {
 
 // ─── Unified backend ──────────────────────────────────────────────────────────
 
-/// Routes API calls to either the Anthropic or Ollama backend based on the
-/// model prefix.  All code above the query engine works with `ApiBackend`
-/// instead of `ClaudeClient` directly.
+/// Routes API calls to the Anthropic, Ollama, or OpenAI-compatible backend
+/// based on the model prefix.  All code above the query engine works with
+/// `ApiBackend` instead of `ClaudeClient` directly.
 #[derive(Clone)]
 pub enum ApiBackend {
     Anthropic(ClaudeClient),
     Ollama(OllamaClient),
+    OpenAiCompat(OpenAiCompatClient),
 }
 
 impl ApiBackend {
     /// Create the right backend for `model`.
-    /// `api_key` is required for Anthropic; ignored for Ollama.
+    /// `api_key` is required for Anthropic; ignored for Ollama/OpenAI-compat.
     pub fn new(model: &str, api_key: &str, ollama_host: &str) -> Result<Self> {
         if is_ollama_model(model) {
             Ok(Self::Ollama(OllamaClient::new(ollama_host)?))
+        } else if is_openai_compat_model(model) {
+            Ok(Self::OpenAiCompat(OpenAiCompatClient::from_model(model)?))
         } else {
             Ok(Self::Anthropic(ClaudeClient::new(api_key)?))
         }
@@ -285,15 +292,24 @@ impl ApiBackend {
         match self {
             Self::Anthropic(c) => c.messages_stream(request, on_text).await,
             Self::Ollama(c) => c.messages_stream(request, on_text).await,
+            Self::OpenAiCompat(c) => c.messages_stream(request, on_text).await,
         }
     }
 
-    /// Non-streaming call (falls through to streaming + collect for Ollama).
+    /// Non-streaming call (falls through to streaming + collect for non-Anthropic backends).
     pub async fn messages(&self, request: MessagesRequest) -> Result<MessagesResponse> {
         match self {
             Self::Anthropic(c) => c.messages(request).await,
             Self::Ollama(c) => {
-                // Convert StreamedResponse → MessagesResponse
+                let streamed = c.messages_stream(request, |_| {}).await?;
+                Ok(MessagesResponse {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    content: streamed.content,
+                    stop_reason: streamed.stop_reason,
+                    usage: streamed.usage,
+                })
+            }
+            Self::OpenAiCompat(c) => {
                 let streamed = c.messages_stream(request, |_| {}).await?;
                 Ok(MessagesResponse {
                     id: uuid::Uuid::new_v4().to_string(),
@@ -309,14 +325,24 @@ impl ApiBackend {
     pub fn ollama_host(&self) -> Option<&str> {
         match self {
             Self::Ollama(c) => Some(&c.base_url),
-            Self::Anthropic(_) => None,
+            _ => None,
         }
     }
 
-    /// True if the Ollama model has been detected as not supporting tools.
+    /// Provider display name (for status bar / logging).
+    pub fn provider_name(&self) -> &str {
+        match self {
+            Self::Anthropic(_) => "Anthropic",
+            Self::Ollama(_) => "Ollama",
+            Self::OpenAiCompat(c) => &c.provider_name,
+        }
+    }
+
+    /// True if the model has been detected as not supporting tools.
     pub fn tools_disabled(&self) -> bool {
         match self {
             Self::Ollama(c) => c.tools_disabled(),
+            Self::OpenAiCompat(c) => c.tools_disabled(),
             Self::Anthropic(_) => false,
         }
     }
@@ -325,6 +351,7 @@ impl ApiBackend {
     pub fn take_tools_notice(&self) -> bool {
         match self {
             Self::Ollama(c) => c.take_tools_notice(),
+            Self::OpenAiCompat(c) => c.take_tools_notice(),
             Self::Anthropic(_) => false,
         }
     }

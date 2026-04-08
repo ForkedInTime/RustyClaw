@@ -1,0 +1,266 @@
+/// Cost tracking + budget management.
+///
+/// Tracks per-model token usage and cost across the session.
+/// Supports budget limits with warnings at 80% and hard stop at 100%.
+
+use std::collections::HashMap;
+
+// ─── Per-model pricing (USD per million tokens) ─────────────────────────────
+
+struct ModelPrice {
+    input: f64,
+    output: f64,
+}
+
+/// Get pricing for a model.  Returns (input_price, output_price) per million tokens.
+fn model_price(model: &str) -> ModelPrice {
+    if model.contains("opus") {
+        ModelPrice { input: 15.0, output: 75.0 }
+    } else if model.contains("haiku") {
+        ModelPrice { input: 0.25, output: 1.25 }
+    } else if model.contains("sonnet") {
+        ModelPrice { input: 3.0, output: 15.0 }
+    } else if model.starts_with("ollama:") {
+        // Local models are free
+        ModelPrice { input: 0.0, output: 0.0 }
+    } else if model.contains("groq:") || model.contains("together:") {
+        // Rough estimate for hosted open-source models
+        ModelPrice { input: 0.5, output: 1.0 }
+    } else if model.contains("deepseek:") {
+        ModelPrice { input: 0.27, output: 1.10 }
+    } else if model.contains("mistral:") {
+        ModelPrice { input: 2.0, output: 6.0 }
+    } else if model.contains("oai:") || model.contains("openai:") {
+        // GPT-4o class pricing
+        ModelPrice { input: 2.5, output: 10.0 }
+    } else {
+        // Unknown — assume Sonnet-tier pricing
+        ModelPrice { input: 3.0, output: 15.0 }
+    }
+}
+
+// ─── Per-model usage tracking ───────────────────────────────────────────────
+
+/// Token usage for a single model.
+#[derive(Debug, Clone, Default)]
+pub struct ModelUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub turns: u32,
+    pub cost_usd: f64,
+}
+
+/// Session-wide cost tracker.
+#[derive(Debug, Clone)]
+pub struct CostTracker {
+    /// Per-model usage breakdown.
+    pub by_model: HashMap<String, ModelUsage>,
+    /// Total session cost.
+    pub total_cost_usd: f64,
+    /// Budget limit (None = unlimited).
+    pub budget_usd: Option<f64>,
+}
+
+impl Default for CostTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CostTracker {
+    pub fn new() -> Self {
+        Self {
+            by_model: HashMap::new(),
+            total_cost_usd: 0.0,
+            budget_usd: None,
+        }
+    }
+
+    /// Set a budget limit for this session.
+    pub fn set_budget(&mut self, usd: f64) {
+        self.budget_usd = Some(usd);
+    }
+
+    /// Clear the budget limit.
+    pub fn clear_budget(&mut self) {
+        self.budget_usd = None;
+    }
+
+    /// Record token usage for a turn.
+    pub fn record(&mut self, model: &str, input_tokens: u64, output_tokens: u64) {
+        let price = model_price(model);
+        let cost = (input_tokens as f64 / 1_000_000.0) * price.input
+            + (output_tokens as f64 / 1_000_000.0) * price.output;
+
+        let entry = self.by_model.entry(model.to_string()).or_default();
+        entry.input_tokens += input_tokens;
+        entry.output_tokens += output_tokens;
+        entry.turns += 1;
+        entry.cost_usd += cost;
+
+        self.total_cost_usd += cost;
+    }
+
+    /// Check if the budget is exceeded.
+    pub fn over_budget(&self) -> bool {
+        match self.budget_usd {
+            Some(b) => self.total_cost_usd >= b,
+            None => false,
+        }
+    }
+
+    /// Check if we're at the warning threshold (80%).
+    pub fn budget_warning(&self) -> bool {
+        match self.budget_usd {
+            Some(b) => self.total_cost_usd >= b * 0.8 && self.total_cost_usd < b,
+            None => false,
+        }
+    }
+
+    /// Budget remaining (None if no budget set).
+    pub fn remaining(&self) -> Option<f64> {
+        self.budget_usd.map(|b| (b - self.total_cost_usd).max(0.0))
+    }
+
+    /// Format a summary suitable for display.
+    pub fn summary(&self) -> String {
+        let mut lines = Vec::new();
+
+        lines.push(format!("Session cost: ${:.4}", self.total_cost_usd));
+        if let Some(budget) = self.budget_usd {
+            let pct = (self.total_cost_usd / budget * 100.0).min(100.0);
+            lines.push(format!(
+                "Budget: ${:.2} ({:.0}% used, ${:.4} remaining)",
+                budget, pct, (budget - self.total_cost_usd).max(0.0)
+            ));
+        }
+
+        if !self.by_model.is_empty() {
+            lines.push(String::new());
+            lines.push("Per-model breakdown:".into());
+
+            let mut models: Vec<_> = self.by_model.iter().collect();
+            models.sort_by(|a, b| b.1.cost_usd.partial_cmp(&a.1.cost_usd).unwrap());
+
+            for (model, usage) in models {
+                let short = short_model_name(model);
+                lines.push(format!(
+                    "  {short}: {turns} turns, {in_tok} in / {out_tok} out, ${cost:.4}",
+                    turns = usage.turns,
+                    in_tok = format_tokens(usage.input_tokens),
+                    out_tok = format_tokens(usage.output_tokens),
+                    cost = usage.cost_usd,
+                ));
+            }
+        }
+
+        let total_in: u64 = self.by_model.values().map(|u| u.input_tokens).sum();
+        let total_out: u64 = self.by_model.values().map(|u| u.output_tokens).sum();
+        let total_turns: u32 = self.by_model.values().map(|u| u.turns).sum();
+        if total_turns > 0 {
+            lines.push(String::new());
+            lines.push(format!(
+                "Total: {} turns, {} in / {} out",
+                total_turns,
+                format_tokens(total_in),
+                format_tokens(total_out),
+            ));
+        }
+
+        lines.join("\n")
+    }
+
+    /// One-line status for the TUI banner.
+    pub fn banner_text(&self) -> String {
+        if self.total_cost_usd < 0.0001 {
+            return String::new();
+        }
+        match self.budget_usd {
+            Some(b) => format!("${:.3} / ${:.2}", self.total_cost_usd, b),
+            None => format!("${:.3}", self.total_cost_usd),
+        }
+    }
+
+    /// Estimate the savings from routing (compare actual cost vs all-high-model cost).
+    pub fn routing_savings(&self, high_model: &str) -> f64 {
+        let high_price = model_price(high_model);
+        let hypothetical: f64 = self.by_model.values().map(|u| {
+            (u.input_tokens as f64 / 1_000_000.0) * high_price.input
+                + (u.output_tokens as f64 / 1_000_000.0) * high_price.output
+        }).sum();
+        (hypothetical - self.total_cost_usd).max(0.0)
+    }
+}
+
+/// Shorten model IDs for display: "claude-sonnet-4-6-20250514" → "Sonnet 4.6"
+fn short_model_name(model: &str) -> String {
+    if model.contains("opus") {
+        "Opus".into()
+    } else if model.contains("haiku") {
+        "Haiku".into()
+    } else if model.contains("sonnet") {
+        "Sonnet".into()
+    } else if model.starts_with("ollama:") {
+        format!("Ollama ({})", &model[7..])
+    } else if let Some(rest) = model.strip_prefix("groq:") {
+        format!("Groq ({})", rest)
+    } else if let Some(rest) = model.strip_prefix("deepseek:") {
+        format!("DeepSeek ({})", rest)
+    } else {
+        model.to_string()
+    }
+}
+
+/// Format token count for display: 1234 → "1.2K", 1234567 → "1.2M"
+fn format_tokens(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cost_tracking() {
+        let mut tracker = CostTracker::new();
+        tracker.record("claude-haiku-4-5-20251001", 10_000, 1_000);
+        // Haiku: 0.25/M in + 1.25/M out = 0.0025 + 0.00125 = 0.00375
+        assert!((tracker.total_cost_usd - 0.00375).abs() < 0.0001);
+        assert_eq!(tracker.by_model.len(), 1);
+    }
+
+    #[test]
+    fn test_budget() {
+        let mut tracker = CostTracker::new();
+        tracker.set_budget(1.0);
+        tracker.record("claude-sonnet-4-6-20250514", 100_000, 10_000);
+        assert!(!tracker.over_budget());
+        // Sonnet: 3.0/M * 0.1 + 15.0/M * 0.01 = 0.30 + 0.15 = 0.45
+        assert!((tracker.total_cost_usd - 0.45).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_ollama_is_free() {
+        let mut tracker = CostTracker::new();
+        tracker.record("ollama:llama3", 500_000, 50_000);
+        assert_eq!(tracker.total_cost_usd, 0.0);
+    }
+
+    #[test]
+    fn test_routing_savings() {
+        let mut tracker = CostTracker::new();
+        // 5 turns on Haiku instead of Opus
+        for _ in 0..5 {
+            tracker.record("claude-haiku-4-5-20251001", 10_000, 2_000);
+        }
+        let savings = tracker.routing_savings("claude-opus-4-6-20250514");
+        // Should be significant
+        assert!(savings > 0.5);
+    }
+}

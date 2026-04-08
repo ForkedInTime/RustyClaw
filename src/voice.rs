@@ -412,10 +412,275 @@ fn strip_inline_md(s: &str) -> String {
 /// Maximum words spoken per response — keeps TTS under ~90 seconds.
 pub const TTS_WORD_LIMIT: usize = 200;
 
-/// Synthesise `text` with piper and play it.
+/// Default XTTS v2 speaker when no voice clone is configured.
+pub const XTTS_DEFAULT_SPEAKER: &str = "Craig Gutsy";
+
+/// Port for the XTTS v2 background server.
+const XTTS_SERVER_PORT: u16 = 5002;
+
+// ── CUDA detection ───────────────────────────────────────────────────────────
+
+/// Check if an NVIDIA GPU with CUDA is available.
+pub fn cuda_available() -> bool {
+    which("nvidia-smi")
+}
+
+// ── XTTS v2 server lifecycle ─────────────────────────────────────────────────
+
+/// Find the xtts-server.py script bundled with RustyClaw.
+fn xtts_server_script() -> Option<PathBuf> {
+    // Check relative to the running binary
+    if let Ok(exe) = std::env::current_exe() {
+        let exe_dir = exe.parent()?;
+        // release binary: target/release/rustyclaw → ../../scripts/
+        for candidate in &[
+            exe_dir.join("../../scripts/xtts-server.py"),
+            exe_dir.join("../scripts/xtts-server.py"),
+            exe_dir.join("scripts/xtts-server.py"),
+        ] {
+            if candidate.exists() {
+                return Some(candidate.canonicalize().ok()?);
+            }
+        }
+    }
+    // Check relative to CWD
+    let cwd_script = PathBuf::from("scripts/xtts-server.py");
+    if cwd_script.exists() {
+        return cwd_script.canonicalize().ok();
+    }
+    None
+}
+
+/// Find the Python interpreter inside the TTS uv tool venv.
+fn tts_python() -> Option<String> {
+    // uv tool installs to ~/.local/share/uv/tools/tts/bin/python
+    if let Some(home) = dirs::home_dir() {
+        let uv_python = home.join(".local/share/uv/tools/tts/bin/python");
+        if uv_python.exists() {
+            return Some(uv_python.display().to_string());
+        }
+    }
+    // Fallback: python3.11 in PATH
+    if which("python3.11") { return Some("python3.11".into()); }
+    None
+}
+
+/// Check if the XTTS v2 server is already running.
+pub fn xtts_server_running() -> bool {
+    std::net::TcpStream::connect(format!("127.0.0.1:{XTTS_SERVER_PORT}")).is_ok()
+}
+
+/// Start the XTTS v2 background server if not already running.
+/// Returns Ok(port) on success. The server process is detached and persists
+/// until RustyClaw exits or /voice speak off is called.
+pub async fn ensure_xtts_server() -> Result<u16> {
+    if xtts_server_running() {
+        return Ok(XTTS_SERVER_PORT);
+    }
+
+    let script = xtts_server_script()
+        .ok_or_else(|| anyhow!("xtts-server.py not found. Rebuild RustyClaw or check scripts/ dir."))?;
+    let python = tts_python()
+        .ok_or_else(|| anyhow!("No Python for TTS venv. Run: uv tool install TTS --python 3.11"))?;
+
+    let mut args = vec![
+        script.display().to_string(),
+        XTTS_SERVER_PORT.to_string(),
+    ];
+    if !cuda_available() {
+        args.push("--cpu".into());
+    }
+
+    // Spawn detached server process
+    let _child = std::process::Command::new(&python)
+        .args(&args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| anyhow!("Failed to start XTTS v2 server: {e}"))?;
+
+    // Wait for server to become ready (up to 60s for model loading)
+    for _ in 0..120 {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        if xtts_server_running() {
+            return Ok(XTTS_SERVER_PORT);
+        }
+    }
+
+    Err(anyhow!("XTTS v2 server failed to start within 60 seconds"))
+}
+
+/// Stop the XTTS v2 server if running.
+pub fn stop_xtts_server() {
+    let _ = std::process::Command::new("sh")
+        .args(["-c", &format!("kill $(lsof -ti:{XTTS_SERVER_PORT}) 2>/dev/null")])
+        .output();
+}
+
+// ── Server-based synthesis ───────────────────────────────────────────────────
+
+/// Synthesise via the XTTS v2 server (fast — model stays loaded in GPU VRAM).
+async fn speak_via_server(
+    text: &str,
+    stop_rx: tokio::sync::oneshot::Receiver<()>,
+) -> Result<bool> {
+    let clean = strip_for_speech(text);
+    if clean.is_empty() { return Ok(false); }
+
+    let words: Vec<&str> = clean.split_whitespace().collect();
+    let truncated = words.len() > TTS_WORD_LIMIT;
+    let speech_text = if truncated {
+        words[..TTS_WORD_LIMIT].join(" ") + ". Response trimmed."
+    } else {
+        clean
+    };
+
+    // Build JSON payload
+    let clone_path = voice_clone_sample_path().filter(|p| p.exists());
+    let body = if let Some(ref wav) = clone_path {
+        format!(
+            r#"{{"text":"{}","speaker_wav":"{}","language":"en"}}"#,
+            speech_text.replace('\\', "\\\\").replace('"', "\\\""),
+            wav.display().to_string().replace('\\', "\\\\").replace('"', "\\\""),
+        )
+    } else {
+        format!(
+            r#"{{"text":"{}","speaker":"{}","language":"en"}}"#,
+            speech_text.replace('\\', "\\\\").replace('"', "\\\""),
+            XTTS_DEFAULT_SPEAKER,
+        )
+    };
+
+    let wav_out = std::env::temp_dir().join("rustyclaw-xtts-server.wav");
+    tokio::pin!(stop_rx);
+
+    // HTTP POST to server
+    let mut curl = Command::new("curl")
+        .args([
+            "-s", "-X", "POST",
+            &format!("http://127.0.0.1:{XTTS_SERVER_PORT}/tts"),
+            "-H", "Content-Type: application/json",
+            "-d", &body,
+            "--output", &wav_out.display().to_string(),
+            "--max-time", "30",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    tokio::select! {
+        biased;
+        _ = &mut stop_rx => {
+            let _ = curl.kill().await;
+            let _ = tokio::fs::remove_file(&wav_out).await;
+            return Ok(truncated);
+        }
+        status = curl.wait() => {
+            if !status?.success() {
+                return Err(anyhow!("XTTS v2 server request failed"));
+            }
+        }
+    }
+
+    // Verify we got a real WAV (not an error page)
+    let meta = tokio::fs::metadata(&wav_out).await?;
+    if meta.len() < 1000 {
+        let _ = tokio::fs::remove_file(&wav_out).await;
+        return Err(anyhow!("XTTS v2 server returned invalid audio"));
+    }
+
+    play_wav(&wav_out, stop_rx).await?;
+    Ok(truncated)
+}
+
+/// Synthesise `text` and play it.
+///
+/// Priority: XTTS v2 server (GPU, fast) → XTTS v2 CLI → piper (last resort).
 /// `stop_rx` — send () to abort mid-synthesis or mid-playback.
 /// Returns `Ok(true)` if truncated (hit word limit), `Ok(false)` if complete, `Err` on failure.
 pub async fn speak(
+    text: &str,
+    _voice_model: Option<&str>,
+    stop_rx: tokio::sync::oneshot::Receiver<()>,
+) -> Result<bool> {
+    // ── Try XTTS v2 server first (fastest — model pre-loaded in VRAM) ──────
+    if xtts_server_running() {
+        return speak_via_server(text, stop_rx).await;
+    }
+
+    // ── XTTS v2 CLI fallback (cold start each call) ───────────────────────
+    if xtts_available() {
+        if let Some(clone_path) = voice_clone_sample_path() {
+            if clone_path.exists() {
+                return speak_cloned(text, &clone_path, stop_rx).await;
+            }
+        }
+        return speak_xtts_default(text, stop_rx).await;
+    }
+
+    // ── Piper fallback (robotic, last resort) ──────────────────────────────
+    speak_piper(text, _voice_model, stop_rx).await
+}
+
+/// Synthesise via XTTS v2 using a built-in default speaker (no clone needed).
+async fn speak_xtts_default(
+    text: &str,
+    stop_rx: tokio::sync::oneshot::Receiver<()>,
+) -> Result<bool> {
+    let clean = strip_for_speech(text);
+    if clean.is_empty() { return Ok(false); }
+
+    let words: Vec<&str> = clean.split_whitespace().collect();
+    let truncated = words.len() > TTS_WORD_LIMIT;
+    let speech_text = if truncated {
+        words[..TTS_WORD_LIMIT].join(" ") + ". Response trimmed."
+    } else {
+        clean
+    };
+
+    let wav_out = std::env::temp_dir().join("rustyclaw-xtts-default.wav");
+    let wav_out_str = wav_out.display().to_string();
+    tokio::pin!(stop_rx);
+
+    let mut cli_args = vec![
+        "--model_name", "tts_models/multilingual/multi-dataset/xtts_v2",
+        "--speaker_idx", XTTS_DEFAULT_SPEAKER,
+        "--language_idx", "en",
+        "--out_path", &wav_out_str,
+        "--text", &speech_text,
+    ];
+    if cuda_available() {
+        cli_args.extend(["--use_cuda", "true"]);
+    }
+    let mut tts_proc = Command::new("tts")
+        .args(&cli_args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    tokio::select! {
+        biased;
+        _ = &mut stop_rx => {
+            let _ = tts_proc.kill().await;
+            let _ = tokio::fs::remove_file(&wav_out).await;
+            return Ok(truncated);
+        }
+        status = tts_proc.wait() => {
+            if !status?.success() {
+                return Err(anyhow!(
+                    "XTTS v2 synthesis failed.\n\
+                     Install:  uv tool install TTS --python 3.11 --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'"
+                ));
+            }
+        }
+    }
+
+    play_wav(&wav_out, stop_rx).await?;
+    Ok(truncated)
+}
+
+/// Piper fallback — robotic but lightweight. Used only when XTTS v2 is not installed.
+async fn speak_piper(
     text: &str,
     voice_model: Option<&str>,
     stop_rx: tokio::sync::oneshot::Receiver<()>,
@@ -423,7 +688,6 @@ pub async fn speak(
     let clean = strip_for_speech(text);
     if clean.is_empty() { return Ok(false); }
 
-    // Enforce word limit — never synthesise a wall of text
     let words: Vec<&str> = clean.split_whitespace().collect();
     let truncated = words.len() > TTS_WORD_LIMIT;
     let speech_text = if truncated {
@@ -435,9 +699,9 @@ pub async fn speak(
     let piper_bin = if which("piper") { "piper" }
         else if which("piper-tts") { "piper-tts" }
         else { return Err(anyhow!(
-            "piper not found.\n\
-             Install:  pip install piper-tts\n\
-             Binary:   https://github.com/rhasspy/piper/releases"
+            "No TTS engine found.\n\n\
+             Recommended (natural voice):  uv tool install TTS --python 3.11 --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'\n\
+             Fallback (robotic):           pipx install piper-tts"
         )); };
 
     let model = voice_model
@@ -452,7 +716,6 @@ pub async fn speak(
     let wav_out = std::env::temp_dir().join("rustyclaw-tts.wav");
     tokio::pin!(stop_rx);
 
-    // ── Step 1: Synthesise via piper ────────────────────────────────────────
     let mut piper = Command::new(piper_bin)
         .args(["--model", &model, "--output_file", &wav_out.display().to_string()])
         .stdin(Stdio::piped())
@@ -475,8 +738,16 @@ pub async fn speak(
         _ = piper.wait() => {}
     }
 
-    // ── Step 2: Play the WAV ────────────────────────────────────────────────
-    let path_str = wav_out.display().to_string();
+    play_wav(&wav_out, stop_rx).await?;
+    Ok(truncated)
+}
+
+/// Play a WAV file through the first available audio player, then clean up.
+async fn play_wav(
+    wav_path: &std::path::Path,
+    mut stop_rx: std::pin::Pin<&mut tokio::sync::oneshot::Receiver<()>>,
+) -> Result<()> {
+    let path_str = wav_path.display().to_string();
     let players: &[(&str, &[&str])] = &[
         ("aplay",  &["-q"]),
         ("paplay", &[]),
@@ -495,24 +766,23 @@ pub async fn speak(
                 .spawn()?;
             tokio::select! {
                 biased;
-                _ = &mut stop_rx => { let _ = child.kill().await; }
+                _ = stop_rx.as_mut() => { let _ = child.kill().await; }
                 _ = child.wait() => {}
             }
             played = true;
             break;
         }
     }
-    let _ = tokio::fs::remove_file(&wav_out).await;
+    let _ = tokio::fs::remove_file(wav_path).await;
 
     if !played {
         return Err(anyhow!(
             "No audio player found.\n\
-             Install one:  sudo apt install alsa-utils    # provides aplay\n\
-             Or:           sudo apt install mpv\n\
-             Or:           sudo apt install ffmpeg        # provides ffplay"
+             Install:  sudo pacman -S alsa-utils   # provides aplay\n\
+             Or:       sudo pacman -S mpv"
         ));
     }
-    Ok(truncated)
+    Ok(())
 }
 
 // ── Status display ────────────────────────────────────────────────────────────
@@ -520,34 +790,21 @@ pub async fn speak(
 pub fn voice_status(enabled: bool, tts_enabled: bool) -> String {
     let recorder = find_recorder();
     let rec_status = match &recorder {
-        Some(RecorderBackend::Arecord) => "✓ arecord (available)",
-        Some(RecorderBackend::Sox)     => "✓ sox (available)",
-        Some(RecorderBackend::Ffmpeg)  => "✓ ffmpeg (available)",
-        None => "✗ no recorder found (install: sudo apt install alsa-utils)",
+        Some(RecorderBackend::Arecord) => "✓ arecord",
+        Some(RecorderBackend::Sox)     => "✓ sox",
+        Some(RecorderBackend::Ffmpeg)  => "✓ ffmpeg",
+        None => "✗ no recorder (install: sudo pacman -S alsa-utils)",
     };
 
     let whisper = if local_whisper_available() {
-        "✓ local whisper (offline transcription)"
+        "✓ local whisper (offline)"
     } else {
-        "✗ whisper not installed (pip install openai-whisper)"
+        "✗ whisper not installed (pipx install openai-whisper)"
     };
 
     let api_key_status = match voice_api_key() {
-        Some(_) => "✓ API key found (OPENAI_API_KEY / WHISPER_API_KEY)".to_string(),
-        None    => {
-            // Check if a .env exists in CWD or home so we can give targeted advice
-            let has_cwd_env = std::env::current_dir()
-                .map(|p| p.join(".env").exists())
-                .unwrap_or(false);
-            let has_home_env = dirs::home_dir()
-                .map(|p| p.join(".env").exists())
-                .unwrap_or(false);
-            if has_cwd_env || has_home_env {
-                "✗ no API key — add OPENAI_API_KEY=sk-... to your .env file".to_string()
-            } else {
-                "✗ no API key — create ~/.env with: OPENAI_API_KEY=sk-...".to_string()
-            }
-        }
+        Some(_) => "✓ API key found".to_string(),
+        None    => "✗ no API key — add OPENAI_API_KEY=sk-... to ~/.env".to_string(),
     };
 
     let transcription_ok = local_whisper_available() || voice_api_key().is_some();
@@ -563,70 +820,345 @@ pub fn voice_status(enabled: bool, tts_enabled: bool) -> String {
         "DISABLED"
     };
 
-    let tts_piper = if piper_available() { "✓ piper (available)" } else { "✗ piper not found" };
-    let tts_model = match find_default_voice() {
-        Some(p) => format!("✓ voice model: {p}"),
-        None    => "✗ no voice model — download en_US-lessac-high.onnx to ~/.local/share/piper/".to_string(),
-    };
+    // ── TTS status — XTTS v2 is primary, piper is last-resort fallback ─────
+    let xtts_ok = xtts_available();
+    let piper_ok = piper_available();
+    let player_ok = audio_player_available();
     let tts_overall = if tts_enabled { "ENABLED" } else { "DISABLED" };
 
-    let piper_ok = piper_available();
-    let model_ok = find_default_voice().is_some();
-    let player_ok = audio_player_available();
+    let server_up = xtts_server_running();
+    let gpu = cuda_available();
+    let tts_engine = if xtts_ok && server_up {
+        if gpu { "✓ XTTS v2 server running (GPU — fast)" } else { "✓ XTTS v2 server running (CPU)" }
+    } else if xtts_ok {
+        "✓ XTTS v2 available (server will auto-start on use)"
+    } else if piper_ok {
+        "⚠ piper only — robotic fallback (install XTTS v2 for natural voice)"
+    } else {
+        "✗ no TTS engine installed"
+    };
+
+    // Voice clone status
+    let clone_path = voice_clone_sample_path();
+    let clone_exists = clone_path.as_ref().map_or(false, |p| p.exists());
+
+    let clone_status = if clone_exists {
+        let tier = detect_clone_tier(&clone_path.unwrap());
+        format!("✓ your voice ({tier} tier)")
+    } else if xtts_ok {
+        format!("default speaker ({XTTS_DEFAULT_SPEAKER})")
+    } else {
+        "— (requires XTTS v2)".to_string()
+    };
+
+    let tts_ready = xtts_ok || piper_ok;
     let all_input_ok = recorder_ok && transcription_ok;
-    let all_tts_ok = piper_ok && model_ok && player_ok;
 
     let mut out = format!(
         "Voice Input  {input_overall}\n\
          \n\
-         Audio capture:\n\
-           {rec_status}\n\
+         Audio capture:      {rec_status}\n\
+         Transcription:      {whisper}\n\
+         API key:            {api_key_status}\n\
          \n\
-         Transcription (speech → text):\n\
-           {whisper}\n\
-           {api_key_status}\n\
+         TTS output  {tts_overall}\n\
          \n\
-         TTS output (text → speech)  {tts_overall}\n\
-           {tts_piper}\n\
-           {tts_model}\n\
+         Engine:             {tts_engine}\n\
+         Voice:              {clone_status}\n\
+         Audio player:       {}\n\
          \n\
          Commands:\n\
            /voice enable         — enable voice input (Ctrl+R to record)\n\
            /voice disable        — disable voice input\n\
-           /voice speak on|off   — enable/disable TTS response output\n\
-           /voice model          — pick a voice model\n\
-           Ctrl+R                — start/stop recording (when enabled)"
+           /voice speak on|off   — enable/disable TTS output\n\
+           /voice test           — play a test phrase\n\
+           /voice clone          — clone your voice (XTTS v2)\n\
+           /voice clone remove   — revert to default speaker\n\
+           Ctrl+R                — start/stop recording (when enabled)",
+        if player_ok { "✓ available" } else { "✗ no player (install: sudo pacman -S mpv)" },
     );
 
-    // Only show install instructions for things that are actually missing
-    if all_input_ok && all_tts_ok {
-        out.push_str("\n\n  ✓ All set — voice input and TTS are fully configured.");
+    // Install instructions for missing components
+    if all_input_ok && tts_ready && player_ok {
+        out.push_str("\n\n  ✓ All set — voice input and TTS fully configured.");
     } else {
         if !recorder_ok {
             out.push_str("\n\n  Setup needed — audio capture:\n\
-                           \n    sudo apt install alsa-utils    # provides arecord");
+                           \n    sudo pacman -S alsa-utils");
         }
         if !transcription_ok {
             out.push_str("\n\n  Setup needed — transcription:\n\
-                           \n    pip install openai-whisper     # offline transcription\n\
-                           \n    — or set API key:\n\
-                           \n    echo 'OPENAI_API_KEY=sk-...' >> ~/.env");
+                           \n    pipx install openai-whisper    # offline\n\
+                           \n    — or: echo 'OPENAI_API_KEY=sk-...' >> ~/.env");
         }
-        if !piper_ok {
-            out.push_str("\n\n  Setup needed — piper TTS:\n\
-                           \n    pip install piper-tts          # or download from GitHub");
-        }
-        if !model_ok {
-            out.push_str("\n\n  Setup needed — voice model:\n\
-                           \n    mkdir -p ~/.local/share/piper && cd ~/.local/share/piper\n\
-                           \n    wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx\n\
-                           \n    wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx.json");
+        if !xtts_ok {
+            out.push_str("\n\n  Setup needed — XTTS v2 (natural voice, STRONGLY recommended):\n\
+                           \n    uv tool install TTS --python 3.11 \\\n\
+                             \x20     --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'\n\
+                           \n    ⚠ Piper is a robotic fallback. XTTS v2 sounds like a real human.");
         }
         if !player_ok {
             out.push_str("\n\n  Setup needed — audio player:\n\
-                           \n    sudo apt install alsa-utils    # provides aplay");
+                           \n    sudo pacman -S mpv             # or alsa-utils for aplay");
         }
     }
 
     out
+}
+
+// ── Voice cloning via XTTS v2 ────────────────────────────────────────────────
+
+/// Clone quality tiers — determines recording duration and guidance.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CloneTier {
+    /// 10 seconds — recognizable but synthetic
+    Quick,
+    /// 60 seconds — natural rhythm, occasional artifacts
+    Recommended,
+    /// 5+ minutes — near-perfect clone
+    Premium,
+}
+
+impl CloneTier {
+    pub fn label(&self) -> &'static str {
+        match self {
+            CloneTier::Quick       => "quick",
+            CloneTier::Recommended => "recommended",
+            CloneTier::Premium     => "premium",
+        }
+    }
+
+    pub fn duration_secs(&self) -> u64 {
+        match self {
+            CloneTier::Quick       => 10,
+            CloneTier::Recommended => 60,
+            CloneTier::Premium     => 300,
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            CloneTier::Quick       => "10 seconds — recognizable you, but clearly synthetic",
+            CloneTier::Recommended => "60 seconds — natural rhythm, good quality (guided prompts)",
+            CloneTier::Premium     => "5+ minutes — near-perfect voice clone",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "quick" | "1" | "10s"      => Some(CloneTier::Quick),
+            "recommended" | "2" | "60s" => Some(CloneTier::Recommended),
+            "premium" | "3" | "5m"      => Some(CloneTier::Premium),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for CloneTier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.label())
+    }
+}
+
+/// Check if XTTS v2 is available (Coqui TTS Python package).
+pub fn xtts_available() -> bool {
+    which("tts")
+}
+
+/// Directory where voice clone samples are stored.
+pub fn voice_clone_dir() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|h| h.join(".local/share/rustyclaw/voice-clone"))
+}
+
+/// Path to the active voice clone WAV sample.
+pub fn voice_clone_sample_path() -> Option<std::path::PathBuf> {
+    voice_clone_dir().map(|d| d.join("my-voice.wav"))
+}
+
+/// Detect which tier a recorded sample falls into based on file duration.
+fn detect_clone_tier(wav_path: &std::path::Path) -> &'static str {
+    // Estimate duration from file size: 16-bit mono 22050 Hz ≈ 44100 bytes/sec
+    let size = std::fs::metadata(wav_path).map(|m| m.len()).unwrap_or(0);
+    let est_secs = size / 44100;
+    if est_secs >= 240 { "premium" }
+    else if est_secs >= 40 { "recommended" }
+    else { "quick" }
+}
+
+/// Guided reading prompts for the recommended tier.
+/// Designed to exercise varied phonemes, prosody, questions, and exclamations.
+pub const GUIDED_PROMPTS: &[&str] = &[
+    "The quick brown fox jumps over the lazy dog. Every letter matters when you're building a voice.",
+    "How does this function handle edge cases? I think we need to refactor the error path.",
+    "That's a great idea! Let me check if the tests pass before we merge this pull request.",
+    "The server responded with a five hundred error. We should add retry logic with exponential backoff.",
+    "Why would anyone use a linked list here? An array would be so much faster for sequential access.",
+    "Perfect. Ship it. The benchmarks look incredible — forty percent faster than the previous version.",
+    "I'm not sure about this approach. Could we try something simpler first? Maybe a hash map instead.",
+    "Documentation is important, but working code is more important. Let's fix the bug, then write docs.",
+];
+
+/// Build instructions text for recording at a given tier.
+pub fn recording_instructions(tier: CloneTier) -> String {
+    let duration = tier.duration_secs();
+    let mut text = format!(
+        "Voice Clone Recording — {} tier ({} seconds)\n\n\
+         Tips for best quality:\n\
+         • Use a quiet room — no background noise, fans, or music\n\
+         • Speak at your normal pace and volume\n\
+         • Hold your mic 6-12 inches from your mouth\n\
+         • Vary your tone naturally — don't read in monotone\n\n",
+        tier.label(),
+        duration,
+    );
+
+    match tier {
+        CloneTier::Quick => {
+            text.push_str(
+                "Read this aloud when recording starts:\n\n\
+                 \"The quick brown fox jumps over the lazy dog.\n\
+                 Every letter matters when you're building a voice.\"\n\n\
+                 Press Ctrl+R to start recording. Press Ctrl+R again to stop after ~10 seconds.",
+            );
+        }
+        CloneTier::Recommended => {
+            text.push_str("Read these prompts aloud, one after another:\n\n");
+            for (i, prompt) in GUIDED_PROMPTS.iter().enumerate() {
+                text.push_str(&format!("  {}. \"{}\"\n\n", i + 1, prompt));
+            }
+            text.push_str(
+                "Press Ctrl+R to start recording. Read all prompts naturally, then press Ctrl+R to stop.",
+            );
+        }
+        CloneTier::Premium => {
+            text.push_str(
+                "For premium quality, read continuously for 5+ minutes.\n\n\
+                 Suggestions:\n\
+                 • Read a README or documentation file from this project aloud\n\
+                 • Narrate what you're working on — explain your code\n\
+                 • Read a blog post or article that interests you\n\
+                 • Just talk naturally about anything\n\n\
+                 The longer and more varied your speech, the better the clone.\n\n\
+                 Press Ctrl+R to start recording. Press Ctrl+R again when done (aim for 5+ minutes).",
+            );
+        }
+    }
+    text
+}
+
+/// Save a recorded WAV file as the voice clone sample.
+/// Copies from the temp recording location to the voice clone directory.
+pub async fn save_voice_clone(tier: CloneTier) -> Result<String> {
+    let src = temp_wav_path();
+    if !src.exists() {
+        return Err(anyhow!("No recording found. Record with Ctrl+R first."));
+    }
+
+    // Validate minimum duration
+    let size = tokio::fs::metadata(&src).await?.len();
+    let est_secs = size / 44100; // rough estimate for 16-bit mono 22050Hz
+    let min_secs = match tier {
+        CloneTier::Quick       => 3,
+        CloneTier::Recommended => 20,
+        CloneTier::Premium     => 120,
+    };
+    if est_secs < min_secs {
+        return Err(anyhow!(
+            "Recording too short (~{}s). {} tier needs at least {}s. Try again.",
+            est_secs, tier.label(), min_secs,
+        ));
+    }
+
+    let dest_dir = voice_clone_dir()
+        .ok_or_else(|| anyhow!("Cannot determine home directory"))?;
+    tokio::fs::create_dir_all(&dest_dir).await?;
+
+    let dest = dest_dir.join("my-voice.wav");
+    tokio::fs::copy(&src, &dest).await?;
+
+    // Also save the tier info
+    let meta = dest_dir.join("meta.txt");
+    tokio::fs::write(&meta, format!("tier={}\nsize={}\n", tier.label(), size)).await?;
+
+    Ok(format!(
+        "Voice clone saved ({} tier, ~{}s).\n\
+         Location: {}\n\n\
+         TTS will now use XTTS v2 with your voice.\n\
+         Use /voice clone remove to revert to the default XTTS v2 speaker.",
+        tier.label(), est_secs, dest.display(),
+    ))
+}
+
+/// Remove the voice clone sample, reverting to XTTS v2 default speaker.
+pub async fn remove_voice_clone() -> Result<String> {
+    let dir = voice_clone_dir()
+        .ok_or_else(|| anyhow!("Cannot determine home directory"))?;
+    let sample = dir.join("my-voice.wav");
+    if sample.exists() {
+        tokio::fs::remove_file(&sample).await?;
+        let meta = dir.join("meta.txt");
+        let _ = tokio::fs::remove_file(&meta).await;
+        Ok(format!("Voice clone removed. TTS reverted to XTTS v2 default speaker ({XTTS_DEFAULT_SPEAKER})."))
+    } else {
+        Ok("No voice clone configured.".into())
+    }
+}
+
+/// Synthesise `text` using XTTS v2 with the user's cloned voice.
+pub async fn speak_cloned(
+    text: &str,
+    clone_wav: &std::path::Path,
+    stop_rx: tokio::sync::oneshot::Receiver<()>,
+) -> Result<bool> {
+    let clean = strip_for_speech(text);
+    if clean.is_empty() { return Ok(false); }
+
+    let words: Vec<&str> = clean.split_whitespace().collect();
+    let truncated = words.len() > TTS_WORD_LIMIT;
+    let speech_text = if truncated {
+        words[..TTS_WORD_LIMIT].join(" ") + ". Response trimmed."
+    } else {
+        clean
+    };
+
+    let wav_out = std::env::temp_dir().join("rustyclaw-xtts.wav");
+    let wav_out_str = wav_out.display().to_string();
+    tokio::pin!(stop_rx);
+
+    let clone_str = clone_wav.display().to_string();
+    let mut cli_args = vec![
+        "--model_name", "tts_models/multilingual/multi-dataset/xtts_v2",
+        "--speaker_wav", &clone_str,
+        "--language_idx", "en",
+        "--out_path", &wav_out_str,
+        "--text", &speech_text,
+    ];
+    if cuda_available() {
+        cli_args.extend(["--use_cuda", "true"]);
+    }
+    let mut tts_proc = Command::new("tts")
+        .args(&cli_args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    tokio::select! {
+        biased;
+        _ = &mut stop_rx => {
+            let _ = tts_proc.kill().await;
+            let _ = tokio::fs::remove_file(&wav_out).await;
+            return Ok(truncated);
+        }
+        status = tts_proc.wait() => {
+            if !status?.success() {
+                return Err(anyhow!(
+                    "XTTS v2 synthesis failed.\n\
+                     Install:  uv tool install TTS --python 3.11 --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'"
+                ));
+            }
+        }
+    }
+
+    play_wav(&wav_out, stop_rx).await?;
+    Ok(truncated)
 }

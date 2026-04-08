@@ -188,6 +188,30 @@ pub struct Settings {
     /// When true, skills cannot execute shell commands (Bash tool blocked during skill turns).
     #[serde(rename = "disableSkillShellExecution")]
     pub disable_skill_shell_execution: Option<bool>,
+
+    /// Enable smart model router — auto-routes tasks by complexity to different models.
+    #[serde(rename = "routerEnabled")]
+    pub router_enabled: Option<bool>,
+
+    /// Session budget limit in USD (router cost tracking).
+    #[serde(rename = "routerBudget")]
+    pub router_budget: Option<f64>,
+
+    /// Model for low-complexity tasks (default: claude-haiku-4-5-20251001).
+    #[serde(rename = "routerLowModel")]
+    pub router_low_model: Option<String>,
+
+    /// Model for medium-complexity tasks (default: claude-sonnet-4-6-20250514).
+    #[serde(rename = "routerMediumModel")]
+    pub router_medium_model: Option<String>,
+
+    /// Model for high-complexity tasks (default: user's configured model).
+    #[serde(rename = "routerHighModel")]
+    pub router_high_model: Option<String>,
+
+    /// Model for super-high-complexity tasks needing 1M context (default: claude-opus-4-6).
+    #[serde(rename = "routerSuperHighModel")]
+    pub router_super_high_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -291,6 +315,12 @@ impl Settings {
             notifications_enabled:  other.notifications_enabled.or(self.notifications_enabled),
             sandbox_allow_network:  other.sandbox_allow_network.or(self.sandbox_allow_network),
             disable_skill_shell_execution: other.disable_skill_shell_execution.or(self.disable_skill_shell_execution),
+            router_enabled:       other.router_enabled.or(self.router_enabled),
+            router_budget:        other.router_budget.or(self.router_budget),
+            router_low_model:     other.router_low_model.or(self.router_low_model),
+            router_medium_model:  other.router_medium_model.or(self.router_medium_model),
+            router_high_model:    other.router_high_model.or(self.router_high_model),
+            router_super_high_model: other.router_super_high_model.or(self.router_super_high_model),
             permissions: PermissionsConfig {
                 // Union both lists — project additions stack on top of global
                 allow: {

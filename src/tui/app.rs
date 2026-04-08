@@ -340,6 +340,13 @@ pub struct App {
     pub pending_help_command: Option<String>,
     /// Voice model path to preview — set by the interactive voice model picker.
     pub pending_voice_model: Option<String>,
+    /// Voice clone tier — set when user starts a clone recording session.
+    pub pending_clone_tier: Option<crate::voice::CloneTier>,
+
+    /// Smart model router configuration.
+    pub router: crate::router::RouterConfig,
+    /// Session cost tracker with per-model breakdown.
+    pub cost_tracker: crate::cost::CostTracker,
 }
 
 /// Format a raw model ID into a human-readable name like "Sonnet 4.6".
@@ -454,6 +461,9 @@ impl App {
             pending_help_category: None,
             pending_help_command: None,
             pending_voice_model: None,
+            pending_clone_tier: None,
+            router: crate::router::RouterConfig::new(model),
+            cost_tracker: crate::cost::CostTracker::new(),
         }
     }
 

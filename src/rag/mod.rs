@@ -1,0 +1,150 @@
+/// Local codebase RAG — tree-sitter AST indexing + SQLite FTS5 search.
+///
+/// Indexes the project's source code into per-symbol chunks, stored in a local
+/// SQLite database.  When the agent needs context, FTS5 retrieves the most
+/// relevant code spans — so the LLM sees surgical context instead of whole files.
+///
+/// Index location: `<project>/.claude/rag.db`
+///
+/// This is the feature Cursor charges $20/month for.  We do it locally, for free,
+/// in a single binary with zero external dependencies.
+
+pub mod indexer;
+pub mod search;
+
+use anyhow::{Context, Result};
+use rusqlite::Connection;
+use std::path::{Path, PathBuf};
+use tracing::debug;
+
+/// The RAG database — owns a SQLite connection with FTS5 tables.
+pub struct RagDb {
+    pub conn: Connection,
+    pub db_path: PathBuf,
+}
+
+impl RagDb {
+    /// Open (or create) the RAG database for a project.
+    /// Stored at `<cwd>/.claude/rag.db`.
+    pub fn open(cwd: &Path) -> Result<Self> {
+        let claude_dir = cwd.join(".claude");
+        std::fs::create_dir_all(&claude_dir)
+            .context("Failed to create .claude directory for RAG index")?;
+
+        let db_path = claude_dir.join("rag.db");
+        let conn = Connection::open(&db_path)
+            .context("Failed to open RAG database")?;
+
+        // Performance: WAL mode + relaxed sync for indexing speed
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA cache_size = -8000;",  // 8MB cache
+        )?;
+
+        // Create tables if they don't exist
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS code_chunks (
+                id          INTEGER PRIMARY KEY,
+                file_path   TEXT NOT NULL,
+                symbol_name TEXT NOT NULL,
+                symbol_kind TEXT NOT NULL,
+                language    TEXT NOT NULL,
+                start_line  INTEGER NOT NULL,
+                end_line    INTEGER NOT NULL,
+                content     TEXT NOT NULL,
+                mtime       INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_chunks_file ON code_chunks(file_path);
+            CREATE INDEX IF NOT EXISTS idx_chunks_symbol ON code_chunks(symbol_name);
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                symbol_name,
+                content,
+                content=code_chunks,
+                content_rowid=id,
+                tokenize='porter unicode61'
+            );
+
+            -- Triggers to keep FTS in sync with the content table
+            CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON code_chunks BEGIN
+                INSERT INTO chunks_fts(rowid, symbol_name, content)
+                VALUES (new.id, new.symbol_name, new.content);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON code_chunks BEGIN
+                INSERT INTO chunks_fts(chunks_fts, rowid, symbol_name, content)
+                VALUES ('delete', old.id, old.symbol_name, old.content);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON code_chunks BEGIN
+                INSERT INTO chunks_fts(chunks_fts, rowid, symbol_name, content)
+                VALUES ('delete', old.id, old.symbol_name, old.content);
+                INSERT INTO chunks_fts(rowid, symbol_name, content)
+                VALUES (new.id, new.symbol_name, new.content);
+            END;
+
+            -- Metadata table for tracking index state
+            CREATE TABLE IF NOT EXISTS rag_meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );"
+        )?;
+
+        debug!("RAG database opened at {}", db_path.display());
+        Ok(Self { conn, db_path })
+    }
+
+    /// Total number of indexed chunks.
+    pub fn chunk_count(&self) -> Result<i64> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM code_chunks",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    /// Number of unique files indexed.
+    pub fn file_count(&self) -> Result<i64> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(DISTINCT file_path) FROM code_chunks",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    /// Get the mtime we last indexed for a file (0 if never indexed).
+    pub fn file_mtime(&self, path: &str) -> Result<i64> {
+        let result = self.conn.query_row(
+            "SELECT MAX(mtime) FROM code_chunks WHERE file_path = ?1",
+            [path],
+            |row| row.get::<_, Option<i64>>(0),
+        )?;
+        Ok(result.unwrap_or(0))
+    }
+
+    /// Delete all chunks for a given file (before re-indexing it).
+    pub fn delete_file_chunks(&self, path: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM code_chunks WHERE file_path = ?1", [path])?;
+        Ok(())
+    }
+
+    /// Delete all chunks (full re-index).
+    pub fn clear(&self) -> Result<()> {
+        self.conn.execute_batch(
+            "DELETE FROM code_chunks;
+             INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild');"
+        )?;
+        Ok(())
+    }
+
+    /// Database file size in bytes.
+    pub fn db_size(&self) -> i64 {
+        std::fs::metadata(&self.db_path)
+            .map(|m| m.len() as i64)
+            .unwrap_or(0)
+    }
+}
