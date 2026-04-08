@@ -414,8 +414,8 @@ pub fn index_project(db: &RagDb, cwd: &Path, force: bool) -> Result<IndexResult>
         .into_iter()
         .filter_entry(|e| {
             let name = e.file_name().to_string_lossy();
-            // Skip hidden dirs and known build/vendor dirs
-            if e.file_type().is_dir() {
+            // Skip hidden dirs and known build/vendor dirs (but not the root cwd itself)
+            if e.file_type().is_dir() && e.depth() > 0 {
                 return !name.starts_with('.') && !SKIP_DIRS.contains(&name.as_ref());
             }
             true
@@ -529,4 +529,139 @@ pub fn index_project(db: &RagDb, cwd: &Path, force: bool) -> Result<IndexResult>
         chunks_added,
         elapsed_ms: start.elapsed().as_millis(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rag::RagDb;
+    use tempfile::TempDir;
+
+    fn setup_project(files: &[(&str, &str)]) -> TempDir {
+        let tmp = TempDir::new().unwrap();
+        for (path, content) in files {
+            let full = tmp.path().join(path);
+            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+            std::fs::write(&full, content).unwrap();
+        }
+        tmp
+    }
+
+    #[test]
+    fn test_index_rust_file() {
+        let tmp = setup_project(&[
+            ("src/lib.rs", "pub fn hello() -> &'static str { \"hello\" }\n\nstruct Config { name: String }\n"),
+        ]);
+        let db = RagDb::open(tmp.path()).unwrap();
+        let result = index_project(&db, tmp.path(), false).unwrap();
+        assert_eq!(result.files_scanned, 1);
+        assert_eq!(result.files_indexed, 1);
+        assert!(result.chunks_added >= 2); // hello + Config
+        assert_eq!(db.file_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_index_multiple_languages() {
+        let tmp = setup_project(&[
+            ("main.rs", "fn main() {}"),
+            ("app.py", "def run():\n    pass\n"),
+            ("index.js", "function init() { return 1; }\n"),
+        ]);
+        let db = RagDb::open(tmp.path()).unwrap();
+        let result = index_project(&db, tmp.path(), false).unwrap();
+        assert_eq!(result.files_scanned, 3);
+        assert_eq!(result.files_indexed, 3);
+        assert!(result.chunks_added >= 3);
+    }
+
+    #[test]
+    fn test_incremental_index_skips_unchanged() {
+        let tmp = setup_project(&[
+            ("lib.rs", "fn foo() {}"),
+        ]);
+        let db = RagDb::open(tmp.path()).unwrap();
+
+        let r1 = index_project(&db, tmp.path(), false).unwrap();
+        assert_eq!(r1.files_indexed, 1);
+
+        // Second run: nothing changed, should skip
+        let r2 = index_project(&db, tmp.path(), false).unwrap();
+        assert_eq!(r2.files_indexed, 0);
+        assert_eq!(r2.files_skipped, 1);
+    }
+
+    #[test]
+    fn test_force_reindex() {
+        let tmp = setup_project(&[
+            ("lib.rs", "fn foo() {}"),
+        ]);
+        let db = RagDb::open(tmp.path()).unwrap();
+
+        index_project(&db, tmp.path(), false).unwrap();
+        let r2 = index_project(&db, tmp.path(), true).unwrap();
+        assert_eq!(r2.files_indexed, 1); // force = re-indexed even though unchanged
+    }
+
+    #[test]
+    fn test_skips_target_dir() {
+        let tmp = setup_project(&[
+            ("src/lib.rs", "fn good() {}"),
+            ("target/debug/out.rs", "fn bad() {}"),
+        ]);
+        let db = RagDb::open(tmp.path()).unwrap();
+        let result = index_project(&db, tmp.path(), false).unwrap();
+        assert_eq!(result.files_scanned, 1); // only src/lib.rs
+        assert_eq!(db.file_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_skips_non_source_files() {
+        let tmp = setup_project(&[
+            ("README.md", "# Hello"),
+            ("data.csv", "a,b,c"),
+            ("lib.rs", "fn works() {}"),
+        ]);
+        let db = RagDb::open(tmp.path()).unwrap();
+        let result = index_project(&db, tmp.path(), false).unwrap();
+        assert_eq!(result.files_scanned, 1); // only .rs
+    }
+
+    #[test]
+    fn test_large_file_skipped() {
+        let tmp = setup_project(&[
+            ("huge.rs", &"fn x() {}\n".repeat(6000)), // >5000 lines
+        ]);
+        let db = RagDb::open(tmp.path()).unwrap();
+        let result = index_project(&db, tmp.path(), false).unwrap();
+        assert_eq!(result.files_skipped, 1);
+        assert_eq!(result.files_indexed, 0);
+    }
+
+    #[test]
+    fn test_symbol_extraction_rust() {
+        let tmp = setup_project(&[
+            ("lib.rs", "\
+pub fn public_func() -> i32 { 42 }
+
+struct MyStruct {
+    field: String,
+}
+
+enum Color {
+    Red,
+    Blue,
+}
+
+impl MyStruct {
+    fn method(&self) {}
+}
+"),
+        ]);
+        let db = RagDb::open(tmp.path()).unwrap();
+        index_project(&db, tmp.path(), false).unwrap();
+
+        // Should have extracted: public_func, MyStruct, Color, MyStruct (impl)
+        let chunks = db.chunk_count().unwrap();
+        assert!(chunks >= 4, "expected at least 4 chunks, got {chunks}");
+    }
 }

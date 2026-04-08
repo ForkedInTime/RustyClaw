@@ -150,6 +150,12 @@ pub fn search_symbol(db: &RagDb, name: &str, limit: i64) -> Result<Vec<SearchRes
     Ok(out)
 }
 
+/// Make sanitize_fts_query visible for testing.
+#[cfg(test)]
+pub fn sanitize_fts_query_test(query: &str) -> String {
+    sanitize_fts_query(query)
+}
+
 /// Build a context string from search results, suitable for injection
 /// into the system prompt or a user message.
 ///
@@ -179,4 +185,142 @@ pub fn build_context(results: &[SearchResult], max_chars: usize) -> String {
         "<codebase_context>\n{}\n</codebase_context>",
         parts.join("\n\n")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rag::RagDb;
+    use tempfile::TempDir;
+
+    fn seeded_db() -> (TempDir, RagDb) {
+        let tmp = TempDir::new().unwrap();
+        let db = RagDb::open(tmp.path()).unwrap();
+        let chunks = vec![
+            ("src/auth.rs", "authenticate_user", "function", "rust", "fn authenticate_user(token: &str) -> Result<User> { verify(token) }"),
+            ("src/auth.rs", "verify_token", "function", "rust", "fn verify_token(t: &str) -> bool { !t.is_empty() }"),
+            ("src/api.rs", "handle_request", "function", "rust", "fn handle_request(req: Request) -> Response { route(req) }"),
+            ("src/api.rs", "ApiServer", "struct", "rust", "struct ApiServer { port: u16, host: String }"),
+            ("src/db.rs", "DatabasePool", "struct", "rust", "struct DatabasePool { connections: Vec<Connection> }"),
+            ("src/db.rs", "query", "function", "rust", "fn query(pool: &DatabasePool, sql: &str) -> Vec<Row> { pool.execute(sql) }"),
+        ];
+        for (path, name, kind, lang, content) in chunks {
+            db.conn.execute(
+                "INSERT INTO code_chunks (file_path, symbol_name, symbol_kind, language, start_line, end_line, content, mtime)
+                 VALUES (?1, ?2, ?3, ?4, 1, 10, ?5, 1000)",
+                rusqlite::params![path, name, kind, lang, content],
+            ).unwrap();
+        }
+        (tmp, db)
+    }
+
+    #[test]
+    fn test_sanitize_fts_query_basic() {
+        let q = sanitize_fts_query("authenticate user");
+        assert!(q.contains("\"authenticate\"*"));
+        assert!(q.contains("\"user\"*"));
+    }
+
+    #[test]
+    fn test_sanitize_fts_query_strips_operators() {
+        let q = sanitize_fts_query("NOT foo AND bar");
+        // Short words like "NOT" and "AND" (3 chars) pass the len >= 2 filter
+        // but their special meaning is neutralized by quoting
+        assert!(q.contains("\"NOT\"*"));
+        assert!(q.contains("\"foo\"*"));
+    }
+
+    #[test]
+    fn test_sanitize_fts_query_skips_short_words() {
+        let q = sanitize_fts_query("a b cc dd");
+        assert!(!q.contains("\"a\""));
+        assert!(!q.contains("\"b\""));
+        assert!(q.contains("\"cc\"*"));
+        assert!(q.contains("\"dd\"*"));
+    }
+
+    #[test]
+    fn test_search_finds_relevant_results() {
+        let (_tmp, db) = seeded_db();
+        let results = search(&db, "authenticate token", 10).unwrap();
+        assert!(!results.is_empty());
+        assert_eq!(results[0].symbol_name, "authenticate_user");
+    }
+
+    #[test]
+    fn test_search_empty_query() {
+        let (_tmp, db) = seeded_db();
+        let results = search(&db, "", 10).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_search_no_results() {
+        let (_tmp, db) = seeded_db();
+        let results = search(&db, "zzzznonexistent", 10).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_search_respects_limit() {
+        let (_tmp, db) = seeded_db();
+        let results = search(&db, "function struct", 2).unwrap();
+        assert!(results.len() <= 2);
+    }
+
+    #[test]
+    fn test_search_symbol() {
+        let (_tmp, db) = seeded_db();
+        let results = search_symbol(&db, "authenticate_user", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, "src/auth.rs");
+    }
+
+    #[test]
+    fn test_search_symbol_prefix() {
+        let (_tmp, db) = seeded_db();
+        let results = search_symbol(&db, "authenticate", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].symbol_name, "authenticate_user");
+    }
+
+    #[test]
+    fn test_build_context_basic() {
+        let results = vec![SearchResult {
+            file_path: "src/main.rs".to_string(),
+            symbol_name: "main".to_string(),
+            symbol_kind: "function".to_string(),
+            language: "rust".to_string(),
+            start_line: 1,
+            end_line: 5,
+            content: "fn main() {}".to_string(),
+            rank: -10.0,
+        }];
+        let ctx = build_context(&results, 10000);
+        assert!(ctx.contains("<codebase_context>"));
+        assert!(ctx.contains("src/main.rs:1-5"));
+        assert!(ctx.contains("fn main() {}"));
+    }
+
+    #[test]
+    fn test_build_context_respects_char_limit() {
+        let results: Vec<SearchResult> = (0..100).map(|i| SearchResult {
+            file_path: format!("src/file{i}.rs"),
+            symbol_name: format!("func_{i}"),
+            symbol_kind: "function".to_string(),
+            language: "rust".to_string(),
+            start_line: 1,
+            end_line: 10,
+            content: "x".repeat(200),
+            rank: -(100 - i) as f64,
+        }).collect();
+        let ctx = build_context(&results, 500);
+        assert!(ctx.len() < 600); // some overhead from wrapper tags
+    }
+
+    #[test]
+    fn test_build_context_empty() {
+        let ctx = build_context(&[], 10000);
+        assert!(ctx.is_empty());
+    }
 }

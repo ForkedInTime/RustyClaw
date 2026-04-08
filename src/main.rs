@@ -1,3 +1,14 @@
+// Many features are under active development — suppress dead-code noise
+// while the wiring is in progress. Remove once stable.
+#![allow(
+    dead_code,
+    unused_imports,
+    unused_variables,
+    unused_assignments,
+    unreachable_patterns,
+    unused_parens
+)]
+
 /// rustyclaw — Rust port of rustyclaw (Claude Code fork)
 /// Entry point — port of entrypoints/cli.tsx
 
