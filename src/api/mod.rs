@@ -11,12 +11,9 @@ use reqwest::{header, Client};
 use std::collections::HashMap;
 use tracing::{debug, warn};
 
-pub use ollama::{
-    is_ollama_model, list_ollama_models, strip_ollama_prefix, validate_ollama_model,
-    OllamaClient, OLLAMA_PREFIX,
-};
+pub use ollama::{is_ollama_model, list_ollama_models, strip_ollama_prefix, OllamaClient};
 pub use openai_compat::{
-    is_openai_compat_model, parse_provider_model, provider_prefixes, OpenAiCompatClient, PROVIDERS,
+    is_openai_compat_model, parse_provider_model, OpenAiCompatClient, PROVIDERS,
 };
 pub use types::*;
 
@@ -26,18 +23,11 @@ const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
 const DEFAULT_MAX_TOKENS: u32 = 8096;
 
 #[derive(Clone)]
+#[allow(dead_code)] // api_key retained for future authenticated-header injection
 pub struct ClaudeClient {
     client: Client,
     api_key: String,
     base_url: String,
-}
-
-impl ClaudeClient {
-    /// Clone the client reusing the same connection pool and credentials.
-    /// Used by TUI to hand the client off to spawned tokio tasks.
-    pub fn clone_with_same_config(&self) -> Self {
-        self.clone()
-    }
 }
 
 impl ClaudeClient {
@@ -61,6 +51,7 @@ impl ClaudeClient {
     }
 
     /// Non-streaming API call — mirrors callModel() in services/api/claude.ts
+    #[allow(dead_code)] // used by SDK/headless mode (non-streaming path)
     pub async fn messages(
         &self,
         request: MessagesRequest,
@@ -297,6 +288,7 @@ impl ApiBackend {
     }
 
     /// Non-streaming call (falls through to streaming + collect for non-Anthropic backends).
+    #[allow(dead_code)] // SDK/headless non-streaming path
     pub async fn messages(&self, request: MessagesRequest) -> Result<MessagesResponse> {
         match self {
             Self::Anthropic(c) => c.messages(request).await,
@@ -322,6 +314,7 @@ impl ApiBackend {
     }
 
     /// The Ollama host URL if this is an Ollama backend.
+    #[allow(dead_code)]
     pub fn ollama_host(&self) -> Option<&str> {
         match self {
             Self::Ollama(c) => Some(&c.base_url),
@@ -330,6 +323,7 @@ impl ApiBackend {
     }
 
     /// Provider display name (for status bar / logging).
+    #[allow(dead_code)]
     pub fn provider_name(&self) -> &str {
         match self {
             Self::Anthropic(_) => "Anthropic",
@@ -339,6 +333,7 @@ impl ApiBackend {
     }
 
     /// True if the model has been detected as not supporting tools.
+    #[allow(dead_code)]
     pub fn tools_disabled(&self) -> bool {
         match self {
             Self::Ollama(c) => c.tools_disabled(),

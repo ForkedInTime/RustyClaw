@@ -470,11 +470,13 @@ impl QueryEngine {
     }
 
     /// Clear conversation history (equivalent to /clear)
+    #[allow(dead_code)] // public API for SDK/headless mode
     pub fn clear(&mut self) {
         self.messages.clear();
     }
 
     /// Return number of messages in history
+    #[allow(dead_code)] // public API for SDK/headless mode
     pub fn history_len(&self) -> usize {
         self.messages.len()
     }

@@ -44,6 +44,7 @@ fn strip_ansi(s: &str) -> String {
 pub struct BashTool;
 
 #[derive(Deserialize)]
+#[allow(dead_code)] // fields populated by serde from LLM tool calls
 struct BashInput {
     command: String,
     #[serde(default)]

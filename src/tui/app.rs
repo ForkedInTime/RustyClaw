@@ -158,6 +158,7 @@ impl ChatEntry {
 
 pub struct Overlay {
     pub title: String,
+    #[allow(dead_code)] // retained for future overlay text search/copy
     pub text: String,
     pub scroll: usize,
     /// Markdown pre-rendered to ratatui Lines — computed once in new(), reused every frame.
@@ -184,6 +185,7 @@ impl Overlay {
     pub fn scroll_up(&mut self) {
         self.scroll = self.scroll.saturating_sub(5);
     }
+    #[allow(dead_code)]
     pub fn scroll_down(&mut self, total: usize, visible: usize) {
         self.scroll = (self.scroll + 5).min(total.saturating_sub(visible));
     }
@@ -508,6 +510,7 @@ impl App {
     }
 
     /// End a loading turn without stats (cancel, plugin install, etc.)
+    #[allow(dead_code)]
     pub fn finish_loading(&mut self) {
         self.is_loading = false;
         self.turn_start = None;
@@ -515,6 +518,7 @@ impl App {
 
     // ── Input helpers ─────────────────────────────────────────────────────────
 
+    #[allow(dead_code)]
     pub fn input_str(&self) -> String {
         self.input.iter().collect()
     }
@@ -822,6 +826,7 @@ impl App {
     }
 
     /// Scroll down by n lines; re-enables auto-follow when at bottom.
+    #[allow(dead_code)]
     pub fn scroll_down(&mut self, total: usize) {
         self.follow_bottom = false;
         let amount = (crossterm::terminal::size().map(|(_, h)| h as usize / 2).unwrap_or(10)).max(5);

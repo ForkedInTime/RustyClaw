@@ -209,7 +209,6 @@ async fn run_with_regex(input: &GrepInput, ctx: &ToolContext) -> Result<ToolOutp
 
     let mut matched_files: Vec<String> = Vec::new();
     let mut content_lines: Vec<String> = Vec::new();
-    let mut count_total = 0usize;
 
     for entry in WalkDir::new(&search_path)
         .follow_links(false)
@@ -246,7 +245,6 @@ async fn run_with_regex(input: &GrepInput, ctx: &ToolContext) -> Result<ToolOutp
             if re.is_match(line) {
                 file_matched = true;
                 file_count += 1;
-                count_total += 1;
                 if input.output_mode == Some(OutputMode::Content) {
                     content_lines.push(if input.line_numbers {
                         format!("{}:{}: {}", path_str, i + 1, line)

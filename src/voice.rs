@@ -44,10 +44,6 @@ pub fn voice_api_key() -> Option<String> {
         .or_else(|| std::env::var("WHISPER_API_KEY").ok())
 }
 
-pub fn transcription_available() -> bool {
-    local_whisper_available() || voice_api_key().is_some()
-}
-
 fn which(cmd: &str) -> bool {
     std::process::Command::new("which")
         .arg(cmd)

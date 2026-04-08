@@ -140,10 +140,6 @@ pub fn parse_provider_model(model: &str) -> Option<(&'static ProviderDef, &str)>
 }
 
 /// List known provider prefixes — used in /model help text.
-pub fn provider_prefixes() -> Vec<&'static str> {
-    PROVIDERS.iter().map(|p| p.prefix).collect()
-}
-
 // ─── Shared OpenAI wire types ────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -609,6 +605,7 @@ impl OpenAiCompatClient {
         })
     }
 
+    #[allow(dead_code)]
     pub fn tools_disabled(&self) -> bool {
         self.no_tools.load(Ordering::Relaxed)
     }

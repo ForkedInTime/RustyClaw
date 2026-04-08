@@ -989,7 +989,6 @@ async fn run_loop(
                                 .to_string()
                             ));
                             consecutive_compact_count = 0;
-                            last_tokens_in = 0;
                         } else {
                         snip_compact(&mut messages); // immediate safety snip
                         app.entries.push(ChatEntry::system("Auto-compacting (summarise)…"));
@@ -3047,6 +3046,9 @@ async fn handle_key(
 
         (Left, _) => app.cursor_left(),
         (Right, _) => app.cursor_right(),
+        // Ctrl+Home → jump to very top of chat; Ctrl+End → jump to bottom
+        (Home, KeyModifiers::CONTROL) => { app.follow_bottom = false; app.scroll = 0; }
+        (End, KeyModifiers::CONTROL) => { app.follow_bottom = true; }
         (Home, _) => app.cursor_home(),
         (End, _) => app.cursor_end(),
         (Up, _) => {
@@ -3080,10 +3082,6 @@ async fn handle_key(
         }
         (PageUp, _) => app.scroll_up(),
         (PageDown, _) => { app.follow_bottom = true; }
-        // Ctrl+Home → jump to very top of chat
-        (Home, KeyModifiers::CONTROL) => { app.follow_bottom = false; app.scroll = 0; }
-        // Ctrl+End → jump to bottom
-        (End, KeyModifiers::CONTROL) => { app.follow_bottom = true; }
         (Char('u'), KeyModifiers::CONTROL) => app.clear_line(),
         (Char(c), _) => app.insert_char(c),
         _ => {}
@@ -3233,7 +3231,7 @@ fn base64_encode(data: &[u8]) -> String {
         let b0 = chunk[0] as usize;
         let b1 = if chunk.len() > 1 { chunk[1] as usize } else { 0 };
         let b2 = if chunk.len() > 2 { chunk[2] as usize } else { 0 };
-        out.push(CHARS[(b0 >> 2)] as char);
+        out.push(CHARS[b0 >> 2] as char);
         out.push(CHARS[((b0 & 3) << 4) | (b1 >> 4)] as char);
         out.push(if chunk.len() > 1 { CHARS[((b1 & 0xf) << 2) | (b2 >> 6)] as char } else { '=' });
         out.push(if chunk.len() > 2 { CHARS[b2 & 0x3f] as char } else { '=' });

@@ -6,9 +6,9 @@
 ///
 /// Incremental: only re-indexes files whose mtime changed since last index.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
 use tracing::{debug, warn};
 use walkdir::WalkDir;

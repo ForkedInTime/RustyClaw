@@ -99,6 +99,7 @@ pub fn install_prefix(distro: &Distro) -> String {
 
 /// A tool we check for and may need to install.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[allow(dead_code)] // variants for /doctor completeness, not all checked at startup
 pub enum Tool {
     Arecord,       // voice input (recording)
     Ffmpeg,        // voice input (alternative recorder / audio processing)

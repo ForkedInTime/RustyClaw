@@ -156,6 +156,7 @@ pub struct ToolDefinition {
 
 /// Top-level API response (non-streaming)
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // used by non-streaming API path (SDK/headless)
 pub struct MessagesResponse {
     pub id: String,
     pub content: Vec<ContentBlock>,

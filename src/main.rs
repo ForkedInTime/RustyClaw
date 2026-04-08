@@ -1,14 +1,3 @@
-// Many features are under active development — suppress dead-code noise
-// while the wiring is in progress. Remove once stable.
-#![allow(
-    dead_code,
-    unused_imports,
-    unused_variables,
-    unused_assignments,
-    unreachable_patterns,
-    unused_parens
-)]
-
 /// rustyclaw — Rust port of rustyclaw (Claude Code fork)
 /// Entry point — port of entrypoints/cli.tsx
 
@@ -36,7 +25,6 @@ mod voice;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
-use colored::Colorize;
 use config::Config;
 use query_engine::QueryEngine;
 use tools::all_tools;
