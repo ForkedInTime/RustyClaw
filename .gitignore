@@ -4,3 +4,8 @@
 *~
 .env
 .DS_Store
+
+# Strategy docs — not for public eyes
+CLAUDE.md
+competitor-analysis-[redacted].md
+rust-claude-code-landscape.md

@@ -14,7 +14,7 @@ pub enum AppEvent {
     /// A tool call result
     ToolResult { is_error: bool, text: String },
     /// The full turn is complete — carries the updated full message history
-    Done { tokens_in: u64, tokens_out: u64, cache_read: u64, cache_write: u64, messages: Vec<Message> },
+    Done { tokens_in: u64, tokens_out: u64, cache_read: u64, cache_write: u64, messages: Vec<Message>, model_used: String },
     /// An API-level error
     Error(String),
     /// Claude wants to run a sensitive tool — needs user permission

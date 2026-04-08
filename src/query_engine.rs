@@ -5,9 +5,11 @@ use crate::api::types::*;
 use crate::api::{ApiBackend, MessagesRequest};
 use crate::compact::{compact_needed, snip_compact, summarize_compact, CompactNeeded};
 use crate::config::Config;
+use crate::rag;
 use crate::tools::{DynTool, ToolContext};
 use anyhow::{Context, Result};
 use colored::Colorize;
+use tracing::debug;
 
 // System prompt is built dynamically from Config::build_system_prompt().
 
@@ -89,6 +91,9 @@ impl QueryEngine {
             println!("{}", event);
         }
 
+        // RAG context injection: search the local index for relevant code
+        let rag_context = self.retrieve_rag_context(&user_input);
+
         // Append user message
         self.messages.push(Message {
             role: Role::User,
@@ -110,10 +115,17 @@ impl QueryEngine {
                 .map(|t| t.definition())
                 .collect();
 
+            // Augment system prompt with RAG context on the first turn
+            let effective_system = if turn == 1 && !rag_context.is_empty() {
+                format!("{}\n\n{}", self.system_prompt, rag_context)
+            } else {
+                self.system_prompt.clone()
+            };
+
             let request = MessagesRequest {
                 model: self.config.model.clone(),
                 max_tokens: self.config.max_tokens,
-                system: crate::api::types::SystemContent::Plain(self.system_prompt.clone()),
+                system: crate::api::types::SystemContent::Plain(effective_system),
                 messages: self.messages.clone(),
                 tools: tool_defs,
                 stream: None,
@@ -480,6 +492,41 @@ fn truncate_json(v: &serde_json::Value, max_len: usize) -> String {
 impl QueryEngine {
     fn replay_user_messages(&self) -> bool {
         self.config.replay_user_messages
+    }
+
+    /// Retrieve relevant code context from the local RAG index.
+    /// Returns a formatted context block, or empty string if RAG is unavailable.
+    fn retrieve_rag_context(&self, user_input: &str) -> String {
+        // Only inject RAG if the index exists
+        let db = match rag::RagDb::open(&self.config.cwd) {
+            Ok(db) => db,
+            Err(_) => return String::new(),
+        };
+
+        // Skip if the index is empty (not yet built)
+        if db.chunk_count().unwrap_or(0) == 0 {
+            return String::new();
+        }
+
+        // Search for relevant code chunks
+        let results = match rag::search::search(&db, user_input, 10) {
+            Ok(r) => r,
+            Err(e) => {
+                debug!("RAG search failed: {e}");
+                return String::new();
+            }
+        };
+
+        if results.is_empty() {
+            return String::new();
+        }
+
+        // Build context block, capped at 8KB to avoid blowing up the prompt
+        let context = rag::search::build_context(&results, 8192);
+        if !context.is_empty() {
+            debug!("RAG injected {} results ({} chars)", results.len(), context.len());
+        }
+        context
     }
 }
 

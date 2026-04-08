@@ -116,6 +116,7 @@ pub enum Tool {
     Git,           // upgrade check
     Nodejs,        // plugins (npm)
     Npm,           // plugins
+    CoquiTts,      // XTTS v2 voice cloning (tts CLI)
 }
 
 impl Tool {
@@ -137,6 +138,7 @@ impl Tool {
             Tool::Git        => "git",
             Tool::Nodejs     => "node",
             Tool::Npm        => "npm",
+            Tool::CoquiTts   => "tts",
         }
     }
 
@@ -158,6 +160,7 @@ impl Tool {
             Tool::Git        => "git (upgrade check, /upgrade)",
             Tool::Nodejs     => "Node.js (plugin system)",
             Tool::Npm        => "npm (plugin install)",
+            Tool::CoquiTts   => "XTTS v2 — natural TTS (PRIMARY engine)",
         }
     }
 
@@ -188,6 +191,7 @@ impl Tool {
                 Distro::Arch => None, // npm is bundled with nodejs on Arch
                 _            => Some("npm"),
             },
+            Tool::CoquiTts => None, // uv tool install TTS (all distros — AUR pkg has broken deps)
         }
     }
 
@@ -248,7 +252,8 @@ pub fn find_missing(distro: &Distro) -> Vec<MissingTool> {
     if !crate::voice::piper_available() {
         let (pkg, note) = match distro {
             Distro::Arch => (Tool::Piper.package(distro), None),
-            _ => (None, Some("pip install piper-tts\n         (or binary: github.com/rhasspy/piper/releases)".into())),
+            _ => (None, Some("pipx install piper-tts\n\
+                 \x20        — or binary: github.com/rhasspy/piper/releases".into())),
         };
         missing.push(MissingTool { tool: Tool::Piper, package: pkg, manual_note: note });
     }
@@ -271,6 +276,17 @@ pub fn find_missing(distro: &Distro) -> Vec<MissingTool> {
             ),
         };
         missing.push(MissingTool { tool: Tool::PiperVoice, package: None, manual_note: note });
+    }
+
+    // XTTS v2 / Coqui TTS — PRIMARY TTS engine (natural voice)
+    if !crate::voice::xtts_available() {
+        let note = Some(
+            "uv tool install TTS --python 3.11 \\\n\
+             \x20        --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'\n\
+             \x20        ⚠ STRONGLY recommended — XTTS v2 sounds like a real human.\n\
+             \x20        Without it, TTS falls back to piper (robotic).".into()
+        );
+        missing.push(MissingTool { tool: Tool::CoquiTts, package: None, manual_note: note });
     }
 
     // Clipboard (need at least one)

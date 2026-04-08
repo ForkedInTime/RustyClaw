@@ -14,17 +14,17 @@ use std::collections::HashMap;
 // ── Slash command list (used for Tab completion) ──────────────────────────────
 
 pub const SLASH_COMMANDS: &[&str] = &[
-    "add-dir", "advisor", "agents", "banner", "branch", "brief", "btw",
+    "add-dir", "advisor", "agents", "banner", "branch", "brief", "btw", "budget",
     "clear", "compact", "commit", "commit-push-pr", "config", "context", "copy",
     "cost", "ctx-viz", "diff", "doctor", "edit-claude-md", "effort", "env", "exit", "export",
     "install-missing",
-    "fast", "feedback", "files", "help", "hooks", "ide", "image", "init", "init-verifiers",
+    "fast", "feedback", "files", "help", "hooks", "ide", "image", "index", "init", "init-verifiers",
     "insights", "keybindings", "login", "logout", "mcp", "memory", "model",
     "notifications", "output-style", "permissions", "plan", "plugin", "pr_comments", "quit",
     "release-notes", "reload-plugins", "rename", "resume", "rewind", "review", "sandbox",
     "security-review", "session", "share", "skills", "stats", "status", "statusline", "summary",
     "tasks", "teleport", "terminal-setup", "theme", "thinkback", "ultraplan", "upgrade",
-    "usage", "version", "vim", "voice", "autofix-pr", "issue", "color", "powerup",
+    "rag", "router", "usage", "version", "vim", "voice", "autofix-pr", "issue", "color", "powerup",
 ];
 
 // ── Model catalogue ───────────────────────────────────────────────────────────
@@ -146,6 +146,40 @@ pub enum CommandAction {
     CheckUpgrade,
     /// Open a URL in the default browser
     OpenBrowser(String),
+    /// Trigger RAG codebase indexing (force = re-index everything)
+    IndexProject { force: bool },
+    /// Search the RAG index and display results
+    RagSearch(String),
+    /// Set session budget limit in USD
+    SetBudget(Option<f64>),
+    /// Toggle smart model router on/off, or configure tiers
+    RouterToggle,
+    /// Show router config and status
+    RouterStatus,
+    /// Set a specific router tier model
+    RouterSetTier { tier: String, model: String },
+    /// Show cost dashboard
+    ShowCostDashboard,
+    /// Spawn a background agent in a git worktree
+    SpawnAgent(String),
+    /// List all spawned background agents
+    ListSpawns,
+    /// Review a completed spawn's changes
+    ReviewSpawn(String),
+    /// Merge a completed spawn into the current branch
+    MergeSpawn(String),
+    /// Cancel a running spawn
+    KillSpawn(String),
+    /// Discard a spawn's worktree without merging
+    DiscardSpawn(String),
+    /// Start voice clone recording flow (tier selection)
+    VoiceClone(String),
+    /// Save the just-recorded voice clone sample
+    VoiceCloneSave(String),
+    /// Remove the voice clone sample
+    VoiceCloneRemove,
+    /// Play a test phrase with current TTS (clone or piper)
+    VoiceTest,
     /// Command not recognised — show error
     Unknown(String),
 }
@@ -221,6 +255,14 @@ pub fn dispatch(input: &str, ctx: &CommandContext) -> CommandAction {
         "usage"          => cmd_usage(ctx),
         "help"           => cmd_help(args),
 
+        // ── RAG codebase indexing ────────────────────────────────────────
+        "index"          => cmd_index(args),
+        "rag"            => cmd_rag(args),
+
+        // ── Smart model router + cost ───────────────────────────────────
+        "budget"         => cmd_budget(args),
+        "router"         => cmd_router(args),
+
         // ── Session commands ──────────────────────────────────────────────
         "session"        => cmd_session(args, ctx),
         "sessions"       => cmd_session(args, ctx),
@@ -281,6 +323,7 @@ pub fn dispatch(input: &str, ctx: &CommandContext) -> CommandAction {
         "edit-claude-md"  => CommandAction::EditClaudeMd,
         "plugin"          => cmd_plugin(args),
         "reload-plugins"  => CommandAction::ReloadPlugins,
+        "spawn"           => cmd_spawn(args),
         "ultraplan"       => cmd_ultraplan(args),
         "autofix-pr"      => cmd_autofix_pr(args),
         "issue"           => cmd_issue(args),
@@ -609,18 +652,31 @@ fn cmd_model(args: &str, ctx: &CommandContext) -> CommandAction {
     if args.is_empty() {
         CommandAction::ListModels
     } else {
-        // Normalize "ollama <name>" (space) → "ollama:<name>" (colon)
+        // Normalize "provider name" (space) → "provider:name" (colon)
         let raw = args.trim();
         let model = if raw == "default" {
             crate::api::default_model().to_string()
         } else if raw.starts_with("ollama ") {
             format!("ollama:{}", raw["ollama ".len()..].trim())
+        } else if let Some(space_pos) = raw.find(' ') {
+            let prefix = &raw[..space_pos];
+            // Check if the word before the space is a known provider prefix
+            if crate::api::PROVIDERS.iter().any(|p| p.prefix == prefix) {
+                format!("{prefix}:{}", raw[space_pos + 1..].trim())
+            } else {
+                raw.to_string()
+            }
         } else {
             raw.to_string()
         };
 
         // Ollama models — accept any "ollama:<name>" without checking KNOWN_MODELS
         if crate::api::is_ollama_model(&model) {
+            return CommandAction::SetModel(model);
+        }
+
+        // OpenAI-compatible provider models — accept any "prefix:<name>"
+        if crate::api::is_openai_compat_model(&model) {
             return CommandAction::SetModel(model);
         }
 
@@ -631,13 +687,21 @@ fn cmd_model(args: &str, ctx: &CommandContext) -> CommandAction {
         let known = KNOWN_MODELS.iter().any(|(n, _)| *n == model);
         if !known {
             let names: Vec<_> = KNOWN_MODELS.iter().map(|(n, _)| *n).collect();
+            let providers: Vec<_> = crate::api::PROVIDERS
+                .iter()
+                .map(|p| format!("  /model {}:<model-name>  ({})", p.prefix, p.name))
+                .collect();
             return CommandAction::Message(format!(
                 "Unknown model '{model}'.\n\
                  Known Anthropic models:\n  {}\n\
                  \n\
                  Shorthands: opus, sonnet, haiku\n\
-                 For local models: /model ollama:<name>  (e.g. /model ollama:dolphin3)",
-                names.join("\n  ")
+                 \n\
+                 Local models:\n  /model ollama:<name>\n\
+                 \n\
+                 OpenAI-compatible providers:\n{}",
+                names.join("\n  "),
+                providers.join("\n"),
             ));
         }
         CommandAction::SetModel(model)
@@ -720,6 +784,103 @@ fn cmd_keybindings() -> CommandAction {
         "  ?             Show this help (when input is empty)\n",
         "  /help         Show all commands",
     ).into())
+}
+
+// ─── RAG codebase indexing ────────────────────────────────────────────────────
+
+fn cmd_index(args: &str) -> CommandAction {
+    let args = args.trim();
+    match args {
+        "force" | "--force" | "-f" => CommandAction::IndexProject { force: true },
+        "stats" | "status" => {
+            // Stats are shown by the run_loop handler (needs async access to db)
+            CommandAction::IndexProject { force: false }
+        }
+        "" => CommandAction::IndexProject { force: false },
+        _ => CommandAction::Message(
+            "Usage: /index [force|stats]\n\
+             \n  /index        — incremental re-index (only changed files)\
+             \n  /index force  — full re-index (clear + rebuild)\
+             \n  /index stats  — show index statistics"
+                .into(),
+        ),
+    }
+}
+
+fn cmd_rag(args: &str) -> CommandAction {
+    let query = args.trim();
+    if query.is_empty() {
+        return CommandAction::Message(
+            "Usage: /rag <query>\n\
+             \n  Search the codebase index for relevant code.\
+             \n  Example: /rag authentication middleware\
+             \n  Example: /rag how does the streaming API work\
+             \n\n  Run /index first to build the index."
+                .into(),
+        );
+    }
+    CommandAction::RagSearch(query.to_string())
+}
+
+fn cmd_budget(args: &str) -> CommandAction {
+    let args = args.trim();
+    if args.is_empty() || args == "status" {
+        return CommandAction::SetBudget(None); // show current budget
+    }
+    if args == "off" || args == "clear" || args == "none" {
+        return CommandAction::SetBudget(Some(-1.0)); // sentinel: clear budget
+    }
+    // Parse dollar amount: "$5", "5", "5.00", "$10.50"
+    let cleaned = args.trim_start_matches('$');
+    match cleaned.parse::<f64>() {
+        Ok(v) if v > 0.0 => CommandAction::SetBudget(Some(v)),
+        _ => CommandAction::Message(
+            "Usage: /budget <amount>\n\
+             \n  Set a session spend limit.\
+             \n  Examples: /budget $5   /budget 10.50\
+             \n  /budget off — remove budget limit\
+             \n  /budget — show current budget"
+                .into(),
+        ),
+    }
+}
+
+fn cmd_router(args: &str) -> CommandAction {
+    let args = args.trim();
+    match args {
+        "" | "status" => CommandAction::RouterStatus,
+        "on" | "enable" => CommandAction::RouterToggle,
+        "off" | "disable" => CommandAction::RouterToggle,
+        _ if args.starts_with("low ") => {
+            let model = args["low ".len()..].trim().to_string();
+            CommandAction::RouterSetTier { tier: "low".into(), model }
+        }
+        _ if args.starts_with("medium ") || args.starts_with("mid ") => {
+            let model = args.split_whitespace().skip(1).collect::<Vec<_>>().join(" ");
+            CommandAction::RouterSetTier { tier: "medium".into(), model }
+        }
+        _ if args.starts_with("high ") => {
+            let model = args["high ".len()..].trim().to_string();
+            CommandAction::RouterSetTier { tier: "high".into(), model }
+        }
+        _ if args.starts_with("super-high ") || args.starts_with("superhigh ") => {
+            let model = args.split_whitespace().skip(1).collect::<Vec<_>>().join(" ");
+            CommandAction::RouterSetTier { tier: "super-high".into(), model }
+        }
+        _ => CommandAction::Message(
+            "Usage: /router [on|off|status]\n\
+             \n  Smart model router — auto-routes tasks by complexity.\
+             \n  /router on      — enable auto-routing\
+             \n  /router off     — disable (use configured model for all)\
+             \n  /router status  — show current config\
+             \n  /router low <model>         — set low-complexity model\
+             \n  /router medium <model>      — set medium-complexity model\
+             \n  /router high <model>        — set high-complexity model\
+             \n  /router super-high <model>  — set 1M-context model\
+             \n\n  Example: /router low ollama:llama3"
+                .into(),
+        ),
+    }
 }
 
 fn cmd_doctor(ctx: &CommandContext) -> CommandAction {
@@ -811,28 +972,36 @@ fn cmd_doctor(ctx: &CommandContext) -> CommandAction {
         checks.push("✓ OPENAI_API_KEY set (cloud Whisper transcription)".into());
     } else {
         checks.push("  ✗ No speech-to-text — for /voice input:".into());
-        checks.push("      Offline: pip install openai-whisper".into());
+        match distro {
+            crate::distro::Distro::Arch => {
+                checks.push("      Offline: pipx install openai-whisper  (NOT bare pip)".into());
+            }
+            _ => {
+                checks.push("      Offline: pipx install openai-whisper".into());
+            }
+        }
         checks.push("      Cloud:   add OPENAI_API_KEY=sk-... to ~/.env".into());
     }
 
-    // piper TTS (engine + voice model)
-    if let Some(model_path) = crate::voice::find_default_voice() {
-        checks.push(format!("✓ piper voice model: {model_path}"));
+    // TTS engine — XTTS v2 is primary, piper is degraded fallback
+    if crate::voice::xtts_available() {
+        checks.push("✓ XTTS v2 — natural neural TTS (primary engine)".into());
+        if let Some(clone_path) = crate::voice::voice_clone_sample_path() {
+            if clone_path.exists() {
+                checks.push(format!("✓ Voice clone: {}", clone_path.display()));
+            } else {
+                checks.push(format!("  Using default speaker ({}) — run /voice clone for your voice",
+                    crate::voice::XTTS_DEFAULT_SPEAKER));
+            }
+        }
     } else {
-        checks.push("  ✗ No piper voice model (needed for /voice speak on)".into());
-        match distro {
-            crate::distro::Distro::Arch => {
-                // piper-voices-common installs voices.json only; .onnx files need manual download
-                checks.push("      sudo wget -P /usr/share/piper-voices/ \\".into());
-                checks.push("        https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx".into());
-                checks.push("      sudo wget -P /usr/share/piper-voices/ \\".into());
-                checks.push("        https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx.json".into());
-            }
-            _ => {
-                checks.push("      mkdir -p ~/.local/share/piper && cd ~/.local/share/piper".into());
-                checks.push("      wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx".into());
-                checks.push("      wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx.json".into());
-            }
+        checks.push("  ✗ XTTS v2 not found — STRONGLY recommended for natural TTS".into());
+        checks.push("      uv tool install TTS --python 3.11 \\".into());
+        checks.push("        --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'".into());
+        if crate::voice::piper_available() {
+            checks.push("  ⚠ piper installed (robotic fallback — upgrade to XTTS v2 for natural voice)".into());
+        } else {
+            checks.push("  ✗ No TTS engine at all — install XTTS v2 above".into());
         }
     }
 
@@ -1752,6 +1921,14 @@ pub const HELP_CATEGORIES: &[(&str, &str, &[HelpCommand])] = &[
         ("/skills",      "list available skills"),
         ("/insights",    "show codebase insights"),
     ]),
+    ("Spawn agents", "Background parallel agents in git worktrees", &[
+        ("/spawn <task>",        "spawn a background agent"),
+        ("/spawn list",          "list spawned agents"),
+        ("/spawn review <id>",   "review agent's changes"),
+        ("/spawn merge <id>",    "merge agent's changes"),
+        ("/spawn kill <id>",     "cancel a running agent"),
+        ("/spawn discard <id>",  "discard agent's worktree"),
+    ]),
     ("Plugins & tools", "MCP servers, plugins, viz", &[
         ("/mcp",            "show MCP server status"),
         ("/plugin",         "install/manage plugins"),
@@ -1760,7 +1937,8 @@ pub const HELP_CATEGORIES: &[(&str, &str, &[HelpCommand])] = &[
     ]),
     ("Other", "Voice, vim, themes, upgrades", &[
         ("/image",         "attach an image to next message"),
-        ("/voice",         "voice input (Ctrl+R)"),
+        ("/voice",         "voice input/output status"),
+        ("/voice clone",   "clone your voice for TTS (XTTS v2)"),
         ("/vim",           "toggle vim editing mode"),
         ("/theme",         "switch theme (dark, light, solarized)"),
         ("/btw",           "prepend a note to next message"),
@@ -2397,12 +2575,28 @@ fn cmd_statusline(args: &str) -> CommandAction {
 // ── Voice ──────────────────────────────────────────────────────────────────────
 
 fn cmd_voice(args: &str, ctx: &CommandContext) -> CommandAction {
-    match args.trim() {
-        "enable"    => CommandAction::SetVoiceEnabled(true),
-        "disable"   => CommandAction::SetVoiceEnabled(false),
-        "speak on"  => CommandAction::SetTtsEnabled(true),
-        "speak off" => CommandAction::SetTtsEnabled(false),
-        "model"     => CommandAction::ListVoiceModels,
+    let trimmed = args.trim();
+    match trimmed {
+        "enable"       => CommandAction::SetVoiceEnabled(true),
+        "disable"      => CommandAction::SetVoiceEnabled(false),
+        "speak on"     => CommandAction::SetTtsEnabled(true),
+        "speak off"    => CommandAction::SetTtsEnabled(false),
+        "model"        => CommandAction::ListVoiceModels,
+        "test"         => CommandAction::VoiceTest,
+        "clone remove" => CommandAction::VoiceCloneRemove,
+        _ if trimmed.starts_with("clone save") => {
+            let tier = trimmed.strip_prefix("clone save").unwrap_or("").trim();
+            CommandAction::VoiceCloneSave(tier.to_string())
+        }
+        _ if trimmed.starts_with("clone") => {
+            let tier_arg = trimmed.strip_prefix("clone").unwrap_or("").trim();
+            if tier_arg.is_empty() {
+                // Show tier picker
+                CommandAction::VoiceClone(String::new())
+            } else {
+                CommandAction::VoiceClone(tier_arg.to_string())
+            }
+        }
         _ => CommandAction::Message(crate::voice::voice_status(
             ctx.config.voice_enabled,
             ctx.config.tts_enabled,
@@ -2846,6 +3040,58 @@ fn plugin_manage_list() -> CommandAction {
 }
 
 // ── New commands from TS source ───────────────────────────────────────────────
+
+fn cmd_spawn(args: &str) -> CommandAction {
+    let args = args.trim();
+    if args.is_empty() {
+        return CommandAction::Message(
+            "Usage:\n\
+             /spawn <task>           — spawn a background agent to work on <task>\n\
+             /spawn list             — list all spawned agents\n\
+             /spawn review <id>      — review a completed agent's changes\n\
+             /spawn merge <id>       — merge an agent's changes into current branch\n\
+             /spawn kill <id>        — cancel a running agent\n\
+             /spawn discard <id>     — discard an agent's worktree\n\n\
+             Example: /spawn refactor the auth module to use JWT tokens"
+            .into(),
+        );
+    }
+
+    let (sub, rest) = split_first_word(args);
+    match sub {
+        "list" | "ls"       => CommandAction::ListSpawns,
+        "review" | "diff"   => {
+            if rest.is_empty() {
+                CommandAction::Message("Usage: /spawn review <agent-id>".into())
+            } else {
+                CommandAction::ReviewSpawn(rest.to_string())
+            }
+        }
+        "merge"             => {
+            if rest.is_empty() {
+                CommandAction::Message("Usage: /spawn merge <agent-id>".into())
+            } else {
+                CommandAction::MergeSpawn(rest.to_string())
+            }
+        }
+        "kill" | "cancel"   => {
+            if rest.is_empty() {
+                CommandAction::Message("Usage: /spawn kill <agent-id>".into())
+            } else {
+                CommandAction::KillSpawn(rest.to_string())
+            }
+        }
+        "discard" | "drop"  => {
+            if rest.is_empty() {
+                CommandAction::Message("Usage: /spawn discard <agent-id>".into())
+            } else {
+                CommandAction::DiscardSpawn(rest.to_string())
+            }
+        }
+        // Everything else is the task description
+        _ => CommandAction::SpawnAgent(args.to_string()),
+    }
+}
 
 fn cmd_ultraplan(args: &str) -> CommandAction {
     let depth = args.trim();

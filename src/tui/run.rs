@@ -96,10 +96,20 @@ fn viewport_height(app: &App, term_cols: u16, term_rows: u16) -> u16 {
 /// fresh one.  io::stdout() is a handle to fd 1 — multiple instances are fine.
 fn make_terminal(vp_h: u16) -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
     let backend = CrosstermBackend::new(io::stdout());
-    Ok(Terminal::with_options(
+    match Terminal::with_options(
         backend,
         TerminalOptions { viewport: Viewport::Inline(vp_h) },
-    )?)
+    ) {
+        Ok(t) => Ok(t),
+        Err(_) => {
+            // Fallback: fullscreen viewport (works in all terminals)
+            let backend = CrosstermBackend::new(io::stdout());
+            Ok(Terminal::with_options(
+                backend,
+                TerminalOptions { viewport: Viewport::Fullscreen },
+            )?)
+        }
+    }
 }
 
 // ── Plugin install async task ─────────────────────────────────────────────────
@@ -411,6 +421,7 @@ async fn run_loop(
     let mcp_clients = mcp_manager.clients.clone();
     let (mut tools, shared_state) = all_tools_with_state_and_mcp(&config, mcp_tools, mcp_clients);
     let todo_state: TodoState = shared_state.todo;
+    let spawn_registry = crate::spawn::new_registry();
 
     // Apply --allowed-tools / --disallowed-tools CLI filters
     if !config.allowed_tools.is_empty() {
@@ -430,6 +441,25 @@ async fn run_loop(
     if let Some(ref e) = config.effort { app.effort = Some(e.clone()); }
     // Apply theme from config (loaded from settings.json)
     if let Some(ref theme) = config.theme { app.theme = theme.clone(); }
+    // Apply router settings from config (loaded from settings.json)
+    if config.router_enabled {
+        app.router.enabled = true;
+    }
+    if let Some(budget) = config.router_budget {
+        app.cost_tracker.set_budget(budget);
+    }
+    if let Some(ref m) = config.router_low_model {
+        app.router.low_model = m.clone();
+    }
+    if let Some(ref m) = config.router_medium_model {
+        app.router.medium_model = m.clone();
+    }
+    if let Some(ref m) = config.router_high_model {
+        app.router.high_model = m.clone();
+    }
+    if let Some(ref m) = config.router_super_high_model {
+        app.router.super_high_model = m.clone();
+    }
     let mut messages: Vec<Message> = Vec::new();
     let mut last_tokens_in: u64 = 0;
     let mut consecutive_compact_count: u32 = 0;
@@ -524,6 +554,34 @@ async fn run_loop(
 
     let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
     let mut term_events = EventStream::new();
+
+    // ── Background RAG indexing (incremental, non-blocking) ────────────────
+    {
+        let cwd = config.cwd.clone();
+        let tx2 = tx.clone();
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let db = crate::rag::RagDb::open(&cwd)?;
+                crate::rag::indexer::index_project(&db, &cwd, false)
+            })
+            .await
+            .unwrap_or_else(|e| Err(anyhow::anyhow!("RAG index panicked: {e}")));
+            match result {
+                Ok(r) if r.files_indexed > 0 => {
+                    let _ = tx2.send(crate::tui::events::AppEvent::SystemMessage(
+                        format!(
+                            "Codebase indexed — {} files, {} chunks ({:.0}ms)",
+                            r.files_indexed, r.chunks_added, r.elapsed_ms
+                        ),
+                    ));
+                }
+                Ok(_) => {} // nothing new to index — stay silent
+                Err(e) => {
+                    tracing::warn!("Background RAG indexing failed: {e}");
+                }
+            }
+        });
+    }
 
     loop {
         // Recreate the terminal if the needed viewport height or width changed.
@@ -738,7 +796,7 @@ async fn run_loop(
                 let mut ev = event;
                 loop {
                     match ev {
-                        AppEvent::Done { tokens_in, tokens_out, cache_read, cache_write, messages: new_messages } => {
+                        AppEvent::Done { tokens_in, tokens_out, cache_read, cache_write, messages: new_messages, model_used } => {
                             last_tokens_in = tokens_in;
                             messages = new_messages.clone();
                             if !config.no_session_persistence && new_messages.len() > saved_count {
@@ -748,6 +806,21 @@ async fn run_loop(
                             }
                             // Per-turn cost tracking
                             app.turn_costs.push((tokens_in, tokens_out));
+                            // Record in cost tracker (per-model breakdown)
+                            app.cost_tracker.record(&model_used, tokens_in, tokens_out);
+                            // Budget check
+                            if app.cost_tracker.budget_warning() {
+                                if let Some(remaining) = app.cost_tracker.remaining() {
+                                    app.entries.push(ChatEntry::system(
+                                        format!("Budget warning: ${:.4} remaining", remaining)
+                                    ));
+                                }
+                            }
+                            if app.cost_tracker.over_budget() {
+                                app.entries.push(ChatEntry::system(
+                                    "Budget exceeded! Use /budget to adjust or remove the limit.".to_string()
+                                ));
+                            }
 
                             // Notifications + terminal bell on task completion
                             if config.notifications_enabled {
@@ -798,7 +871,7 @@ async fn run_loop(
                                     });
                                 }
                             }
-                            app.apply(AppEvent::Done { tokens_in, tokens_out, cache_read, cache_write, messages: new_messages });
+                            app.apply(AppEvent::Done { tokens_in, tokens_out, cache_read, cache_write, messages: new_messages, model_used });
                         }
                         AppEvent::Compacted { ref replacement, summary_len } => {
                             consecutive_compact_count = 0; // successful compact resets thrash counter
@@ -832,6 +905,7 @@ async fn run_loop(
                             &perm_state, &skills, &mut system_prompt, &tx,
                             &todo_state, &mut session, &mut saved_count,
                             &mcp_statuses, &mut turn_counter,
+                            &spawn_registry,
                         ).await?;
                     }
                     Event::Mouse(mouse) => {
@@ -990,6 +1064,7 @@ async fn handle_key(
     saved_count: &mut usize,
     mcp_statuses: &[crate::mcp::types::McpServerStatus],
     turn_counter: &mut usize,
+    spawn_registry: &crate::spawn::SpawnRegistry,
 ) -> Result<()> {
     use KeyCode::*;
 
@@ -1181,33 +1256,47 @@ async fn handle_key(
         // Ctrl+R — toggle voice recording (only when voice mode is enabled)
         (Char('r'), KeyModifiers::CONTROL) if config.voice_enabled => {
             if app.voice_recording {
-                // Stop recording gracefully via oneshot signal, then transcribe
+                // Stop recording gracefully via oneshot signal
                 if let Some(stop_tx) = app.voice_stop_tx.take() {
                     let _ = stop_tx.send(());
                 }
-                // voice_task is left to finish naturally after stop signal
                 app.voice_task = None;
                 app.voice_recording = false;
-                app.entries.push(ChatEntry::system("Transcribing…".to_string()));
-                app.scroll_to_bottom();
-                let tx2 = tx.clone();
-                let api_url = config.voice_api_url.clone();
-                let api_key = crate::voice::voice_api_key();
-                tokio::spawn(async move {
-                    // Brief pause so the recorder process can finalize the WAV file
-                    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-                    match crate::voice::transcribe(api_url.as_deref(), api_key.as_deref()).await {
-                        Ok(text) if text.is_empty() => {
-                            let _ = tx2.send(AppEvent::SystemMessage("Transcription was empty.".into()));
+
+                if let Some(tier) = app.pending_clone_tier.take() {
+                    // Voice clone mode — save the recording as voice clone sample
+                    app.entries.push(ChatEntry::system("Saving voice clone…".to_string()));
+                    app.scroll_to_bottom();
+                    let tx2 = tx.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                        match crate::voice::save_voice_clone(tier).await {
+                            Ok(msg) => { let _ = tx2.send(AppEvent::SystemMessage(msg)); }
+                            Err(e) => { let _ = tx2.send(AppEvent::SystemMessage(format!("Voice clone failed: {e:#}"))); }
                         }
-                        Ok(text) => {
-                            let _ = tx2.send(AppEvent::VoiceTranscription(text));
+                    });
+                } else {
+                    // Normal mode — transcribe the recording
+                    app.entries.push(ChatEntry::system("Transcribing…".to_string()));
+                    app.scroll_to_bottom();
+                    let tx2 = tx.clone();
+                    let api_url = config.voice_api_url.clone();
+                    let api_key = crate::voice::voice_api_key();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                        match crate::voice::transcribe(api_url.as_deref(), api_key.as_deref()).await {
+                            Ok(text) if text.is_empty() => {
+                                let _ = tx2.send(AppEvent::SystemMessage("Transcription was empty.".into()));
+                            }
+                            Ok(text) => {
+                                let _ = tx2.send(AppEvent::VoiceTranscription(text));
+                            }
+                            Err(e) => {
+                                let _ = tx2.send(AppEvent::Error(format!("Transcription failed: {e}")));
+                            }
                         }
-                        Err(e) => {
-                            let _ = tx2.send(AppEvent::Error(format!("Transcription failed: {e}")));
-                        }
-                    }
-                });
+                    });
+                }
             } else {
                 // Start recording
                 match crate::voice::find_recorder() {
@@ -1327,6 +1416,7 @@ async fn handle_key(
 
                 match dispatch(&input, &ctx) {
                     CommandAction::Quit => {
+                        crate::voice::stop_xtts_server();
                         app.should_quit = true;
                     }
                     CommandAction::Clear => {
@@ -1771,53 +1861,53 @@ async fn handle_key(
                     }
                     CommandAction::SetTtsEnabled(enabled) => {
                         if enabled {
-                            // Pre-validate before enabling — show clear install steps if anything is missing.
+                            let has_xtts = crate::voice::xtts_available();
                             let has_piper = crate::voice::piper_available();
-                            let has_model = config.tts_voice_model.is_some()
-                                || crate::voice::find_default_voice().is_some();
                             let has_player = crate::voice::audio_player_available();
 
-                            if !has_piper || !has_model || !has_player {
-                                let mut msg = "Cannot enable TTS — missing requirements:\n".to_string();
-                                if !has_piper {
-                                    msg.push_str(
-                                        "\n  piper not found\n\
-                                         \n  Install:\n\
-                                         \n    pip install piper-tts\n\
-                                         \n  — or download the binary:\n\
-                                         \n    https://github.com/rhasspy/piper/releases"
-                                    );
-                                }
-                                if !has_model {
-                                    msg.push_str(
-                                        "\n\n  No voice model found\n\
-                                         \n  Install en_US-lessac-high (natural female voice):\n\
-                                         \n    mkdir -p ~/.local/share/piper && cd ~/.local/share/piper\n\
-                                         \n    wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx\n\
-                                         \n    wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx.json"
-                                    );
-                                }
-                                if !has_player {
-                                    msg.push_str(
-                                        "\n\n  No audio player found (needed to play synthesised audio)\n\
-                                         \n  Install one of:\n\
-                                         \n    sudo apt install alsa-utils    # provides aplay\n\
-                                         \n    sudo apt install mpv\n\
-                                         \n    sudo apt install ffmpeg        # provides ffplay"
-                                    );
-                                }
-                                app.entries.push(ChatEntry::system(msg));
-                                app.follow_bottom = true;
-                                // Still enable — let them fix it and it will work next response
+                            if !has_xtts && !has_piper {
+                                app.entries.push(ChatEntry::system(
+                                    "Cannot enable TTS — no engine found.\n\n\
+                                     Install XTTS v2 (natural voice, recommended):\n\
+                                       uv tool install TTS --python 3.11 \\\n\
+                                         --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'".to_string()
+                                ));
+                            } else if !has_player {
+                                app.entries.push(ChatEntry::system(
+                                    "Cannot enable TTS — no audio player.\n\
+                                     Install: sudo pacman -S mpv   # or alsa-utils".to_string()
+                                ));
+                            } else if has_xtts {
+                                // Auto-start XTTS v2 server for fast synthesis
+                                let tx2 = tx.clone();
+                                tokio::spawn(async move {
+                                    match crate::voice::ensure_xtts_server().await {
+                                        Ok(_port) => {
+                                            let gpu = if crate::voice::cuda_available() { " (GPU)" } else { " (CPU)" };
+                                            let _ = tx2.send(AppEvent::SystemMessage(
+                                                format!("XTTS v2 server ready{gpu} — responses will be spoken.")
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            let _ = tx2.send(AppEvent::SystemMessage(
+                                                format!("XTTS v2 server failed: {e}\nFalling back to CLI mode (slower).")
+                                            ));
+                                        }
+                                    }
+                                });
+                                app.entries.push(ChatEntry::system(
+                                    "TTS on — starting XTTS v2 server (loading model, ~10s)...".to_string()
+                                ));
                             } else {
                                 app.entries.push(ChatEntry::system(
-                                    "TTS on — Claude will speak responses using piper.".to_string()
+                                    "TTS on — using piper (robotic fallback). Install XTTS v2 for natural voice.".to_string()
                                 ));
-                                app.follow_bottom = true;
                             }
+                            app.follow_bottom = true;
                         } else {
+                            crate::voice::stop_xtts_server();
                             app.entries.push(ChatEntry::system(
-                                "TTS off.".to_string()
+                                "TTS off. XTTS v2 server stopped.".to_string()
                             ));
                             app.follow_bottom = true;
                         }
@@ -2292,6 +2382,313 @@ async fn handle_key(
                             app.scroll_to_bottom();
                         }
                     }
+                    CommandAction::IndexProject { force } => {
+                        let cwd = config.cwd.clone();
+                        let label = if force { "Full re-index" } else { "Incremental index" };
+                        app.entries.push(ChatEntry::system(format!("{label} — indexing codebase …")));
+                        app.start_loading();
+                        app.scroll_to_bottom();
+                        let tx2 = tx.clone();
+                        tokio::spawn(async move {
+                            let result = tokio::task::spawn_blocking(move || {
+                                let db = crate::rag::RagDb::open(&cwd)?;
+                                crate::rag::indexer::index_project(&db, &cwd, force)
+                            })
+                            .await
+                            .unwrap_or_else(|e| Err(anyhow::anyhow!("Index task panicked: {e}")));
+                            match result {
+                                Ok(r) => {
+                                    let msg = format!(
+                                        "Index complete — {} files scanned, {} indexed, {} skipped, {} chunks. {:.0}ms",
+                                        r.files_scanned, r.files_indexed, r.files_skipped, r.chunks_added, r.elapsed_ms
+                                    );
+                                    let _ = tx2.send(crate::tui::events::AppEvent::SystemMessage(msg));
+                                }
+                                Err(e) => {
+                                    let _ = tx2.send(crate::tui::events::AppEvent::SystemMessage(
+                                        format!("Index error: {e}")
+                                    ));
+                                }
+                            }
+                        });
+                    }
+                    CommandAction::RagSearch(query) => {
+                        let cwd = config.cwd.clone();
+                        match crate::rag::RagDb::open(&cwd) {
+                            Ok(db) => {
+                                match crate::rag::search::search(&db, &query, 10) {
+                                    Ok(results) if results.is_empty() => {
+                                        app.entries.push(ChatEntry::system(
+                                            format!("No results for '{query}'. Run /index first to build the index.")
+                                        ));
+                                    }
+                                    Ok(results) => {
+                                        let mut lines = vec![format!("RAG search: '{}' — {} results\n", query, results.len())];
+                                        for r in &results {
+                                            lines.push(format!(
+                                                "  {} {}:{}-{} ({} `{}`)",
+                                                r.file_path, r.start_line, r.end_line,
+                                                r.symbol_kind, r.symbol_name, r.language,
+                                            ));
+                                        }
+                                        // Show full context of first 3 results
+                                        let ctx = crate::rag::search::build_context(
+                                            &results[..results.len().min(3)], 8000
+                                        );
+                                        if !ctx.is_empty() {
+                                            lines.push(String::new());
+                                            lines.push(ctx);
+                                        }
+                                        app.entries.push(ChatEntry::system(lines.join("\n")));
+                                    }
+                                    Err(e) => {
+                                        app.entries.push(ChatEntry::system(format!("RAG search error: {e}")));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                app.entries.push(ChatEntry::system(format!("RAG database error: {e}")));
+                            }
+                        }
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::SetBudget(amount) => {
+                        match amount {
+                            None => {
+                                // Show current budget
+                                let text = app.cost_tracker.summary();
+                                app.entries.push(ChatEntry::system(text));
+                            }
+                            Some(v) if v < 0.0 => {
+                                // Clear budget
+                                app.cost_tracker.clear_budget();
+                                app.entries.push(ChatEntry::system("Budget limit removed.".to_string()));
+                            }
+                            Some(v) => {
+                                app.cost_tracker.set_budget(v);
+                                app.entries.push(ChatEntry::system(
+                                    format!("Budget set to ${:.2}. Use /budget to check status.", v)
+                                ));
+                            }
+                        }
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::RouterToggle => {
+                        app.router.enabled = !app.router.enabled;
+                        let state = if app.router.enabled { "ON" } else { "OFF" };
+                        app.entries.push(ChatEntry::system(
+                            format!("Smart model router: {state}\n\
+                                     Low → {}\n\
+                                     Medium → {}\n\
+                                     High → {}\n\
+                                     Super-High → {}",
+                                app.router.low_model,
+                                app.router.medium_model,
+                                app.router.high_model,
+                                app.router.super_high_model,
+                            )
+                        ));
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::RouterStatus => {
+                        let state = if app.router.enabled { "ON" } else { "OFF" };
+                        let savings = app.cost_tracker.routing_savings(&app.router.high_model);
+                        let mut text = format!(
+                            "Smart Model Router: {state}\n\n\
+                             Tier assignments:\n  \
+                             Low complexity       → {}\n  \
+                             Medium complexity    → {}\n  \
+                             High complexity      → {}\n  \
+                             Super-High (1M ctx)  → {}\n",
+                            app.router.low_model,
+                            app.router.medium_model,
+                            app.router.high_model,
+                            app.router.super_high_model,
+                        );
+                        if savings > 0.001 {
+                            text.push_str(&format!(
+                                "\nEstimated savings from routing: ${:.4}", savings
+                            ));
+                        }
+                        text.push_str(&format!("\n\n{}", app.cost_tracker.summary()));
+                        app.entries.push(ChatEntry::system(text));
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::RouterSetTier { tier, model } => {
+                        match tier.as_str() {
+                            "low" => app.router.low_model = model.clone(),
+                            "medium" => app.router.medium_model = model.clone(),
+                            "high" => app.router.high_model = model.clone(),
+                            "super-high" => app.router.super_high_model = model.clone(),
+                            _ => {}
+                        }
+                        app.entries.push(ChatEntry::system(
+                            format!("Router {tier} tier set to: {model}")
+                        ));
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::ShowCostDashboard => {
+                        let text = app.cost_tracker.summary();
+                        app.entries.push(ChatEntry::system(text));
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::SpawnAgent(task) => {
+                        let tx2 = tx.clone();
+                        let cfg = config.clone();
+                        let reg = spawn_registry.clone();
+                        let task2 = task.clone();
+                        tokio::spawn(async move {
+                            match crate::spawn::spawn_agent(task2.clone(), &cfg, &reg, tx2.clone()).await {
+                                Ok(id) => {
+                                    let _ = tx2.send(AppEvent::SystemMessage(
+                                        format!("Spawned agent [{id}]: {task2}\nWorking in background. Use /spawn list to check status."),
+                                    ));
+                                }
+                                Err(e) => {
+                                    let _ = tx2.send(AppEvent::SystemMessage(
+                                        format!("Failed to spawn agent: {e:#}"),
+                                    ));
+                                }
+                            }
+                        });
+                        app.entries.push(ChatEntry::system(format!("Spawning background agent: {task}")));
+                    }
+                    CommandAction::ListSpawns => {
+                        let text = crate::spawn::list_agents(&spawn_registry);
+                        app.entries.push(ChatEntry::system(text));
+                    }
+                    CommandAction::ReviewSpawn(id) => {
+                        match crate::spawn::review_agent(&spawn_registry, &id) {
+                            Ok(text) => app.entries.push(ChatEntry::system(text)),
+                            Err(e) => app.entries.push(ChatEntry::error(format!("{e:#}"))),
+                        }
+                    }
+                    CommandAction::MergeSpawn(id) => {
+                        let reg = spawn_registry.clone();
+                        let cwd = config.cwd.clone();
+                        let tx2 = tx.clone();
+                        let id2 = id.clone();
+                        tokio::spawn(async move {
+                            match crate::spawn::merge_agent(&reg, &id2, &cwd).await {
+                                Ok(msg) => { let _ = tx2.send(AppEvent::SystemMessage(msg)); }
+                                Err(e) => { let _ = tx2.send(AppEvent::SystemMessage(format!("Merge failed: {e:#}"))); }
+                            }
+                        });
+                        app.entries.push(ChatEntry::system(format!("Merging agent [{id}]...")));
+                    }
+                    CommandAction::KillSpawn(id) => {
+                        match crate::spawn::kill_agent(&spawn_registry, &id) {
+                            Ok(msg) => app.entries.push(ChatEntry::system(msg)),
+                            Err(e) => app.entries.push(ChatEntry::error(format!("{e:#}"))),
+                        }
+                    }
+                    CommandAction::VoiceClone(tier_arg) => {
+                        if tier_arg.is_empty() {
+                            // Show tier picker
+                            let text = format!(
+                                "Voice Clone — choose a quality tier:\n\n\
+                                 1. quick        — {}\n\
+                                 2. recommended  — {}\n\
+                                 3. premium      — {}\n\n\
+                                 Usage: /voice clone <tier>\n\
+                                 Example: /voice clone recommended",
+                                crate::voice::CloneTier::Quick.description(),
+                                crate::voice::CloneTier::Recommended.description(),
+                                crate::voice::CloneTier::Premium.description(),
+                            );
+                            app.entries.push(ChatEntry::system(text));
+                        } else if let Some(tier) = crate::voice::CloneTier::from_str(&tier_arg) {
+                            // Show recording instructions for the chosen tier
+                            let instructions = crate::voice::recording_instructions(tier);
+                            app.entries.push(ChatEntry::system(instructions));
+                            app.pending_clone_tier = Some(tier);
+                            // Enable voice mode so Ctrl+R works
+                            config.voice_enabled = true;
+                        } else {
+                            app.entries.push(ChatEntry::error(format!(
+                                "Unknown tier '{tier_arg}'. Use: quick, recommended, or premium"
+                            )));
+                        }
+                    }
+                    CommandAction::VoiceCloneSave(tier_arg) => {
+                        let tier = crate::voice::CloneTier::from_str(&tier_arg)
+                            .or(app.pending_clone_tier)
+                            .unwrap_or(crate::voice::CloneTier::Recommended);
+                        let tx2 = tx.clone();
+                        tokio::spawn(async move {
+                            match crate::voice::save_voice_clone(tier).await {
+                                Ok(msg)  => { let _ = tx2.send(AppEvent::SystemMessage(msg)); }
+                                Err(e) => { let _ = tx2.send(AppEvent::SystemMessage(format!("Voice clone save failed: {e:#}"))); }
+                            }
+                        });
+                        app.entries.push(ChatEntry::system("Saving voice clone..."));
+                        app.pending_clone_tier = None;
+                    }
+                    CommandAction::VoiceTest => {
+                        // Cancel any existing TTS
+                        if let Some(prev) = app.tts_stop_tx.take() {
+                            let _ = prev.send(());
+                        }
+                        let (stop_tx, stop_rx) = oneshot::channel::<()>();
+                        app.tts_stop_tx = Some(stop_tx);
+                        let voice_model = config.tts_voice_model.clone();
+                        let tx2 = tx.clone();
+                        let has_clone = crate::voice::voice_clone_sample_path()
+                            .map_or(false, |p| p.exists());
+                        let xtts_ok = crate::voice::xtts_available();
+                        let server_up = crate::voice::xtts_server_running();
+                        let label = if has_clone && xtts_ok {
+                            "your cloned voice (XTTS v2)".to_string()
+                        } else if xtts_ok {
+                            format!("XTTS v2 default ({})", crate::voice::XTTS_DEFAULT_SPEAKER)
+                        } else if crate::voice::piper_available() {
+                            "piper fallback (robotic)".to_string()
+                        } else {
+                            "no TTS engine found".to_string()
+                        };
+                        let time_hint = if server_up { "~1 second" } else if xtts_ok { "starting server ~10s, then ~1s" } else { "a few seconds" };
+                        app.entries.push(ChatEntry::system(
+                            format!("Synthesizing with {label}… ({time_hint}, Esc to cancel)")
+                        ));
+                        tokio::spawn(async move {
+                            // Auto-start server if XTTS v2 is available but server not running
+                            if crate::voice::xtts_available() && !crate::voice::xtts_server_running() {
+                                let _ = crate::voice::ensure_xtts_server().await;
+                            }
+                            let test_text = "Hi there. This is RustyClaw. \
+                                Ship it. The benchmarks look incredible.";
+                            match crate::voice::speak(test_text, voice_model.as_deref(), stop_rx).await {
+                                Ok(_) => {
+                                    let _ = tx2.send(AppEvent::SystemMessage("Voice test complete.".into()));
+                                }
+                                Err(e) => {
+                                    let _ = tx2.send(AppEvent::SystemMessage(format!("Voice test failed: {e}")));
+                                }
+                            }
+                        });
+                    }
+                    CommandAction::VoiceCloneRemove => {
+                        let tx2 = tx.clone();
+                        tokio::spawn(async move {
+                            match crate::voice::remove_voice_clone().await {
+                                Ok(msg)  => { let _ = tx2.send(AppEvent::SystemMessage(msg)); }
+                                Err(e) => { let _ = tx2.send(AppEvent::SystemMessage(format!("Failed: {e:#}"))); }
+                            }
+                        });
+                    }
+                    CommandAction::DiscardSpawn(id) => {
+                        let reg = spawn_registry.clone();
+                        let cwd = config.cwd.clone();
+                        let tx2 = tx.clone();
+                        let id2 = id.clone();
+                        tokio::spawn(async move {
+                            match crate::spawn::discard_agent(&reg, &id2, &cwd).await {
+                                Ok(msg) => { let _ = tx2.send(AppEvent::SystemMessage(msg)); }
+                                Err(e) => { let _ = tx2.send(AppEvent::SystemMessage(format!("Discard failed: {e:#}"))); }
+                            }
+                        });
+                        app.entries.push(ChatEntry::system(format!("Discarding agent [{id}]...")));
+                    }
                     CommandAction::Unknown(name) => {
                         // Try skill expansion before giving up
                         if let Some((skill_name, args)) = parse_skill_invocation(&input) {
@@ -2375,7 +2772,7 @@ async fn handle_key(
             } else {
                 final_text
             };
-            user_content.push(ContentBlock::Text { text: final_text });
+            user_content.push(ContentBlock::Text { text: final_text.clone() });
 
             messages.push(Message {
                 role: Role::User,
@@ -2394,7 +2791,22 @@ async fn handle_key(
             let c2 = client.clone();
             let tvec = tools.to_vec();
             let msgs = messages.clone();
-            let cfg = config.clone();
+            let mut cfg = config.clone();
+
+            // Smart model router: detect complexity and override model if enabled
+            if app.router.enabled && !crate::api::is_ollama_model(&config.model)
+                && !crate::api::is_openai_compat_model(&config.model)
+            {
+                let complexity = crate::router::detect_complexity(&final_text);
+                let routed_model = app.router.model_for(complexity).to_string();
+                if routed_model != config.model {
+                    app.entries.push(ChatEntry::system(
+                        format!("Router: {complexity} complexity → {}", crate::tui::app::pretty_model_name(&routed_model))
+                    ));
+                    cfg.model = routed_model;
+                }
+            }
+
             let tx2 = tx.clone();
             // Inject brief mode instruction into system prompt if enabled
             let sp = if app.brief_mode {
@@ -2933,6 +3345,7 @@ async fn run_api_task(
                     cache_read: response.usage.cache_read_input_tokens,
                     cache_write: response.usage.cache_creation_input_tokens,
                     messages: messages.clone(),
+                    model_used: config.model.clone(),
                 });
                 return;
             }
@@ -3103,6 +3516,7 @@ async fn run_api_task(
                         cache_read: response.usage.cache_read_input_tokens,
                         cache_write: response.usage.cache_creation_input_tokens,
                         messages: messages.clone(),
+                        model_used: config.model.clone(),
                     });
                     return;
                 }

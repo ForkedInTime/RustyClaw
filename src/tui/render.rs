@@ -723,6 +723,30 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
         ));
     }
 
+    // Router indicator
+    if app.router.enabled {
+        left_spans.push(Span::styled(
+            "  │  ROUTER",
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    // Cost display
+    let cost_text = app.cost_tracker.banner_text();
+    if !cost_text.is_empty() {
+        let cost_color = if app.cost_tracker.over_budget() {
+            Color::Red
+        } else if app.cost_tracker.budget_warning() {
+            Color::Yellow
+        } else {
+            Color::DarkGray
+        };
+        left_spans.push(Span::styled(
+            format!("  │  {cost_text}"),
+            Style::default().fg(cost_color),
+        ));
+    }
+
     // Right side: "● model-name" — clean, no token counts (matches rustyclaw)
     let right_text = format!("● {} ", app.model_short);
     let right_width = right_text.len() as u16;
