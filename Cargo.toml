@@ -96,3 +96,6 @@ lto = "fat"
 codegen-units = 1
 strip = true
 panic = "abort"
+
+[dev-dependencies]
+tempfile = "3.27.0"

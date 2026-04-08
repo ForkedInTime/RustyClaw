@@ -148,3 +148,81 @@ impl RagDb {
             .unwrap_or(0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn test_db() -> (TempDir, RagDb) {
+        let tmp = TempDir::new().unwrap();
+        let db = RagDb::open(tmp.path()).unwrap();
+        (tmp, db)
+    }
+
+    #[test]
+    fn test_open_creates_tables() {
+        let (_tmp, db) = test_db();
+        assert_eq!(db.chunk_count().unwrap(), 0);
+        assert_eq!(db.file_count().unwrap(), 0);
+        assert!(db.db_size() > 0);
+    }
+
+    #[test]
+    fn test_insert_and_count() {
+        let (_tmp, db) = test_db();
+        db.conn.execute(
+            "INSERT INTO code_chunks (file_path, symbol_name, symbol_kind, language, start_line, end_line, content, mtime)
+             VALUES ('src/main.rs', 'main', 'function', 'rust', 1, 10, 'fn main() {}', 1000)",
+            [],
+        ).unwrap();
+        assert_eq!(db.chunk_count().unwrap(), 1);
+        assert_eq!(db.file_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_file_mtime() {
+        let (_tmp, db) = test_db();
+        assert_eq!(db.file_mtime("src/main.rs").unwrap(), 0);
+        db.conn.execute(
+            "INSERT INTO code_chunks (file_path, symbol_name, symbol_kind, language, start_line, end_line, content, mtime)
+             VALUES ('src/main.rs', 'main', 'function', 'rust', 1, 10, 'fn main() {}', 42)",
+            [],
+        ).unwrap();
+        assert_eq!(db.file_mtime("src/main.rs").unwrap(), 42);
+    }
+
+    #[test]
+    fn test_delete_file_chunks() {
+        let (_tmp, db) = test_db();
+        db.conn.execute(
+            "INSERT INTO code_chunks (file_path, symbol_name, symbol_kind, language, start_line, end_line, content, mtime)
+             VALUES ('a.rs', 'foo', 'function', 'rust', 1, 5, 'fn foo() {}', 1)",
+            [],
+        ).unwrap();
+        db.conn.execute(
+            "INSERT INTO code_chunks (file_path, symbol_name, symbol_kind, language, start_line, end_line, content, mtime)
+             VALUES ('b.rs', 'bar', 'function', 'rust', 1, 5, 'fn bar() {}', 1)",
+            [],
+        ).unwrap();
+        assert_eq!(db.chunk_count().unwrap(), 2);
+        db.delete_file_chunks("a.rs").unwrap();
+        assert_eq!(db.chunk_count().unwrap(), 1);
+        assert_eq!(db.file_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_clear() {
+        let (_tmp, db) = test_db();
+        for i in 0..5 {
+            db.conn.execute(
+                "INSERT INTO code_chunks (file_path, symbol_name, symbol_kind, language, start_line, end_line, content, mtime)
+                 VALUES (?1, 'sym', 'function', 'rust', 1, 5, 'code', 1)",
+                [format!("file{i}.rs")],
+            ).unwrap();
+        }
+        assert_eq!(db.chunk_count().unwrap(), 5);
+        db.clear().unwrap();
+        assert_eq!(db.chunk_count().unwrap(), 0);
+    }
+}
