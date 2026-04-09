@@ -97,7 +97,7 @@ pub enum CommandAction {
     SetTheme(String),
     /// Enable or disable voice input mode
     SetVoiceEnabled(bool),
-    /// Enable or disable TTS (piper voice output)
+    /// Enable or disable TTS (XTTS v2 voice output)
     SetTtsEnabled(bool),
     /// Run a system package-manager install command interactively (drops raw mode)
     RunInstall(String),
@@ -129,6 +129,8 @@ pub enum CommandAction {
     PluginRemove(String),
     /// List installed plugins
     PluginList,
+    /// Reload settings.json (model, theme, effort, spinner, etc.) without restart
+    ReloadSettings,
     /// Reload all plugin MCP servers (re-reads settings.json)
     ReloadPlugins,
     /// Execute a plugin slash command (<plugin>:<command>)
@@ -137,7 +139,7 @@ pub enum CommandAction {
     ListModels,
     /// Show interactive voice model picker
     ListVoiceModels,
-    /// Set the piper voice model and play a preview
+    /// Set the voice model and play a preview
     PreviewVoiceModel(String),
     /// Show interactive help category picker
     ListHelp,
@@ -163,6 +165,10 @@ pub enum CommandAction {
     RouterStatus,
     /// Set a specific router tier model
     RouterSetTier { tier: String, model: String },
+    /// Create a git checkpoint commit (auto-stash of working changes)
+    GitCheckpoint(Option<String>),
+    /// Set autonomy level: "suggest", "auto-edit", "full-auto"
+    SetAutonomy(String),
     /// Show cost dashboard
     ShowCostDashboard,
     /// Spawn a background agent in a git worktree
@@ -183,7 +189,7 @@ pub enum CommandAction {
     VoiceCloneSave(String),
     /// Remove the voice clone sample
     VoiceCloneRemove,
-    /// Play a test phrase with current TTS (clone or piper)
+    /// Play a test phrase with current TTS (XTTS v2)
     VoiceTest,
     /// Command not recognised — show error
     Unknown(String),
@@ -250,12 +256,15 @@ pub fn dispatch(input: &str, ctx: &CommandContext) -> CommandAction {
         "review"         => cmd_review(args),
         "tasks"          => cmd_tasks(ctx),
         "copy"           => cmd_copy(ctx),
-        "rewind"         => CommandAction::Rewind(args.parse::<usize>().unwrap_or(1)),
+        "rewind" | "undo" => CommandAction::Rewind(args.parse::<usize>().unwrap_or(1)),
         "branch"         => cmd_branch(ctx),
         "summary"        => CommandAction::SendPrompt(
             "Please give a brief summary of our conversation so far — what we've discussed, \
              decisions made, and current state of any work in progress. Keep it concise.".into()
         ),
+        "checkpoint"     => CommandAction::GitCheckpoint(if args.is_empty() { None } else { Some(args.to_string()) }),
+        "lint"           => cmd_lint(ctx),
+        "autonomy"       => cmd_autonomy(args),
         "add-dir"        => cmd_add_dir(args, ctx),
         "pr_comments"    => cmd_pr_comments(args, ctx),
         "usage"          => cmd_usage(ctx),
@@ -328,6 +337,8 @@ pub fn dispatch(input: &str, ctx: &CommandContext) -> CommandAction {
         "release-notes"   => cmd_release_notes(args),
         "edit-claude-md"  => CommandAction::EditClaudeMd,
         "plugin"          => cmd_plugin(args),
+        "reload"          => CommandAction::ReloadSettings,
+        "reload-settings" => CommandAction::ReloadSettings,
         "reload-plugins"  => CommandAction::ReloadPlugins,
         "spawn"           => cmd_spawn(args),
         "ultraplan"       => cmd_ultraplan(args),
@@ -916,6 +927,14 @@ fn cmd_doctor(ctx: &CommandContext) -> CommandAction {
     }
     checks.push(String::new());
 
+    // XDG / config directory
+    let config_dir = crate::config::Config::claude_dir();
+    let data_dir = crate::config::Config::data_dir();
+    checks.push(format!("✓ Config dir: {}", config_dir.display()));
+    if data_dir != config_dir {
+        checks.push(format!("✓ Data dir: {}", data_dir.display()));
+    }
+
     // API key
     if ctx.config.api_key.len() >= 4 {
         checks.push(format!("✓ ANTHROPIC_API_KEY set ({}...)", &ctx.config.api_key[..4]));
@@ -939,6 +958,9 @@ fn cmd_doctor(ctx: &CommandContext) -> CommandAction {
         checks.push("✓ CLAUDE.md present".into());
     } else {
         checks.push("  No CLAUDE.md — run /init to create one".into());
+    }
+    if ctx.config.cwd.join("AGENTS.md").exists() {
+        checks.push("✓ AGENTS.md present".into());
     }
     checks.push(format!("✓ Model: {}", ctx.config.model));
 
@@ -991,26 +1013,21 @@ fn cmd_doctor(ctx: &CommandContext) -> CommandAction {
         checks.push("      Cloud:   add OPENAI_API_KEY=sk-... to ~/.env".into());
     }
 
-    // TTS engine — XTTS v2 is primary, piper is degraded fallback
+    // TTS engine — XTTS v2
     if crate::voice::xtts_available() {
         checks.push("✓ XTTS v2 — natural neural TTS (primary engine)".into());
         if let Some(clone_path) = crate::voice::voice_clone_sample_path() {
             if clone_path.exists() {
                 checks.push(format!("✓ Voice clone: {}", clone_path.display()));
             } else {
-                checks.push(format!("  Using default speaker ({}) — run /voice clone for your voice",
+                checks.push(format!("  Using default speaker ({}) — /voice clone to set a custom voice",
                     crate::voice::XTTS_DEFAULT_SPEAKER));
             }
         }
     } else {
-        checks.push("  ✗ XTTS v2 not found — STRONGLY recommended for natural TTS".into());
+        checks.push("  ✗ XTTS v2 not found — required for TTS".into());
         checks.push("      uv tool install TTS --python 3.11 \\".into());
         checks.push("        --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'".into());
-        if crate::voice::piper_available() {
-            checks.push("  ⚠ piper installed (robotic fallback — upgrade to XTTS v2 for natural voice)".into());
-        } else {
-            checks.push("  ✗ No TTS engine at all — install XTTS v2 above".into());
-        }
     }
 
     // System tool check
@@ -1247,6 +1264,65 @@ fn cmd_review(args: &str) -> CommandAction {
         } else {
             format!("Run `gh pr view {pr_ref}` to get PR details. PR: {pr_ref}")
         }
+    ))
+}
+
+fn cmd_autonomy(args: &str) -> CommandAction {
+    let level = args.trim().to_lowercase();
+    match level.as_str() {
+        "suggest" | "auto-edit" | "full-auto" => {
+            CommandAction::SetAutonomy(level)
+        }
+        "" => CommandAction::Message(
+            "Autonomy levels:\n  suggest   — show diff + ask before every Write/Edit\n  \
+             auto-edit — auto-apply edits, ask for new files (default)\n  \
+             full-auto — apply all changes without asking\n\n\
+             Usage: /autonomy <level>".into()
+        ),
+        _ => CommandAction::Message(format!(
+            "Unknown autonomy level: '{level}'. Use: suggest, auto-edit, or full-auto"
+        )),
+    }
+}
+
+fn cmd_lint(ctx: &CommandContext) -> CommandAction {
+    // Detect project type from the working directory
+    let cwd = &ctx.config.cwd;
+    let mut checks = Vec::new();
+
+    if cwd.join("Cargo.toml").exists() {
+        checks.push("cargo clippy --all-targets -- -D warnings");
+        checks.push("cargo test");
+    }
+    if cwd.join("package.json").exists() {
+        checks.push("npm run lint 2>/dev/null || npx eslint . 2>/dev/null || true");
+        checks.push("npm test 2>/dev/null || true");
+    }
+    if cwd.join("pyproject.toml").exists() || cwd.join("setup.py").exists() {
+        checks.push("ruff check . 2>/dev/null || python -m flake8 . 2>/dev/null || true");
+        checks.push("python -m pytest 2>/dev/null || true");
+    }
+    if cwd.join("go.mod").exists() {
+        checks.push("go vet ./...");
+        checks.push("go test ./...");
+    }
+
+    if checks.is_empty() {
+        return CommandAction::Message(
+            "No recognized project type found (Cargo.toml, package.json, pyproject.toml, go.mod).".into()
+        );
+    }
+
+    let cmds = checks.join("\n  ");
+    CommandAction::SendPrompt(format!(
+        "Run the following lint/test commands for this project and fix any errors or warnings. \
+         Keep running them in a loop until they all pass cleanly:\n\n  {cmds}\n\n\
+         For each failure:\n\
+         1. Read the error output carefully\n\
+         2. Fix the root cause in the source code\n\
+         3. Re-run the failing command to verify the fix\n\
+         4. Repeat until all commands pass with zero errors/warnings\n\n\
+         Report what you fixed when done."
     ))
 }
 
@@ -1900,6 +1976,7 @@ pub const HELP_CATEGORIES: &[(&str, &str, &[HelpCommand])] = &[
         ("/rename",   "rename current session"),
         ("/export",   "export session to markdown"),
         ("/rewind",   "undo last n exchanges (default 1)"),
+        ("/undo",     "alias for /rewind"),
         ("/summary",  "summarize conversation so far"),
         ("/copy",     "copy last response to clipboard"),
     ]),
@@ -1910,6 +1987,8 @@ pub const HELP_CATEGORIES: &[(&str, &str, &[HelpCommand])] = &[
         ("/commit-push-pr",  "commit, push, and create PR"),
         ("/review",          "code review"),
         ("/security-review", "security audit"),
+        ("/checkpoint",      "git checkpoint commit (snapshot current changes)"),
+        ("/lint",            "auto-detect and run lint + tests, fix errors in loop"),
         ("/pr_comments",     "show PR comments"),
         ("/issue",           "work on a GitHub issue"),
         ("/autofix-pr",      "auto-fix PR review comments"),
@@ -1940,14 +2019,16 @@ pub const HELP_CATEGORIES: &[(&str, &str, &[HelpCommand])] = &[
     ("Plugins & tools", "MCP servers, plugins, viz", &[
         ("/mcp",            "show MCP server status"),
         ("/plugin",         "install/manage plugins"),
+        ("/reload",         "hot-reload settings.json + CLAUDE.md"),
         ("/reload-plugins", "reload all MCP plugins"),
         ("/ctx-viz",        "context usage visualization"),
     ]),
     ("Other", "Voice, vim, themes, upgrades", &[
         ("/image",         "attach an image to next message"),
         ("/voice",         "voice input/output status"),
-        ("/voice clone",   "clone your voice for TTS (XTTS v2)"),
+        ("/voice clone",   "record a custom voice for TTS"),
         ("/vim",           "toggle vim editing mode"),
+        ("/autonomy",      "set file change oversight (suggest/auto-edit/full-auto)"),
         ("/theme",         "switch theme (dark, light, solarized)"),
         ("/btw",           "prepend a note to next message"),
         ("/upgrade",       "check for updates"),
@@ -3301,17 +3382,20 @@ fn cmd_powerup(args: &str) -> CommandAction {
         (
             "lesson 6 — voice & TTS",
             "Voice input & text-to-speech",
-            "Voice features (requires piper + whisper/openai):\n\
+            "Voice features (requires XTTS v2 + whisper/openai):\n\
              \n\
              **Voice input** — transcribes your speech to text\n\
              - /voice on    — enable (requires a mic + whisper)\n\
              - Hold Ctrl+Space to record while voice is on\n\
              \n\
-             **Text-to-speech** — speaks Claude's replies aloud\n\
-             - /voice tts on   — enable TTS (requires piper)\n\
-             - Install piper:  yay -S piper-tts-bin\n\
-             - Install voices: sudo wget -P /usr/share/piper-voices/\n\
-             - /doctor         — check if piper is configured\n\
+             **Text-to-speech** — speaks replies in a custom voice (record anyone)\n\
+             - /voice tts on   — enable TTS (requires XTTS v2)\n\
+             - /voice clone    — record any voice as the TTS speaker\n\
+             - /doctor         — check if XTTS v2 is configured\n\
+             \n\
+             Install XTTS v2:\n\
+               uv tool install TTS --python 3.11 \\\n\
+                 --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'\n\
              \n\
              You have completed the rustyclaw power-up course!\n\
              Type /help any time for the full command reference."

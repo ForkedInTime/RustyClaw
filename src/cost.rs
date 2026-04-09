@@ -59,6 +59,8 @@ pub struct CostTracker {
     pub total_cost_usd: f64,
     /// Budget limit (None = unlimited).
     pub budget_usd: Option<f64>,
+    /// Input tokens from the most recent API turn (for context % display).
+    pub last_input_tokens: u64,
 }
 
 impl Default for CostTracker {
@@ -73,6 +75,7 @@ impl CostTracker {
             by_model: HashMap::new(),
             total_cost_usd: 0.0,
             budget_usd: None,
+            last_input_tokens: 0,
         }
     }
 
@@ -99,6 +102,7 @@ impl CostTracker {
         entry.cost_usd += cost;
 
         self.total_cost_usd += cost;
+        self.last_input_tokens = input_tokens;
     }
 
     /// Check if the budget is exceeded.
@@ -168,6 +172,24 @@ impl CostTracker {
         }
 
         lines.join("\n")
+    }
+
+    /// Total input tokens across all models (approximation of context usage).
+    #[allow(dead_code)] // used by /cost and future dashboards
+    pub fn total_input_tokens(&self) -> u64 {
+        self.by_model.values().map(|u| u.input_tokens).sum()
+    }
+
+    /// Total output tokens across all models.
+    #[allow(dead_code)] // used by /cost and future dashboards
+    pub fn total_output_tokens(&self) -> u64 {
+        self.by_model.values().map(|u| u.output_tokens).sum()
+    }
+
+    /// Context usage as percentage of a given context window size.
+    pub fn context_pct(&self, context_window: u64) -> f64 {
+        if context_window == 0 { return 0.0; }
+        (self.last_input_tokens as f64 / context_window as f64 * 100.0).min(100.0)
     }
 
     /// One-line status for the TUI banner.

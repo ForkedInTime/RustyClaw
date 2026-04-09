@@ -107,8 +107,6 @@ pub enum Tool {
     Aplay,         // TTS playback
     Mpv,           // TTS playback
     Ffplay,        // TTS playback (part of ffmpeg)
-    Piper,         // TTS engine (system pkg on Arch, pip elsewhere)
-    PiperVoice,   // TTS voice model data (system pkg on Arch, manual wget elsewhere)
     Bwrap,         // bubblewrap sandbox
     Firejail,      // firejail sandbox
     WlCopy,        // clipboard (Wayland)
@@ -129,8 +127,6 @@ impl Tool {
             Tool::Aplay      => "aplay",
             Tool::Mpv        => "mpv",
             Tool::Ffplay     => "ffplay",
-            Tool::Piper      => "piper",
-            Tool::PiperVoice => "piper-voice-model",
             Tool::Bwrap      => "bwrap",
             Tool::Firejail   => "firejail",
             Tool::WlCopy     => "wl-copy",
@@ -151,8 +147,6 @@ impl Tool {
             Tool::Aplay      => "TTS audio playback (ALSA)",
             Tool::Mpv        => "TTS audio playback",
             Tool::Ffplay     => "TTS audio playback",
-            Tool::Piper      => "TTS engine",
-            Tool::PiperVoice => "TTS voice model files",
             Tool::Bwrap      => "bubblewrap sandbox (/sandbox bwrap)",
             Tool::Firejail   => "firejail sandbox (/sandbox firejail)",
             Tool::WlCopy     => "clipboard — Wayland (/copy, /share clip)",
@@ -173,11 +167,6 @@ impl Tool {
             Tool::Ffmpeg | Tool::Ffplay => Some("ffmpeg"),
             Tool::Sox    => Some("sox"),
             Tool::Mpv    => Some("mpv"),
-            Tool::Piper  => match distro {
-                Distro::Arch => Some("piper-tts-bin"), // AUR package; symlinks to /usr/bin/piper-tts
-                _            => None, // pip install piper-tts
-            },
-            Tool::PiperVoice => None, // always manual wget — no package installs the .onnx files
             Tool::Bwrap  => Some("bubblewrap"),
             Tool::Firejail => Some("firejail"),
             Tool::WlCopy => Some("wl-clipboard"),
@@ -249,43 +238,11 @@ pub fn find_missing(distro: &Distro) -> Vec<MissingTool> {
         });
     }
 
-    // piper TTS engine
-    if !crate::voice::piper_available() {
-        let (pkg, note) = match distro {
-            Distro::Arch => (Tool::Piper.package(distro), None),
-            _ => (None, Some("pipx install piper-tts\n\
-                 \x20        — or binary: github.com/rhasspy/piper/releases".into())),
-        };
-        missing.push(MissingTool { tool: Tool::Piper, package: pkg, manual_note: note });
-    }
-
-    // piper voice model files
-    if crate::voice::find_default_voice().is_none() {
-        let note = match distro {
-            // Arch: piper-voices-common installs voices.json to /usr/share/piper-voices/
-            // but NOT the actual .onnx files — those must be downloaded there (sudo required)
-            Distro::Arch => Some(
-                "sudo wget -P /usr/share/piper-voices/ \\\n\
-                 \x20        https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx\n\
-                 \x20        sudo wget -P /usr/share/piper-voices/ \\\n\
-                 \x20        https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx.json".into()
-            ),
-            _ => Some(
-                "mkdir -p ~/.local/share/piper && cd ~/.local/share/piper\n\
-                 \x20        wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx\n\
-                 \x20        wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx.json".into()
-            ),
-        };
-        missing.push(MissingTool { tool: Tool::PiperVoice, package: None, manual_note: note });
-    }
-
-    // XTTS v2 / Coqui TTS — PRIMARY TTS engine (natural voice)
+    // XTTS v2 / Coqui TTS — the only TTS engine
     if !crate::voice::xtts_available() {
         let note = Some(
             "uv tool install TTS --python 3.11 \\\n\
-             \x20        --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'\n\
-             \x20        ⚠ STRONGLY recommended — XTTS v2 sounds like a real human.\n\
-             \x20        Without it, TTS falls back to piper (robotic).".into()
+             \x20        --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'".into()
         );
         missing.push(MissingTool { tool: Tool::CoquiTts, package: None, manual_note: note });
     }

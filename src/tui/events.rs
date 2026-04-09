@@ -7,6 +7,8 @@ use tokio::sync::oneshot;
 pub enum AppEvent {
     /// A streamed text chunk from Claude
     TextChunk(String),
+    /// A thinking/reasoning block from extended thinking
+    ThinkingBlock(String),
     /// A tool call is about to execute
     ToolCall { name: String, args: String },
     /// Live output line from a running tool (e.g. bash command progress)

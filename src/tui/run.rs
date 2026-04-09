@@ -439,6 +439,7 @@ async fn run_loop(
 
     let mut app = App::new(&config.model, &config.cwd);
     if let Some(ref e) = config.effort { app.effort = Some(e.clone()); }
+    app.spinner_style = config.spinner_style.clone();
     // Apply theme from config (loaded from settings.json)
     if let Some(ref theme) = config.theme { app.theme = theme.clone(); }
     // Apply router settings from config (loaded from settings.json)
@@ -1861,13 +1862,12 @@ async fn handle_key(
                     CommandAction::SetTtsEnabled(enabled) => {
                         if enabled {
                             let has_xtts = crate::voice::xtts_available();
-                            let has_piper = crate::voice::piper_available();
                             let has_player = crate::voice::audio_player_available();
 
-                            if !has_xtts && !has_piper {
+                            if !has_xtts {
                                 app.entries.push(ChatEntry::system(
-                                    "Cannot enable TTS — no engine found.\n\n\
-                                     Install XTTS v2 (natural voice, recommended):\n\
+                                    "Cannot enable TTS — XTTS v2 not found.\n\n\
+                                     Install:\n\
                                        uv tool install TTS --python 3.11 \\\n\
                                          --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'".to_string()
                                 ));
@@ -1876,7 +1876,7 @@ async fn handle_key(
                                     "Cannot enable TTS — no audio player.\n\
                                      Install: sudo pacman -S mpv   # or alsa-utils".to_string()
                                 ));
-                            } else if has_xtts {
+                            } else {
                                 // Auto-start XTTS v2 server for fast synthesis
                                 let tx2 = tx.clone();
                                 tokio::spawn(async move {
@@ -1896,10 +1896,6 @@ async fn handle_key(
                                 });
                                 app.entries.push(ChatEntry::system(
                                     "TTS on — starting XTTS v2 server (loading model, ~10s)...".to_string()
-                                ));
-                            } else {
-                                app.entries.push(ChatEntry::system(
-                                    "TTS on — using piper (robotic fallback). Install XTTS v2 for natural voice.".to_string()
                                 ));
                             }
                             app.follow_bottom = true;
@@ -1921,16 +1917,15 @@ async fn handle_key(
                         if voices.is_empty() {
                             app.overlay = Some(Overlay::new("voices", format!(
                                 "No voice models found\n\n\
-                                 Install a piper voice model:\n\n\
-                                 mkdir -p ~/.local/share/piper && cd ~/.local/share/piper\n\
-                                 wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx\n\
-                                 wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx.json\n\n\
-                                 Browse all voices: https://rhasspy.github.io/piper-samples/"
+                                 Install XTTS v2:\n\
+                                   uv tool install TTS --python 3.11 \\\n\
+                                     --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'\n\n\
+                                 Then record a custom voice:\n\
+                                   /voice clone"
                             )));
                         } else {
                             let current = config.tts_voice_model.clone()
-                                .or_else(crate::voice::find_default_voice)
-                                .unwrap_or_default();
+                                .unwrap_or_else(|| crate::voice::XTTS_DEFAULT_SPEAKER.to_string());
                             let mut lines = vec![format!("Voice models ({})\n", voices.len())];
                             let mut ids = Vec::new();
                             for (i, (name, path)) in voices.iter().enumerate() {
@@ -2228,6 +2223,66 @@ async fn handle_key(
                         app.scroll_to_bottom();
                         let tx2 = tx.clone();
                         tokio::spawn(plugin_install_task(spec, tx2));
+                    }
+                    CommandAction::ReloadSettings => {
+                        // Hot-reload settings.json without restarting
+                        let settings = crate::settings::Settings::load(&config.cwd);
+                        let mut reloaded = Vec::new();
+
+                        if let Some(model) = settings.model {
+                            let resolved = crate::commands::resolve_model_alias(&model);
+                            config.model = resolved.clone();
+                            app.set_model(resolved);
+                            reloaded.push("model");
+                        }
+                        if let Some(ref theme) = settings.theme {
+                            config.theme = Some(theme.clone());
+                            app.theme = theme.clone();
+                            reloaded.push("theme");
+                        }
+                        if let Some(effort) = settings.effort {
+                            config.effort = Some(effort.clone());
+                            app.effort = Some(effort);
+                            reloaded.push("effort");
+                        }
+                        if let Some(style) = settings.spinner_style {
+                            config.spinner_style = style.clone();
+                            app.spinner_style = style;
+                            reloaded.push("spinnerStyle");
+                        }
+                        config.show_thinking_summaries = settings.show_thinking_summaries.unwrap_or(config.show_thinking_summaries);
+                        if let Some(tbt) = settings.thinking_budget_tokens {
+                            config.thinking_budget_tokens = Some(tbt);
+                            reloaded.push("thinkingBudgetTokens");
+                        }
+                        if let Some(v) = settings.verbose {
+                            config.verbose = v;
+                            reloaded.push("verbose");
+                        }
+                        if let Some(ac) = settings.auto_compact {
+                            config.auto_compact_enabled = ac;
+                            reloaded.push("autoCompact");
+                        }
+                        if let Some(se) = settings.sandbox_enabled {
+                            config.sandbox_enabled = se;
+                            reloaded.push("sandboxEnabled");
+                        }
+                        if let Some(mode) = settings.sandbox_mode {
+                            config.sandbox_mode = mode;
+                            reloaded.push("sandboxMode");
+                        }
+
+                        // Reload CLAUDE.md + AGENTS.md
+                        config.claudemd = crate::config::Config::load_claude_md(&config.cwd);
+                        config.agentsmd = crate::config::Config::load_agents_md(&config.cwd);
+
+                        let msg = if reloaded.is_empty() {
+                            "Settings reloaded (no changes detected). CLAUDE.md + AGENTS.md refreshed.".to_string()
+                        } else {
+                            format!("Settings reloaded: {}. CLAUDE.md + AGENTS.md refreshed.", reloaded.join(", "))
+                        };
+                        app.entries.push(ChatEntry::system(msg));
+                        app.scroll_to_bottom();
                     }
                     CommandAction::ReloadPlugins => {
                         // Re-read settings.json mcpServers section
@@ -2593,6 +2648,29 @@ async fn handle_key(
                         ));
                         app.scroll_to_bottom();
                     }
+                    CommandAction::SetAutonomy(level) => {
+                        config.autonomy = level.clone();
+                        app.entries.push(ChatEntry::system(format!("Autonomy set to: {level}")));
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::GitCheckpoint(msg) => {
+                        let cwd = config.cwd.clone();
+                        let result = tokio::task::spawn_blocking(move || {
+                            git_checkpoint(&cwd, msg.as_deref())
+                        }).await;
+                        match result {
+                            Ok(Ok(summary)) => {
+                                app.entries.push(ChatEntry::system(summary));
+                            }
+                            Ok(Err(e)) => {
+                                app.entries.push(ChatEntry::system(format!("Checkpoint failed: {e}")));
+                            }
+                            Err(e) => {
+                                app.entries.push(ChatEntry::system(format!("Checkpoint task error: {e}")));
+                            }
+                        }
+                        app.scroll_to_bottom();
+                    }
                     CommandAction::ShowCostDashboard => {
                         let text = app.cost_tracker.summary();
                         app.entries.push(ChatEntry::system(text));
@@ -2697,33 +2775,30 @@ async fn handle_key(
                         }
                         let (stop_tx, stop_rx) = oneshot::channel::<()>();
                         app.tts_stop_tx = Some(stop_tx);
-                        let voice_model = config.tts_voice_model.clone();
                         let tx2 = tx.clone();
-                        let has_clone = crate::voice::voice_clone_sample_path()
-                            .map_or(false, |p| p.exists());
                         let xtts_ok = crate::voice::xtts_available();
                         let server_up = crate::voice::xtts_server_running();
-                        let label = if has_clone && xtts_ok {
-                            "your cloned voice (XTTS v2)".to_string()
-                        } else if xtts_ok {
-                            format!("XTTS v2 default ({})", crate::voice::XTTS_DEFAULT_SPEAKER)
-                        } else if crate::voice::piper_available() {
-                            "piper fallback (robotic)".to_string()
-                        } else {
-                            "no TTS engine found".to_string()
-                        };
+                        let label = format!("XTTS v2 default ({})", crate::voice::XTTS_DEFAULT_SPEAKER);
                         let time_hint = if server_up { "~1 second" } else if xtts_ok { "starting server ~10s, then ~1s" } else { "a few seconds" };
+                        let has_clone = crate::voice::voice_clone_sample_path()
+                            .map_or(false, |p| p.exists());
+                        let clone_hint = if has_clone {
+                            " Custom voice active for responses. /voice clone to change it."
+                        } else {
+                            " /voice clone to record any voice — yours, a friend, anyone."
+                        };
                         app.entries.push(ChatEntry::system(
-                            format!("Synthesizing with {label}… ({time_hint}, Esc to cancel)")
+                            format!("Synthesizing with {label}… ({time_hint}, Esc to cancel){clone_hint}")
                         ));
                         tokio::spawn(async move {
                             // Auto-start server if XTTS v2 is available but server not running
                             if crate::voice::xtts_available() && !crate::voice::xtts_server_running() {
                                 let _ = crate::voice::ensure_xtts_server().await;
                             }
-                            let test_text = "Hi there. This is RustyClaw. \
-                                Ship it. The benchmarks look incredible.";
-                            match crate::voice::speak(test_text, voice_model.as_deref(), stop_rx).await {
+                            let test_text = "Hello, I am RustyClaw, your personal coding \
+                                assistant. I can help you write, debug, and ship code faster \
+                                than ever before.";
+                            match crate::voice::speak_default_only(test_text, stop_rx).await {
                                 Ok(_) => {
                                     let _ = tx2.send(AppEvent::SystemMessage("Voice test complete.".into()));
                                 }
@@ -3283,6 +3358,12 @@ async fn run_api_task(
     // compact notice instead of the full body (v2.1.86).
     let read_cache = crate::tools::new_read_cache();
 
+    // Loop detection: track recent (tool_name, args_hash) to catch repeated failures.
+    // If the same call appears 3+ times in the last 6 entries, pause and ask.
+    let mut recent_calls: std::collections::VecDeque<(String, u64)> = std::collections::VecDeque::new();
+    const LOOP_WINDOW: usize = 6;
+    const LOOP_THRESHOLD: usize = 3;
+
     let mut iterations: u32 = 0;
     loop {
         iterations += 1;
@@ -3366,51 +3447,101 @@ async fn run_api_task(
             session_id: Some(session_id.to_string()),
         };
 
-        let tx2 = tx.clone();
-        let response = client
-            .messages_stream(request, move |chunk| {
-                let _ = tx2.send(AppEvent::TextChunk(chunk.to_string()));
-            })
-            .await;
+        // API call with retry for transient errors (429/529/connection)
+        const MAX_RETRIES: u32 = 3;
+        let mut attempt = 0u32;
+        let mut should_compact_retry = false;
+        let response = loop {
+            attempt += 1;
+            let tx2 = tx.clone();
+            let req_clone = request.clone();
+            let result = client
+                .messages_stream(req_clone, move |chunk| {
+                    let _ = tx2.send(AppEvent::TextChunk(chunk.to_string()));
+                })
+                .await;
 
-        let response = match response {
-            Ok(r) => r,
-            Err(e) => {
-                let err_str = e.to_string();
-                // prompt_too_long: auto-compact and retry
-                if err_str.contains("prompt is too long") || err_str.contains("prompt_too_long") {
-                    let _ = tx.send(AppEvent::SystemMessage(
-                        "Prompt too long — auto-compacting context…".into()
-                    ));
-                    match crate::compact::summarize_compact(&client, &messages, &config).await {
-                        Ok(replacement) => {
-                            let summary_len = replacement
-                                .first()
-                                .and_then(|m| m.content.first())
-                                .map(|b| if let ContentBlock::Text { text } = b { text.len() } else { 0 })
-                                .unwrap_or(0);
-                            let _ = tx.send(AppEvent::Compacted { replacement: replacement.clone(), summary_len });
-                            messages = replacement;
-                            continue; // retry with compacted history
-                        }
-                        Err(compact_err) => {
-                            let _ = tx.send(AppEvent::Error(format!(
-                                "Prompt too long and auto-compact failed: {compact_err}"
-                            )));
-                            return;
-                        }
+            match result {
+                Ok(r) => break r,
+                Err(e) => {
+                    let err_str = e.to_string();
+
+                    // prompt_too_long: signal outer loop to compact and retry
+                    if err_str.contains("prompt is too long") || err_str.contains("prompt_too_long") {
+                        should_compact_retry = true;
+                        break StreamedResponse {
+                            content: vec![],
+                            stop_reason: None,
+                            usage: crate::api::types::Usage::default(),
+                        };
                     }
+
+                    // Retryable errors: rate limit (429), overloaded (529), connection issues
+                    let is_retryable = err_str.contains("429")
+                        || err_str.contains("529")
+                        || err_str.contains("overloaded")
+                        || err_str.contains("rate_limit")
+                        || err_str.contains("connection")
+                        || err_str.contains("timed out")
+                        || err_str.contains("reset by peer");
+
+                    if is_retryable && attempt < MAX_RETRIES {
+                        let delay = std::time::Duration::from_millis(1000 * 2u64.pow(attempt - 1));
+                        let _ = tx.send(AppEvent::SystemMessage(format!(
+                            "API error (attempt {attempt}/{MAX_RETRIES}): {err_str}\nRetrying in {:.0}s…",
+                            delay.as_secs_f64(),
+                        )));
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+
+                    let _ = tx.send(AppEvent::Error(err_str));
+                    return;
                 }
-                let _ = tx.send(AppEvent::Error(err_str));
-                return;
             }
         };
+
+        // Handle prompt_too_long: auto-compact and retry the outer loop
+        if should_compact_retry {
+            let _ = tx.send(AppEvent::SystemMessage(
+                "Prompt too long — auto-compacting context…".into()
+            ));
+            match crate::compact::summarize_compact(&client, &messages, &config).await {
+                Ok(replacement) => {
+                    let summary_len = replacement
+                        .first()
+                        .and_then(|m| m.content.first())
+                        .map(|b| if let ContentBlock::Text { text } = b { text.len() } else { 0 })
+                        .unwrap_or(0);
+                    let _ = tx.send(AppEvent::Compacted { replacement: replacement.clone(), summary_len });
+                    messages = replacement;
+                    continue; // retry outer loop with compacted history
+                }
+                Err(compact_err) => {
+                    let _ = tx.send(AppEvent::Error(format!(
+                        "Prompt too long and auto-compact failed: {compact_err}"
+                    )));
+                    return;
+                }
+            }
+        }
 
         // One-time notice when an Ollama model is detected as not supporting tools
         if client.take_tools_notice() {
             let _ = tx.send(AppEvent::SystemMessage(
                 "Note: this model doesn't support tools — running in text-only mode.".into()
             ));
+        }
+
+        // Emit thinking blocks to the TUI (if show_thinking_summaries is enabled)
+        if config.show_thinking_summaries {
+            for block in &response.content {
+                if let ContentBlock::Thinking { thinking, .. } = block {
+                    if !thinking.trim().is_empty() {
+                        let _ = tx.send(AppEvent::ThinkingBlock(thinking.clone()));
+                    }
+                }
+            }
         }
 
         messages.push(Message { role: Role::Assistant, content: response.content.clone() });
@@ -3466,6 +3597,27 @@ async fn run_api_task(
                         let args = serde_json::to_string(input).unwrap_or_default();
                         let _ = tx.send(AppEvent::ToolCall { name: name.clone(), args: args.clone() });
 
+                        // ── Loop detection ──────────────────────────────────
+                        {
+                            use std::hash::{Hash, Hasher};
+                            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                            args.hash(&mut hasher);
+                            let sig = (name.clone(), hasher.finish());
+                            recent_calls.push_back(sig.clone());
+                            while recent_calls.len() > LOOP_WINDOW {
+                                recent_calls.pop_front();
+                            }
+                            let repeats = recent_calls.iter().filter(|c| **c == sig).count();
+                            if repeats >= LOOP_THRESHOLD {
+                                let _ = tx.send(AppEvent::Error(format!(
+                                    "Loop detected: tool '{name}' called {} times with identical arguments in the last {} calls. \
+                                     Pausing to prevent infinite loop. Send a new message to continue.",
+                                    repeats, LOOP_WINDOW,
+                                )));
+                                return;
+                            }
+                        }
+
                         // Plan mode: block destructive tools
                         if effective_plan_mode && PLAN_MODE_BLOCKED_TOOLS.contains(&name.as_str()) {
                             let msg = format!(
@@ -3509,8 +3661,28 @@ async fn run_api_task(
                           } // disable_all_hooks guard
                         }
 
-                        // Permission check — pass input for Bash(prefix:*) rules
-                        let decision = match perm_state.check_with_input(name, Some(input)) {
+                        // Autonomy check: "suggest" mode forces Ask for Write/Edit
+                        let autonomy_override = if config.autonomy == "suggest"
+                            && (name == "Write" || name == "Edit")
+                        {
+                            Some(CheckResult::Ask)
+                        } else {
+                            None
+                        };
+
+                        // Permission check — for Bash, parse compound commands (&&, ||, ;, |)
+                        // so each sub-command is checked individually against prefix rules
+                        let decision = match autonomy_override.unwrap_or_else(|| {
+                            if name == "Bash" {
+                                if let Some(cmd) = input.get("command").and_then(|c| c.as_str()) {
+                                    crate::permissions::check_compound_bash(&perm_state, cmd)
+                                } else {
+                                    perm_state.check_with_input(name, Some(input))
+                                }
+                            } else {
+                                perm_state.check_with_input(name, Some(input))
+                            }
+                        }) {
                             CheckResult::Allow => PermissionDecision::Allow,
                             CheckResult::Deny  => PermissionDecision::Deny,
                             CheckResult::Ask => {
@@ -3604,4 +3776,102 @@ async fn run_api_task(
             }
         }
     }
+}
+
+/// Create a git checkpoint commit of all uncommitted changes.
+/// Returns a summary string for display, or an error.
+fn git_checkpoint(cwd: &std::path::Path, message: Option<&str>) -> anyhow::Result<String> {
+    use std::process::Command;
+
+    // Check if we're in a git repo
+    let in_repo = Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(cwd)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !in_repo {
+        anyhow::bail!("Not inside a git repository");
+    }
+
+    // Check for changes
+    let status = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(cwd)
+        .output()?;
+    let status_text = String::from_utf8_lossy(&status.stdout);
+    if status_text.trim().is_empty() {
+        return Ok("No changes to checkpoint.".into());
+    }
+
+    // Stage all changes
+    Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(cwd)
+        .output()?;
+
+    // Create commit
+    let ts = chrono_free_timestamp();
+    let msg = message.unwrap_or("rustyclaw checkpoint");
+    let full_msg = format!("[checkpoint] {msg} ({ts})");
+
+    let commit = Command::new("git")
+        .args(["commit", "-m", &full_msg, "--no-verify"])
+        .current_dir(cwd)
+        .output()?;
+
+    if !commit.status.success() {
+        let err = String::from_utf8_lossy(&commit.stderr);
+        anyhow::bail!("git commit failed: {err}");
+    }
+
+    // Get the short hash
+    let hash = Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(cwd)
+        .output()?;
+    let short = String::from_utf8_lossy(&hash.stdout).trim().to_string();
+
+    let changed: usize = status_text.lines().count();
+    Ok(format!("Checkpoint created: {short} ({changed} files) — \"{full_msg}\"\nUse `git reset HEAD~1` to undo."))
+}
+
+/// Simple timestamp without pulling in chrono: "2026-04-08T15:30:42"
+fn chrono_free_timestamp() -> String {
+    use std::time::SystemTime;
+    let secs = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // Rough UTC breakdown (good enough for checkpoint labels)
+    let days = secs / 86400;
+    let time_of_day = secs % 86400;
+    let h = time_of_day / 3600;
+    let m = (time_of_day % 3600) / 60;
+    let s = time_of_day % 60;
+    // Days since epoch → year/month/day (simplified, ignoring leap seconds)
+    let (y, mo, d) = days_to_ymd(days);
+    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}")
+}
+
+fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
+    let mut y = 1970;
+    loop {
+        let dy = if is_leap(y) { 366 } else { 365 };
+        if days < dy { break; }
+        days -= dy;
+        y += 1;
+    }
+    let leap = is_leap(y);
+    let month_days: [u64; 12] = [31, if leap {29} else {28}, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut mo = 0;
+    for (i, &md) in month_days.iter().enumerate() {
+        if days < md { mo = i; break; }
+        days -= md;
+    }
+    (y, (mo + 1) as u64, days + 1)
+}
+
+fn is_leap(y: u64) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }

@@ -130,6 +130,7 @@ pub fn format_duration_ms(ms: u128) -> String {
 pub enum EntryKind {
     User,
     Assistant,
+    Thinking,  // Model's extended thinking/reasoning (shown when show_thinking_summaries=true)
     ToolCall,
     ToolStream, // Live streaming output from a running tool
     ToolResult,
@@ -152,6 +153,7 @@ impl ChatEntry {
     pub fn error(t: impl Into<String>) -> Self { Self { kind: EntryKind::Error,     text: t.into() } }
     pub fn system(t: impl Into<String>) -> Self { Self { kind: EntryKind::System,        text: t.into() } }
     pub fn command_output(t: impl Into<String>) -> Self { Self { kind: EntryKind::CommandOutput, text: t.into() } }
+    pub fn thinking(t: impl Into<String>) -> Self { Self { kind: EntryKind::Thinking, text: t.into() } }
 }
 
 // ── Overlay panel (slash command output) ─────────────────────────────────────
@@ -327,6 +329,8 @@ pub struct App {
 
     /// Whimsical verb shown in the spinner while loading (e.g. "Combobulating")
     pub spinner_verb: String,
+    /// Spinner style: "themed" (fun verbs), "minimal" ("Working"), "silent" (no verb)
+    pub spinner_style: String,
     /// When the current loading turn started — used to compute elapsed time
     pub turn_start: Option<Instant>,
 
@@ -456,6 +460,7 @@ impl App {
             pending_install: None,
             turn_costs: Vec::new(),
             spinner_verb: "Thinking".to_string(),
+            spinner_style: "themed".to_string(),
             turn_start: None,
             pending_resume: None,
             pending_delete: None,
@@ -479,11 +484,17 @@ impl App {
     pub fn start_loading(&mut self) {
         self.is_loading = true;
         self.turn_start = Some(Instant::now());
-        let mut rng = rand::rng();
-        self.spinner_verb = SPINNER_VERBS
-            .choose(&mut rng)
-            .unwrap_or(&"Thinking")
-            .to_string();
+        self.spinner_verb = match self.spinner_style.as_str() {
+            "minimal" => "Working".to_string(),
+            "silent" => String::new(),
+            _ => {
+                let mut rng = rand::rng();
+                SPINNER_VERBS
+                    .choose(&mut rng)
+                    .unwrap_or(&"Thinking")
+                    .to_string()
+            }
+        };
     }
 
     /// End a loading turn — computes duration and pushes a completion system message.
@@ -857,6 +868,11 @@ impl App {
                 if self.follow_bottom {
                     self.scroll_to_bottom();
                 }
+            }
+            AppEvent::ThinkingBlock(text) => {
+                self.flush_streaming();
+                self.entries.push(ChatEntry::thinking(text));
+                self.scroll_to_bottom();
             }
             AppEvent::ToolCall { name, args } => {
                 self.flush_streaming();

@@ -16,17 +16,38 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
+          # ── Linux ──────────────────────────────────────────────
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             artifact: rustyclaw-linux-x64
+            cross: true
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             artifact: rustyclaw-linux-arm64
+            cross: true
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             artifact: rustyclaw-linux-x64-musl
+            cross: true
+
+          # ── macOS ──────────────────────────────────────────────
+          - target: x86_64-apple-darwin
+            os: macos-13          # Intel runner
+            artifact: rustyclaw-macos-x64
+            cross: false
+          - target: aarch64-apple-darwin
+            os: macos-14          # Apple Silicon runner
+            artifact: rustyclaw-macos-arm64
+            cross: false
+
+          # ── Windows ────────────────────────────────────────────
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact: rustyclaw-windows-x64.exe
+            cross: false
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -38,19 +59,48 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross-compilation tools
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # Linux cross-compilation via cross
+      - name: Install cross (Linux only)
+        if: matrix.cross
         run: cargo install cross --git https://github.com/cross-rs/cross
 
-      - name: Build release binary
+      - name: Build release (cross)
+        if: matrix.cross
         run: cross build --release --target ${{ matrix.target }}
 
-      - name: Rename binary
+      # Native builds (macOS / Windows)
+      - name: Build release (native)
+        if: "!matrix.cross"
+        run: cargo build --release --target ${{ matrix.target }}
+
+      # ── Package ──────────────────────────────────────────────
+      - name: Rename binary (unix)
+        if: runner.os != 'Windows'
         run: |
           cp target/${{ matrix.target }}/release/rustyclaw ${{ matrix.artifact }}
           chmod +x ${{ matrix.artifact }}
 
-      - name: Generate checksum
+      - name: Rename binary (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Copy-Item "target/${{ matrix.target }}/release/rustyclaw.exe" "${{ matrix.artifact }}"
+
+      - name: Generate checksum (unix)
+        if: runner.os != 'Windows'
         run: sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+
+      - name: Generate checksum (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash "${{ matrix.artifact }}" -Algorithm SHA256).Hash.ToLower()
+          "$hash  ${{ matrix.artifact }}" | Out-File -Encoding ascii "${{ matrix.artifact }}.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -81,18 +131,24 @@ jobs:
       - name: Create manifest
         run: |
           cd release
-          echo '{' > manifest.json
-          echo '  "platforms": {' >> manifest.json
-          first=true
+          cat > manifest.json <<'SCRIPT'
+          {
+            "platforms": {}
+          }
+          SCRIPT
+          # Build proper manifest with jq
+          echo '{}' > manifest.json
           for f in rustyclaw-*; do
             [[ "$f" == *.sha256 ]] && continue
-            checksum=$(cat "${f}.sha256" | cut -d' ' -f1)
-            if [ "$first" = true ]; then first=false; else echo ',' >> manifest.json; fi
-            printf '    "%s": { "checksum": "%s" }' "$f" "$checksum" >> manifest.json
+            [[ ! -f "${f}.sha256" ]] && continue
+            checksum=$(cut -d' ' -f1 < "${f}.sha256")
+            jq --arg name "$f" --arg sum "$checksum" \
+              '.[$name] = {"checksum": $sum}' manifest.json > tmp.json
+            mv tmp.json manifest.json
           done
-          echo '' >> manifest.json
-          echo '  }' >> manifest.json
-          echo '}' >> manifest.json
+          # Wrap in platforms key
+          jq '{platforms: .}' manifest.json > tmp.json
+          mv tmp.json manifest.json
           cat manifest.json
 
       - name: Determine tag

@@ -156,6 +156,11 @@ pub struct Config {
     #[serde(skip)]
     pub claudemd: String,
 
+    /// Concatenated content of all AGENTS.md files loaded at startup.
+    /// Industry-standard agent config — parsed alongside CLAUDE.md.
+    #[serde(skip)]
+    pub agentsmd: String,
+
     /// Ollama server base URL.  Overridable via OLLAMA_HOST env var or settings.json.
     pub ollama_host: String,
 
@@ -286,14 +291,17 @@ pub struct Config {
     /// Optional custom API URL for Whisper transcription (defaults to OpenAI endpoint).
     pub voice_api_url: Option<String>,
 
-    /// Whether TTS (text-to-speech) output is enabled — speaks Claude's responses via piper.
+    /// Whether TTS (text-to-speech) output is enabled — speaks Claude's responses via XTTS v2.
     pub tts_enabled: bool,
 
-    /// Path to the piper .onnx voice model file (None = auto-detect from ~/.local/share/piper/).
+    /// Path to the TTS voice model file or clone sample.
     pub tts_voice_model: Option<String>,
 
     /// Whether desktop notifications (notify-send) + terminal bell fire on task completion.
     pub notifications_enabled: bool,
+
+    /// Spinner style: "themed" (default), "minimal", or "silent".
+    pub spinner_style: String,
 
     /// Whether bwrap sandbox allows outbound network access.
     pub sandbox_allow_network: bool,
@@ -313,6 +321,10 @@ pub struct Config {
     pub router_high_model: Option<String>,
     /// Router: model for super-high-complexity tasks (1M context).
     pub router_super_high_model: Option<String>,
+
+    /// Autonomy level: "suggest" | "auto-edit" | "full-auto".
+    /// Controls whether Write/Edit show diff previews before applying.
+    pub autonomy: String,
 }
 
 impl Default for Config {
@@ -328,6 +340,7 @@ impl Default for Config {
             permissions_allow: Vec::new(),
             permissions_deny: Vec::new(),
             claudemd: String::new(),
+            agentsmd: String::new(),
             ollama_host: "http://localhost:11434".into(),
             thinking_budget_tokens: None,
             show_thinking_summaries: false,
@@ -373,6 +386,7 @@ impl Default for Config {
             tts_enabled: false,
             tts_voice_model: None,
             notifications_enabled: false,
+            spinner_style: "themed".to_string(),
             sandbox_allow_network: true,
             disable_skill_shell_execution: false,
             router_enabled: false,
@@ -381,6 +395,7 @@ impl Default for Config {
             router_medium_model: None,
             router_high_model: None,
             router_super_high_model: None,
+            autonomy: "auto-edit".to_string(),
         }
     }
 }
@@ -429,6 +444,9 @@ impl Config {
         cfg.tts_enabled = settings.tts_enabled.unwrap_or(false);
         if let Some(m) = settings.tts_voice_model { cfg.tts_voice_model = Some(m); }
         cfg.notifications_enabled = settings.notifications_enabled.unwrap_or(false);
+        if let Some(style) = settings.spinner_style {
+            cfg.spinner_style = style;
+        }
         cfg.sandbox_allow_network = settings.sandbox_allow_network.unwrap_or(true);
         cfg.disable_skill_shell_execution = settings.disable_skill_shell_execution.unwrap_or(false);
 
@@ -439,6 +457,9 @@ impl Config {
         cfg.router_medium_model = settings.router_medium_model;
         cfg.router_high_model = settings.router_high_model;
         cfg.router_super_high_model = settings.router_super_high_model;
+        if let Some(a) = settings.autonomy {
+            cfg.autonomy = a;
+        }
 
         // Resolve output style: load name from settings, look up prompt
         if let Some(ref style_name) = settings.output_style {
@@ -451,9 +472,10 @@ impl Config {
             }
         }
 
-        // ── CLAUDE.md files (global + project hierarchy) — skipped in bare mode
+        // ── CLAUDE.md + AGENTS.md files (global + project hierarchy) — skipped in bare mode
         if !cfg.bare_mode {
             cfg.claudemd = Self::load_claude_md(&cfg.cwd);
+            cfg.agentsmd = Self::load_agents_md(&cfg.cwd);
         }
 
         // ── API key from environment (not required for Ollama models)
@@ -566,6 +588,47 @@ impl Config {
         parts.join("\n\n")
     }
 
+    /// Load and merge all AGENTS.md files in priority order (same as CLAUDE.md).
+    /// Industry-standard agent configuration — works across Claude Code, [redacted], [redacted], etc.
+    pub fn load_agents_md(cwd: &Path) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+
+        let mut include = |path: &PathBuf| {
+            let key = path.canonicalize().unwrap_or_else(|_| path.clone());
+            if !seen.insert(key) { return; }
+            if let Ok(content) = std::fs::read_to_string(path) {
+                let trimmed = content.trim();
+                if !trimmed.is_empty() {
+                    parts.push(format!("<!-- {} -->\n{}", path.display(), trimmed));
+                }
+            }
+        };
+
+        // Global: ~/.claude/AGENTS.md
+        let global = Self::claude_dir().join("AGENTS.md");
+        include(&global);
+
+        // Walk from cwd up toward home/root
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        let mut ancestry: Vec<PathBuf> = Vec::new();
+        let mut dir = cwd.to_path_buf();
+        loop {
+            let candidate = dir.join("AGENTS.md");
+            if candidate.exists() {
+                ancestry.push(candidate);
+            }
+            if dir == home { break; }
+            if !dir.pop() { break; }
+        }
+        ancestry.reverse();
+        for path in ancestry {
+            include(&path);
+        }
+
+        parts.join("\n\n")
+    }
+
     /// Read bannerOrgDisplay from ~/.claude/config.json
     pub fn get_banner_label() -> Option<String> {
         let path = Self::claude_dir().join("config.json");
@@ -589,16 +652,56 @@ impl Config {
         Ok(())
     }
 
-    /// Path to the .claude directory in the user's home
+    /// Path to the config directory (XDG-aware).
+    ///
+    /// Priority: $CLAUDE_CONFIG_DIR > $XDG_CONFIG_HOME/rustyclaw > ~/.claude
+    /// Falls back to ~/.claude for backward compat with upstream Claude Code.
     pub fn claude_dir() -> PathBuf {
+        // Explicit override
+        if let Ok(dir) = std::env::var("CLAUDE_CONFIG_DIR") {
+            return PathBuf::from(dir);
+        }
+        // XDG: use $XDG_CONFIG_HOME/rustyclaw if XDG_CONFIG_HOME is set
+        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+            let xdg_path = PathBuf::from(&xdg).join("rustyclaw");
+            // Use XDG path if it already exists, or if ~/.claude does NOT exist
+            let legacy = dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".claude");
+            if xdg_path.exists() || !legacy.exists() {
+                return xdg_path;
+            }
+        }
+        // Legacy fallback
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".claude")
     }
 
+    /// Path to the data directory (XDG-aware).
+    /// Used for sessions, RAG database, and other persistent data.
+    pub fn data_dir() -> PathBuf {
+        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+            let xdg_path = PathBuf::from(&xdg).join("rustyclaw");
+            let legacy = Self::claude_dir().join("sessions");
+            if xdg_path.exists() || !legacy.exists() {
+                return xdg_path;
+            }
+        }
+        // Default: store data alongside config for backward compat
+        Self::claude_dir()
+    }
+
+    /// Path to the cache directory (XDG-aware).
+    #[allow(dead_code)] // available for RAG cache, session cache, etc.
+    pub fn cache_dir() -> PathBuf {
+        if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
+            return PathBuf::from(&xdg).join("rustyclaw");
+        }
+        Self::claude_dir().join("cache")
+    }
+
     /// Path to the sessions directory
     pub fn sessions_dir() -> PathBuf {
-        Self::claude_dir().join("sessions")
+        Self::data_dir().join("sessions")
     }
 
     /// Write a single key-value pair to `~/.claude/settings.json`.
@@ -723,10 +826,15 @@ impl Config {
                 platform = platform,
                 shell_name = shell_name,
             );
-            return if self.claudemd.is_empty() {
+            let base = if self.claudemd.is_empty() {
                 external_prompt
             } else {
                 format!("{external_prompt}\n\n<claude_md>\n{}</claude_md>", self.claudemd)
+            };
+            return if self.agentsmd.is_empty() {
+                base
+            } else {
+                format!("{base}\n\n<agents_md>\n{}</agents_md>", self.agentsmd)
             };
         }
 
@@ -891,6 +999,13 @@ Use the `gh` CLI for all GitHub-related tasks. When creating a PR:
             base
         } else {
             format!("{base}\n\n<claude_md>\n{}</claude_md>", self.claudemd)
+        };
+
+        // Append AGENTS.md content (industry-standard agent config)
+        let base = if self.agentsmd.is_empty() {
+            base
+        } else {
+            format!("{base}\n\n<agents_md>\n{}</agents_md>", self.agentsmd)
         };
 
         // Output style prompt is appended after CLAUDE.md but before append_system_prompt
