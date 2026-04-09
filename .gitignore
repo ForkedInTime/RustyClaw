@@ -5,7 +5,8 @@
 .env
 .DS_Store
 
-# Strategy docs — not for public eyes
-CLAUDE.md
-competitor-analysis-claurst.md
-rust-claude-code-landscape.md
+# Research & strategy — hidden, not even filenames visible
+.secret/
+
+# Git worktrees
+.worktrees/
