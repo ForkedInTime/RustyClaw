@@ -2,6 +2,9 @@
 //!
 //! Every message has a "type" field for tagged dispatch.
 //! Requests have an "id" field for correlation.
+//!
+//! Many variants and fields are defined for Phase B/C but not yet wired.
+//! Suppress dead_code warnings — these types must exist for the NDJSON wire protocol.
 
 use serde::{Deserialize, Serialize};
 
@@ -110,6 +113,7 @@ pub struct RouterDecision {
 /// All possible requests from the host.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // Protocol variants exist for wire compatibility; not all wired in Phase A
 #[serde(tag = "type")]
 pub enum SdkRequest {
     #[serde(rename = "session/start")]
@@ -208,6 +212,7 @@ pub enum SdkRequest {
 // ── Responses (RustyClaw → Host, correlated by ID) ──────────────────────────
 
 /// Responses to specific requests.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]
 pub enum SdkResponse {
@@ -268,6 +273,7 @@ pub enum SdkResponse {
 // ── Notifications (RustyClaw → Host, streamed, no request ID) ───────────────
 
 /// Streamed events during turn execution.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]
 pub enum SdkNotification {
