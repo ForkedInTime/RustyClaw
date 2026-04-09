@@ -446,7 +446,12 @@ impl SdkSession {
                 .collect::<Vec<_>>()
                 .join("\n");
             let summary_truncated = if output_summary.len() > 500 {
-                format!("{}...", &output_summary[..500])
+                // Find a safe UTF-8 boundary near 500 bytes
+                let mut end = 500;
+                while end > 0 && !output_summary.is_char_boundary(end) {
+                    end -= 1;
+                }
+                format!("{}...", &output_summary[..end])
             } else {
                 output_summary
             };

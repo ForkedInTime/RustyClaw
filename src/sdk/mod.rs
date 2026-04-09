@@ -17,6 +17,8 @@ use anyhow::Result;
 use session::SdkSession;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use transport::Transport;
@@ -41,8 +43,8 @@ impl SdkServer {
         let mut approval_ins: HashMap<String, mpsc::UnboundedSender<(String, Option<String>)>> =
             HashMap::new();
 
-        // Track active session count
-        let mut active_sessions: usize = 0;
+        // Track active session count (shared with spawned tasks)
+        let active_sessions = Arc::new(AtomicUsize::new(0));
 
         loop {
             tokio::select! {
@@ -56,7 +58,7 @@ impl SdkServer {
                                 &notif_tx,
                                 &approval_out_tx,
                                 &mut approval_ins,
-                                &mut active_sessions,
+                                &active_sessions,
                                 start_time,
                             ).await?;
                         }
@@ -87,7 +89,7 @@ impl SdkServer {
         notif_tx: &mpsc::UnboundedSender<SdkNotification>,
         approval_out_tx: &mpsc::UnboundedSender<SdkNotification>,
         approval_ins: &mut HashMap<String, mpsc::UnboundedSender<(String, Option<String>)>>,
-        active_sessions: &mut usize,
+        active_sessions: &Arc<AtomicUsize>,
         start_time: Instant,
     ) -> Result<()> {
         match request {
@@ -98,7 +100,7 @@ impl SdkServer {
                         id,
                         status: "ok".into(),
                         version: VERSION.into(),
-                        active_sessions: *active_sessions,
+                        active_sessions: active_sessions.load(Ordering::Relaxed),
                         uptime_seconds: start_time.elapsed().as_secs(),
                     })
                     .await?;
@@ -169,7 +171,7 @@ impl SdkServer {
 
                 // Register approval channel
                 approval_ins.insert(session_id.clone(), approval_in_tx);
-                *active_sessions += 1;
+                active_sessions.fetch_add(1, Ordering::Relaxed);
 
                 // Respond immediately
                 transport
@@ -183,6 +185,7 @@ impl SdkServer {
 
                 // Spawn turn execution in background
                 let spawn_session_id = session_id;
+                let session_counter = Arc::clone(active_sessions);
                 tokio::spawn(async move {
                     let mut session = session;
                     if let Err(e) = session.execute_turn(prompt).await {
@@ -192,6 +195,7 @@ impl SdkServer {
                             message: format!("{e:#}"),
                         });
                     }
+                    session_counter.fetch_sub(1, Ordering::Relaxed);
                 });
             }
 
