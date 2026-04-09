@@ -196,16 +196,17 @@ impl SdkSession {
                 model: self.config.model.clone(),
             });
 
-            // Context health
-            let total_tokens = input_tok + output_tok;
+            // Context health — input_tokens represents the full conversation context
+            // sent to the model (system + messages + tools), which is the real measure
+            // of how full the context window is.
             let used_pct =
                 ((input_tok as f64 / MAX_CONTEXT_TOKENS as f64) * 100.0).min(100.0) as u8;
             self.send_notif(SdkNotification::ContextHealth {
                 session_id: self.session_id.clone(),
                 used_pct,
-                tokens_used: total_tokens,
+                tokens_used: input_tok,
                 tokens_max: MAX_CONTEXT_TOKENS,
-                compaction_imminent: used_pct >= 90,
+                compaction_imminent: used_pct >= 85,
             });
 
             // Budget check
@@ -353,6 +354,19 @@ impl SdkSession {
 
                     match approval_result {
                         Ok(Some((received_id, reason))) => {
+                            // Reject mismatched approval IDs — Phase A is single-session,
+                            // but this prevents out-of-order approvals from executing wrong tools.
+                            if received_id != approval_id {
+                                results.push(ContentBlock::ToolResult {
+                                    tool_use_id: id.clone(),
+                                    content: vec![ToolResultContent::text(format!(
+                                        "Approval ID mismatch: expected {}, got {}",
+                                        approval_id, received_id
+                                    ))],
+                                    is_error: Some(true),
+                                });
+                                continue;
+                            }
                             if reason.is_some() {
                                 // Denied by host
                                 let deny_msg = reason.unwrap_or_else(|| "Denied by host.".into());
@@ -363,14 +377,7 @@ impl SdkSession {
                                 });
                                 continue;
                             }
-                            // Approved — check ID matches
-                            if received_id != approval_id {
-                                debug!(
-                                    "Approval ID mismatch: expected {}, got {}",
-                                    approval_id, received_id
-                                );
-                            }
-                            // Fall through to execute
+                            // Approved — fall through to execute
                         }
                         Ok(None) => {
                             // Channel closed
