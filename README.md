@@ -162,12 +162,36 @@ wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/
 
 ---
 
+## SDK / Headless Mode
+
+Embed RustyClaw in any application — editors, CI/CD, scripts, custom UIs.
+
+```bash
+rustyclaw --headless
+```
+
+Starts a long-running NDJSON server on stdin/stdout. Pipe JSON requests in, read streaming responses out. Works from any language.
+
+```bash
+# Health check (no API key needed)
+(echo '{"id":"1","type":"health/check"}'; sleep 1) | rustyclaw --headless
+
+# Ask a question
+(echo '{"id":"1","type":"session/start","prompt":"What is 2+2?","max_turns":1}'; sleep 15) \
+  | rustyclaw --headless 2>/dev/null
+```
+
+Full docs, protocol reference, and examples: **[`sdk/`](sdk/)**
+
+---
+
 ## Architecture
 
 ```
 src/
 ├── main.rs           # Entry point, CLI args, .env auto-load
 ├── api/              # Anthropic + Ollama backends (streaming SSE)
+├── sdk/              # Headless NDJSON server (--headless mode)
 ├── tui/              # ratatui UI (inline viewport, no alt screen)
 ├── tools/            # 30+ tools (Bash, Read, Write, Edit, Glob, Grep, ...)
 ├── commands/         # 60+ slash commands

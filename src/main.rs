@@ -15,6 +15,7 @@ mod query_engine;
 mod rag;
 mod router;
 mod sandbox;
+mod sdk;
 mod session;
 mod settings;
 mod spawn;
@@ -90,6 +91,10 @@ struct Cli {
     /// Print response and exit (non-interactive / pipe mode)
     #[arg(short = 'p', long)]
     print: bool,
+
+    /// Run as headless SDK server (NDJSON stdio, long-running)
+    #[arg(long)]
+    headless: bool,
 
     /// Enable verbose/debug output
     #[arg(long)]
@@ -710,6 +715,13 @@ async fn main() -> Result<()> {
                 }
             }
         }
+    }
+
+    // --headless mode: long-running SDK server
+    if cli.headless {
+        let transport = crate::sdk::transport::stdio::StdioTransport::new();
+        crate::sdk::SdkServer::run(config, transport).await?;
+        return Ok(());
     }
 
     // --print mode: non-interactive, no TUI
