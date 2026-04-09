@@ -15,6 +15,7 @@ mod query_engine;
 mod rag;
 mod router;
 mod sandbox;
+mod sdk;
 mod session;
 mod settings;
 mod spawn;
