@@ -2,10 +2,10 @@
   <img src="assets/welcome.png" alt="RustyClaw" width="700">
 </p>
 
-<h3 align="center">A Rust-native Claude Code CLI</h3>
+<h3 align="center">Grip your codebase.</h3>
 
 <p align="center">
-  Single binary · No runtime · ~10ms startup · ~10MB RAM
+  Rust-native AI coding CLI · Single binary · No runtime · ~10ms startup
 </p>
 
 <p align="center">
@@ -14,6 +14,83 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="License"></a>
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-2024_edition-orange?style=flat-square&logo=rust" alt="Rust"></a>
 </p>
+
+---
+
+## What it looks like
+
+<table>
+<tr>
+<td width="50%">
+
+**Coding conversation — streaming**
+![Streaming](assets/conversation-streaming.png)
+
+</td>
+<td width="50%">
+
+**Completed response with cost tracking**
+![Complete](assets/conversation-complete.png)
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Codebase RAG search**
+![RAG search](assets/rag-search.png)
+
+</td>
+<td width="50%">
+
+**Model picker — Claude + Ollama**
+![Model picker](assets/ollama-models.png)
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Session manager**
+![Session picker](assets/session-picker.png)
+
+</td>
+<td width="50%">
+
+**Interactive help**
+![Help menu](assets/help-menu.png)
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Doctor diagnostics**
+![Doctor](assets/doctor.png)
+
+</td>
+<td width="50%">
+
+**Cost dashboard**
+![Cost](assets/cost-dashboard.png)
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Voice I/O — XTTS v2**
+![Voice](assets/voice-status.png)
+
+</td>
+<td width="50%">
+
+**Keybindings overlay**
+![Keybindings](assets/keybindings.png)
+
+</td>
+</tr>
+</table>
 
 ---
 
@@ -80,41 +157,6 @@ rustyclaw
 
 ---
 
-## Screenshots
-
-<table>
-<tr>
-<td width="50%">
-
-**Interactive Help**
-![Help menu](assets/help-menu.png)
-
-</td>
-<td width="50%">
-
-**Model Picker**
-![Model picker](assets/ollama-models.png)
-
-</td>
-</tr>
-<tr>
-<td width="50%">
-
-**Session Manager**
-![Session picker](assets/session-picker.png)
-
-</td>
-<td width="50%">
-
-**Doctor Diagnostics**
-![Doctor](assets/doctor.png)
-
-</td>
-</tr>
-</table>
-
----
-
 ## Highlights
 
 - **30+ tools** — Bash, Read, Write, Edit, Glob, Grep, WebFetch, Agent, LSP, Jupyter, MCP plugins, and more
@@ -122,10 +164,12 @@ rustyclaw
 - **Ollama integration** — Local models with automatic tool-use fallback
 - **Voice I/O** — Whisper STT + XTTS v2 TTS with voice cloning
 - **RAG indexing** — tree-sitter AST parsing, 8 languages, SQLite FTS5 search
-- **Smart routing** — Auto-route simple tasks to cheaper models
-- **Cost dashboard** — Real-time token/cost tracking with budget limits
+- **Smart routing** — Auto-route simple tasks to cheaper models, complex to Opus
+- **Cost dashboard** — Real-time token/cost tracking with budget limits (`/budget $5`)
+- **260+ spinner verbs** — Video games, medicine, cycling, and general whimsy while you wait
 - **SDK mode** — `--headless` NDJSON server for editor/CI embedding ([docs](sdk/))
 - **Session management** — Save, resume, search, export conversations
+- **Parallel agents** — Spawn background agents in isolated git worktrees
 - **Sandboxing** — bwrap / firejail / strict isolation
 - **XDG compliant** — Respects `$XDG_CONFIG_HOME`, `$XDG_DATA_HOME`, `$XDG_CACHE_HOME`
 
@@ -148,3 +192,9 @@ See **[FEATURES.md](FEATURES.md)** for the full reference.
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE).
+
+---
+
+<p align="center">
+  <sub>Built on Arch Linux with lots of enthusiasm.</sub>
+</p>

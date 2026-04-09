@@ -4,8 +4,6 @@
 //! binary-only env vars (`deeplink`) are excluded — they only compile as part
 //! of the `rustyclaw` binary.
 
-/// Claude Code version this build is based on.
-pub const BUILT_AGAINST_CLAUDE_VERSION: &str = "2.1.92";
 
 pub mod api;
 pub mod commands;

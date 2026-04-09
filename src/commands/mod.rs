@@ -408,72 +408,9 @@ fn cmd_banner(args: &str) -> CommandAction {
     }
 }
 
-fn detected_claude_version() -> Option<String> {
-    std::process::Command::new("claude")
-        .arg("--version")
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.split_whitespace().next().unwrap_or("").to_string())
-        .filter(|s| !s.is_empty())
-}
-
-/// Detect which JS package manager has claude installed globally.
-/// Returns (manager_name, upgrade_command).
-/// Tries pnpm → bun → npm in order; falls back to whichever is in PATH.
-fn detect_claude_package_manager() -> (&'static str, &'static str) {
-    // Check if each PM can find the package in its global store
-    let has_pm = |pm: &str| -> bool {
-        std::process::Command::new("which").arg(pm)
-            .output().map(|o| o.status.success()).unwrap_or(false)
-    };
-    let pm_has_claude = |pm: &str, args: &[&str]| -> bool {
-        std::process::Command::new(pm)
-            .args(args)
-            .output()
-            .map(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).contains("claude"))
-            .unwrap_or(false)
-    };
-
-    if has_pm("pnpm") && pm_has_claude("pnpm", &["list", "-g", "--depth", "0"]) {
-        return ("pnpm", "pnpm add -g @anthropic-ai/claude-code");
-    }
-    if has_pm("bun") && pm_has_claude("bun", &["pm", "ls", "--global"]) {
-        return ("bun", "bun add -g @anthropic-ai/claude-code");
-    }
-    if has_pm("npm") && pm_has_claude("npm", &["list", "-g", "--depth", "0"]) {
-        return ("npm", "npm update -g @anthropic-ai/claude-code");
-    }
-    // Fallback: prefer whichever is installed, in the same priority order
-    if has_pm("pnpm") { return ("pnpm", "pnpm add -g @anthropic-ai/claude-code"); }
-    if has_pm("bun")  { return ("bun",  "bun add -g @anthropic-ai/claude-code"); }
-    ("npm", "npm update -g @anthropic-ai/claude-code")
-}
 
 fn cmd_version() -> CommandAction {
-    let rfb_ver  = env!("CARGO_PKG_VERSION");
-    let based_on = crate::BUILT_AGAINST_CLAUDE_VERSION;
-    let installed = detected_claude_version();
-
-    let mut lines = vec![
-        format!("RustyClaw  v{rfb_ver}"),
-        format!("Based on       Claude Code v{based_on}"),
-    ];
-
-    match &installed {
-        Some(v) if v.as_str() != based_on => {
-            lines.push(format!("Installed      Claude Code v{v}  ⚠  newer than reviewed version"));
-        }
-        Some(v) => {
-            lines.push(format!("Installed      Claude Code v{v}  ✓"));
-        }
-        None => {
-            lines.push("Installed      Claude Code not found in PATH".into());
-        }
-    }
-
-    CommandAction::Message(lines.join("\n"))
+    CommandAction::Message(format!("RustyClaw v{}", env!("CARGO_PKG_VERSION")))
 }
 
 fn cmd_status(ctx: &CommandContext) -> CommandAction {
@@ -496,12 +433,8 @@ fn cmd_status(ctx: &CommandContext) -> CommandAction {
         "not set".into()
     };
 
-    let claude_ver = detected_claude_version()
-        .map(|v| format!("v{v}"))
-        .unwrap_or_else(|| "not found".into());
-
     let text = format!(
-        "RustyClaw v{ver}  (Claude Code {claude_ver} installed)\n\
+        "RustyClaw v{ver}\n\
          \n\
          Model:      {model}\n\
          Max tokens: {max_tok}\n\
@@ -909,22 +842,7 @@ fn cmd_doctor(ctx: &CommandContext) -> CommandAction {
     let mut checks: Vec<String> = Vec::new();
 
     checks.push(format!("System: {}", distro.name()));
-    checks.push(format!("RustyClaw v{}  |  based on Claude Code v{}",
-        env!("CARGO_PKG_VERSION"), crate::BUILT_AGAINST_CLAUDE_VERSION));
-    {
-        let based_on = crate::BUILT_AGAINST_CLAUDE_VERSION;
-        let (pm, upgrade_cmd) = detect_claude_package_manager();
-        match detected_claude_version() {
-            Some(ref v) if v.as_str() != based_on => {
-                checks.push(format!("⚠  Claude Code v{v} installed via {pm} — newer than reviewed v{based_on}"));
-                checks.push(format!("      To upgrade RustyClaw compatibility, run: {upgrade_cmd}"));
-            }
-            Some(ref v) =>
-                checks.push(format!("✓ Claude Code v{v} installed via {pm}")),
-            None =>
-                checks.push("  Claude Code not found in PATH (optional)".into()),
-        }
-    }
+    checks.push(format!("RustyClaw v{}", env!("CARGO_PKG_VERSION")));
     checks.push(String::new());
 
     // XDG / config directory

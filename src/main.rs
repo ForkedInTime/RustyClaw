@@ -55,9 +55,6 @@ impl tools::Tool for SyntheticOutputTool {
 }
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-/// The Claude Code release this port was last reviewed against.
-/// Update this constant whenever you audit the upstream changelog.
-pub const BUILT_AGAINST_CLAUDE_VERSION: &str = "2.1.92";
 
 #[derive(Debug, Clone, ValueEnum)]
 enum OutputFormat {
@@ -522,7 +519,7 @@ async fn main() -> Result<()> {
                     .arg("--help").output().is_ok();
                 if tts_ok { println!("  \u{2713} XTTS v2 (Coqui TTS) available"); }
                 else { println!("  - XTTS v2 not found (optional — needed for TTS)"); }
-                println!("\n  rustyclaw {VERSION} (built against Claude Code {BUILT_AGAINST_CLAUDE_VERSION})");
+                println!("\n  rustyclaw v{VERSION}");
                 return Ok(());
             }
             Commands::Update => {

@@ -284,9 +284,6 @@ pub struct App {
     pub cached_cwd: String,
     /// Optional label shown in the banner (from bannerOrgDisplay in ~/.claude/config.json)
     pub banner_label: Option<String>,
-    /// Installed Claude Code version, detected once at startup via `claude --version`
-    pub claude_code_version: Option<String>,
-
     /// Current session name (displayed in title bar)
     pub session_name: String,
 
@@ -436,14 +433,6 @@ impl App {
             effort: None,
             cached_cwd,
             banner_label: crate::config::Config::get_banner_label(),
-            claude_code_version: std::process::Command::new("claude")
-                .arg("--version")
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .and_then(|o| String::from_utf8(o.stdout).ok())
-                .map(|s| s.split_whitespace().next().unwrap_or("").to_string())
-                .filter(|s| !s.is_empty()),
             session_name: String::new(),
             recent_sessions: Vec::new(),
             show_welcome: true,

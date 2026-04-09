@@ -62,7 +62,7 @@ pub async fn run_tui(config: Config, resume_id: Option<String>) -> Result<()> {
 /// right below the box (matching TS rustyclaw/Ink compact behaviour).
 /// During chat: full terminal height to maximise scroll room.
 fn viewport_height(app: &App, term_cols: u16, term_rows: u16) -> u16 {
-    let show_banner = app.entries.is_empty() && app.streaming.is_empty();
+    let show_banner = app.show_welcome && app.entries.is_empty() && app.streaming.is_empty();
     let status_h = 1u16;
 
     let usable_w = term_cols.saturating_sub(2) as usize;
@@ -643,7 +643,7 @@ async fn run_loop(
             match Session::delete(&id).await {
                 Ok(()) => {
                     app.entries.push(ChatEntry::system(format!("Deleted session {}.", &id[..8])));
-                    // Refresh the session list overlay
+                    // Refresh the session list overlay + welcome banner
                     if let Ok(list) = Session::list().await {
                         let mut lines = vec![
                             format!("Sessions ({})\n", list.len()),
@@ -662,6 +662,16 @@ async fn run_loop(
                         let mut new_overlay = Overlay::with_items("sessions", lines.join("\n"), ids.clone());
                         new_overlay.selected = prev_selected.min(ids.len().saturating_sub(1));
                         app.overlay = Some(new_overlay);
+                        // Also refresh the welcome banner's recent sessions
+                        app.recent_sessions = list
+                            .into_iter()
+                            .filter(|m| m.id != session.id)
+                            .take(5)
+                            .map(|m| {
+                                let id_short = if m.id.len() >= 8 { m.id[..8].to_string() } else { m.id.clone() };
+                                (m.name, id_short, m.preview)
+                            })
+                            .collect();
                     }
                 }
                 Err(e) => {
@@ -1234,8 +1244,8 @@ async fn handle_key(
         return Ok(());
     }
 
-    // Block input while loading (except Ctrl+C)
-    if app.is_loading && key.code != Char('c') { return Ok(()); }
+    // Block input while loading (except Ctrl+C and Esc)
+    if app.is_loading && key.code != Char('c') && key.code != Esc { return Ok(()); }
 
     // ── Vim mode routing ───────────────────────────────────────────────────────
     if app.vim_enabled {
@@ -1391,8 +1401,6 @@ async fn handle_key(
 
             // Slash command dispatch (disabled when --disable-slash-commands)
             if input.starts_with('/') && !config.disable_slash_commands {
-                app.show_welcome = false;
-
                 let last_assistant = app.entries.iter().rev()
                     .find(|e| matches!(e.kind, crate::tui::app::EntryKind::Assistant))
                     .map(|e| e.text.as_str());
@@ -1423,6 +1431,18 @@ async fn handle_key(
                         messages.clear();
                         app.clear();
                         app.pending_screen_clear = true;
+                        // Refresh recent sessions so the welcome banner is up-to-date
+                        if let Ok(list) = Session::list().await {
+                            app.recent_sessions = list
+                                .into_iter()
+                                .filter(|m| m.id != session.id)
+                                .take(5)
+                                .map(|m| {
+                                    let id_short = if m.id.len() >= 8 { m.id[..8].to_string() } else { m.id.clone() };
+                                    (m.name, id_short, m.preview)
+                                })
+                                .collect();
+                        }
                     }
                     CommandAction::Compact => {
                         if messages.is_empty() {
@@ -2983,9 +3003,8 @@ async fn handle_key(
             app.api_task = Some(handle.abort_handle());
         }
 
-        // '?' shows keybindings only when input is empty — otherwise insert normally
+        // '?' shows keybindings as an overlay when input is empty — otherwise insert normally
         (Char('?'), _) if !app.is_loading && app.input.is_empty() => {
-            app.show_welcome = false;
             let last_assistant = app.entries.iter().rev()
                 .find(|e| matches!(e.kind, crate::tui::app::EntryKind::Assistant))
                 .map(|e| e.text.as_str());
@@ -3007,8 +3026,7 @@ async fn handle_key(
                 btw_note: app.btw_note.as_deref(),
             };
             if let CommandAction::Message(text) = dispatch("/keybindings", &ctx) {
-                app.entries.push(ChatEntry::command_output(text));
-                app.follow_bottom = true;
+                app.overlay = Some(Overlay::new("keybindings", text));
             }
         }
 
