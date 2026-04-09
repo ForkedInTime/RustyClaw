@@ -90,8 +90,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // avoiding 8+ separate theme_colors() calls per frame.
     let tc = theme_colors(&app.theme);
 
-    // Welcome screen = no entries and nothing streaming yet
-    let show_banner = app.entries.is_empty() && app.streaming.is_empty();
+    // Welcome screen — shown when no chat entries exist yet.
+    // Automatically hides when any content is pushed (commands, messages, etc.)
+    // and reappears after /clear (which empties entries).
+    let show_banner = app.show_welcome && app.entries.is_empty() && app.streaming.is_empty();
 
     // Collect input to String once — reused in both height calc and draw_input.
     let full_input: String = app.input.iter().collect();
@@ -151,10 +153,7 @@ fn draw_banner(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(tc.accent))
         .title(Span::styled(
-            match &app.claude_code_version {
-                Some(cv) => format!(" rustyclaw v{VERSION}  ·  Claude Code v{cv} "),
-                None     => format!(" rustyclaw v{VERSION} "),
-            },
+            format!(" rustyclaw v{VERSION} "),
             Style::default().fg(tc.accent).add_modifier(Modifier::BOLD),
         ));
 
@@ -228,7 +227,7 @@ fn draw_banner_left(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
     lines.push(Line::raw(""));  // space before tagline
     lines.push(Line::from(
         Span::styled(
-            "  Rust port of Clawd-Code",
+            "  Grip your codebase.",
             Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
         )
     ));
