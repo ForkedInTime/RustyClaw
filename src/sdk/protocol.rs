@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 // ── Sub-types ────────────────────────────────────────────────────────────────
 
 /// Tool approval policy — set at session start.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Policy {
     /// Tools that execute silently (no notification).
     #[serde(default)]
@@ -30,7 +30,7 @@ pub struct Policy {
 fn default_approval_timeout() -> u64 { 60 }
 
 /// Host capabilities — tells the agent what the environment supports.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Capabilities {
     #[serde(default = "default_true")]
     pub show_diff: bool,
@@ -62,14 +62,14 @@ impl Default for Capabilities {
 }
 
 /// Token usage summary.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenUsage {
     pub input: u64,
     pub output: u64,
 }
 
 /// Session metadata for list responses.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionInfo {
     pub id: String,
     pub name: String,
@@ -78,7 +78,7 @@ pub struct SessionInfo {
 }
 
 /// RAG search result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RagResult {
     pub file: String,
     pub line: u32,
@@ -88,7 +88,7 @@ pub struct RagResult {
 }
 
 /// Per-model cost breakdown.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelCostEntry {
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -99,7 +99,7 @@ pub struct ModelCostEntry {
 pub type ToolUsageMap = std::collections::HashMap<String, u32>;
 
 /// Router decision info.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RouterDecision {
     pub complexity: String,
     pub reason: String,
@@ -108,6 +108,7 @@ pub struct RouterDecision {
 // ── Requests (Host → RustyClaw) ─────────────────────────────────────────────
 
 /// All possible requests from the host.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub enum SdkRequest {
