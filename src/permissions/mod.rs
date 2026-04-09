@@ -142,6 +142,80 @@ pub enum CheckResult {
     Deny,
 }
 
+/// Split a compound bash command into individual sub-commands.
+/// Handles `&&`, `||`, `;`, and `|` as separators.
+/// Does NOT descend into subshells `$(...)` or backticks — just top-level splits.
+pub fn split_compound_command(cmd: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let bytes = cmd.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    let mut in_single = false;
+    let mut in_double = false;
+
+    while i < len {
+        let c = bytes[i];
+        match c {
+            b'\'' if !in_double => { in_single = !in_single; i += 1; }
+            b'"'  if !in_single => { in_double = !in_double; i += 1; }
+            b'\\' if !in_single => { i += 2; } // skip escaped char
+            _ if in_single || in_double => { i += 1; }
+            b'&' if i + 1 < len && bytes[i + 1] == b'&' => {
+                let part = cmd[start..i].trim();
+                if !part.is_empty() { parts.push(part); }
+                i += 2;
+                start = i;
+            }
+            b'|' if i + 1 < len && bytes[i + 1] == b'|' => {
+                let part = cmd[start..i].trim();
+                if !part.is_empty() { parts.push(part); }
+                i += 2;
+                start = i;
+            }
+            b';' => {
+                let part = cmd[start..i].trim();
+                if !part.is_empty() { parts.push(part); }
+                i += 1;
+                start = i;
+            }
+            b'|' => {
+                let part = cmd[start..i].trim();
+                if !part.is_empty() { parts.push(part); }
+                i += 1;
+                start = i;
+            }
+            _ => { i += 1; }
+        }
+    }
+    let tail = cmd[start..].trim();
+    if !tail.is_empty() { parts.push(tail); }
+    parts
+}
+
+/// Check a compound bash command against permission rules.
+/// Returns Deny if ANY sub-command matches a deny rule.
+/// Returns Allow only if ALL sub-commands match an allow rule.
+/// Otherwise returns Ask.
+pub fn check_compound_bash(state: &PermissionState, full_command: &str) -> CheckResult {
+    let subs = split_compound_command(full_command);
+    if subs.is_empty() {
+        return CheckResult::Ask;
+    }
+
+    let mut any_ask = false;
+    for sub in &subs {
+        let fake_input = serde_json::json!({ "command": *sub });
+        let result = state.check_with_input("Bash", Some(&fake_input));
+        match result {
+            CheckResult::Deny => return CheckResult::Deny,
+            CheckResult::Ask => any_ask = true,
+            CheckResult::Allow => {}
+        }
+    }
+    if any_ask { CheckResult::Ask } else { CheckResult::Allow }
+}
+
 /// Build a human-readable description of a tool call for the permission dialog.
 pub fn describe_tool_call(tool_name: &str, input: &serde_json::Value) -> String {
     match tool_name {

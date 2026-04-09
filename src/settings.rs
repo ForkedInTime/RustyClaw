@@ -173,13 +173,18 @@ pub struct Settings {
     #[serde(rename = "ttsEnabled")]
     pub tts_enabled: Option<bool>,
 
-    /// Path to the piper .onnx voice model file.
+    /// Path to the TTS voice model file or clone sample.
     #[serde(rename = "ttsVoiceModel")]
     pub tts_voice_model: Option<String>,
 
     /// Whether desktop notifications + terminal bell fire on task completion.
     #[serde(rename = "notificationsEnabled")]
     pub notifications_enabled: Option<bool>,
+
+    /// Spinner style: "themed" (default), "minimal", or "silent".
+    /// "themed" = fun verbs (gaming/medicine/cycling), "minimal" = just "Working…", "silent" = no spinner text.
+    #[serde(rename = "spinnerStyle")]
+    pub spinner_style: Option<String>,
 
     /// Whether bwrap sandbox allows outbound network (default true).
     #[serde(rename = "sandboxAllowNetwork")]
@@ -212,6 +217,12 @@ pub struct Settings {
     /// Model for super-high-complexity tasks needing 1M context (default: claude-opus-4-6).
     #[serde(rename = "routerSuperHighModel")]
     pub router_super_high_model: Option<String>,
+
+    /// Autonomy level for file modifications: "suggest", "auto-edit", "full-auto".
+    /// - "suggest": show diff preview + ask before applying any Write/Edit
+    /// - "auto-edit": auto-apply edits to existing files, ask for new files (default)
+    /// - "full-auto": apply all changes without asking
+    pub autonomy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -313,6 +324,7 @@ impl Settings {
             tts_enabled:            other.tts_enabled.or(self.tts_enabled),
             tts_voice_model:        other.tts_voice_model.or(self.tts_voice_model),
             notifications_enabled:  other.notifications_enabled.or(self.notifications_enabled),
+            spinner_style:          other.spinner_style.or(self.spinner_style),
             sandbox_allow_network:  other.sandbox_allow_network.or(self.sandbox_allow_network),
             disable_skill_shell_execution: other.disable_skill_shell_execution.or(self.disable_skill_shell_execution),
             router_enabled:       other.router_enabled.or(self.router_enabled),
@@ -321,6 +333,7 @@ impl Settings {
             router_medium_model:  other.router_medium_model.or(self.router_medium_model),
             router_high_model:    other.router_high_model.or(self.router_high_model),
             router_super_high_model: other.router_super_high_model.or(self.router_super_high_model),
+            autonomy:             other.autonomy.or(self.autonomy),
             permissions: PermissionsConfig {
                 // Union both lists — project additions stack on top of global
                 allow: {

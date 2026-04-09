@@ -422,6 +422,20 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
                 lines.push(Line::raw(""));
             }
 
+            EntryKind::Thinking => {
+                lines.push(Line::from(Span::styled(
+                    "  💭 Thinking…",
+                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD | Modifier::ITALIC),
+                )));
+                for raw in entry.text.lines() {
+                    lines.push(Line::from(Span::styled(
+                        format!("  │ {raw}"),
+                        Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                    )));
+                }
+                lines.push(Line::raw(""));
+            }
+
             EntryKind::Error => {
                 lines.push(Line::from(vec![
                     Span::styled("✖ ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
@@ -731,6 +745,23 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
         ));
     }
 
+    // Context usage % display
+    if app.cost_tracker.last_input_tokens > 0 {
+        let ctx_window = context_window_for_model(&app.model_short);
+        let pct = app.cost_tracker.context_pct(ctx_window);
+        let ctx_color = if pct >= 90.0 {
+            Color::Red
+        } else if pct >= 70.0 {
+            Color::Yellow
+        } else {
+            Color::DarkGray
+        };
+        left_spans.push(Span::styled(
+            format!("  │  ctx {:.0}%", pct),
+            Style::default().fg(ctx_color),
+        ));
+    }
+
     // Cost display
     let cost_text = app.cost_tracker.banner_text();
     if !cost_text.is_empty() {
@@ -760,6 +791,21 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
         Paragraph::new(Span::styled(right_text, Style::default().fg(tc.assistant))),
         right_area,
     );
+}
+
+/// Estimate context window size (tokens) for a model name.
+fn context_window_for_model(model: &str) -> u64 {
+    let m = model.to_lowercase();
+    if m.contains("opus") { 200_000 }
+    else if m.contains("sonnet") { 200_000 }
+    else if m.contains("haiku") { 200_000 }
+    else if m.contains("gpt-4o") { 128_000 }
+    else if m.contains("gpt-4") { 128_000 }
+    else if m.contains("deepseek") { 64_000 }
+    else if m.contains("llama") { 128_000 }
+    else if m.contains("mistral") { 32_000 }
+    else if m.contains("gemma") { 8_192 }
+    else { 200_000 } // conservative default for Claude models
 }
 
 // ── Permission dialog ─────────────────────────────────────────────────────────

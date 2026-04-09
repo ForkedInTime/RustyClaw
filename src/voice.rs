@@ -217,126 +217,29 @@ async fn transcribe_api(wav: &std::path::Path, url: &str, api_key: &str) -> Resu
     Ok(resp.text().await?.trim().to_string())
 }
 
-// ── Text-to-Speech via piper ──────────────────────────────────────────────────
-
-pub fn piper_available() -> bool {
-    which("piper") || which("piper-tts")
-}
+// ── Text-to-Speech ───────────────────────────────────────────────────────────
 
 pub fn audio_player_available() -> bool {
     which("aplay") || which("paplay") || which("mpv") || which("ffplay") || which("play")
 }
 
-/// Find the default piper voice model (.onnx) by searching known locations.
-/// Prefers en_US-lessac-high (natural US female), falls back to any .onnx found.
-pub fn find_default_voice() -> Option<String> {
-    // Preferred voice file names (plain or under Arch system-package subpath)
-    let preferred_subpaths = [
-        "en_US-lessac-high.onnx",
-        "en/en_US/lessac/high/en_US-lessac-high.onnx",
-        "en_US-jenny-dioco-medium.onnx",
-        "en/en_US/jenny_dioco/medium/en_US-jenny_dioco-medium.onnx",
-        "en_GB-cori-high.onnx",
-        "en/en_GB/cori/high/en_GB-cori-high.onnx",
-    ];
-    let search_roots: Vec<std::path::PathBuf> = [
-        dirs::home_dir().map(|h| h.join(".local/share/piper")),
-        Some(std::path::PathBuf::from("/usr/share/piper-voices")),
-        Some(std::path::PathBuf::from("/usr/lib/piper")),
-        Some(std::path::PathBuf::from("/usr/share/piper")),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-
-    // Check preferred relative paths under each root first
-    for root in &search_roots {
-        for subpath in &preferred_subpaths {
-            let p = root.join(subpath);
-            if p.exists() { return Some(p.display().to_string()); }
-        }
-    }
-    // Fall back to any .onnx found by recursive walk (depth ≤ 5)
-    for root in &search_roots {
-        if let Some(found) = find_onnx_recursive(root, 5) {
-            return Some(found);
-        }
-    }
-    None
-}
-
-/// Find all installed piper voice models (.onnx files) across known locations.
+/// Find all installed XTTS v2 voice clone samples.
 /// Returns Vec of (display_name, full_path) sorted alphabetically by name.
 pub fn find_all_voices() -> Vec<(String, String)> {
-    let search_roots: Vec<std::path::PathBuf> = [
-        dirs::home_dir().map(|h| h.join(".local/share/piper")),
-        Some(std::path::PathBuf::from("/usr/share/piper-voices")),
-        Some(std::path::PathBuf::from("/usr/lib/piper")),
-        Some(std::path::PathBuf::from("/usr/share/piper")),
-    ]
-    .into_iter()
-    .flatten()
-    .filter(|p| p.exists())
-    .collect();
-
     let mut voices = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for root in &search_roots {
-        collect_onnx_recursive(root, 5, &mut voices, &mut seen);
+    // Check for voice clone sample
+    if let Some(clone_path) = voice_clone_sample_path() {
+        if clone_path.exists() {
+            let tier = detect_clone_tier(&clone_path);
+            voices.push((format!("Your voice ({tier} tier)"), clone_path.display().to_string()));
+        }
     }
-    voices.sort_by(|a, b| a.0.cmp(&b.0));
+    // Default XTTS v2 speaker
+    if xtts_available() {
+        voices.push((format!("XTTS v2 default ({XTTS_DEFAULT_SPEAKER})"), XTTS_DEFAULT_SPEAKER.to_string()));
+    }
     voices
 }
-
-fn collect_onnx_recursive(
-    dir: &std::path::Path,
-    depth: u8,
-    out: &mut Vec<(String, String)>,
-    seen: &mut std::collections::HashSet<String>,
-) {
-    if depth == 0 { return; }
-    let entries = match std::fs::read_dir(dir) { Ok(e) => e, Err(_) => return };
-    let mut subdirs = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_owned();
-        if path.is_file() && name.ends_with(".onnx") && !name.ends_with(".onnx.json") {
-            let full = path.display().to_string();
-            if seen.insert(full.clone()) {
-                // Display name: strip .onnx, replace underscores
-                let display = name.trim_end_matches(".onnx").to_string();
-                out.push((display, full));
-            }
-        } else if path.is_dir() {
-            subdirs.push(path);
-        }
-    }
-    for sub in subdirs {
-        collect_onnx_recursive(&sub, depth - 1, out, seen);
-    }
-}
-
-fn find_onnx_recursive(dir: &std::path::Path, depth: u8) -> Option<String> {
-    if depth == 0 { return None; }
-    let entries = std::fs::read_dir(dir).ok()?;
-    let mut subdirs = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_owned();
-        if path.is_file() && name.ends_with(".onnx") && !name.ends_with(".onnx.json") {
-            return Some(path.display().to_string());
-        } else if path.is_dir() {
-            subdirs.push(path);
-        }
-    }
-    for sub in subdirs {
-        if let Some(found) = find_onnx_recursive(&sub, depth - 1) {
-            return Some(found);
-        }
-    }
-    None
-}
-
 
 /// Strip markdown so text reads naturally aloud.
 fn strip_for_speech(text: &str) -> String {
@@ -409,7 +312,8 @@ fn strip_inline_md(s: &str) -> String {
 pub const TTS_WORD_LIMIT: usize = 200;
 
 /// Default XTTS v2 speaker when no voice clone is configured.
-pub const XTTS_DEFAULT_SPEAKER: &str = "Craig Gutsy";
+/// "Daisy Studious" — clear, warm female voice from the XTTS v2 multi-dataset model.
+pub const XTTS_DEFAULT_SPEAKER: &str = "Daisy Studious";
 
 /// Port for the XTTS v2 background server.
 const XTTS_SERVER_PORT: u16 = 5002;
@@ -589,9 +493,71 @@ async fn speak_via_server(
     Ok(truncated)
 }
 
-/// Synthesise `text` and play it.
+/// Synthesise via XTTS v2 server using ONLY the default speaker (no clone).
+async fn speak_via_server_default(
+    text: &str,
+    stop_rx: tokio::sync::oneshot::Receiver<()>,
+) -> Result<bool> {
+    let clean = strip_for_speech(text);
+    if clean.is_empty() { return Ok(false); }
+
+    let words: Vec<&str> = clean.split_whitespace().collect();
+    let truncated = words.len() > TTS_WORD_LIMIT;
+    let speech_text = if truncated {
+        words[..TTS_WORD_LIMIT].join(" ") + ". Response trimmed."
+    } else {
+        clean
+    };
+
+    let body = format!(
+        r#"{{"text":"{}","speaker":"{}","language":"en"}}"#,
+        speech_text.replace('\\', "\\\\").replace('"', "\\\""),
+        XTTS_DEFAULT_SPEAKER,
+    );
+
+    let wav_out = std::env::temp_dir().join("rustyclaw-xtts-test.wav");
+    tokio::pin!(stop_rx);
+
+    let mut curl = Command::new("curl")
+        .args([
+            "-s", "-X", "POST",
+            &format!("http://127.0.0.1:{XTTS_SERVER_PORT}/tts"),
+            "-H", "Content-Type: application/json",
+            "-d", &body,
+            "--output", &wav_out.display().to_string(),
+            "--max-time", "30",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    tokio::select! {
+        biased;
+        _ = &mut stop_rx => {
+            let _ = curl.kill().await;
+            let _ = tokio::fs::remove_file(&wav_out).await;
+            return Ok(truncated);
+        }
+        status = curl.wait() => {
+            if !status?.success() {
+                return Err(anyhow!("XTTS v2 server request failed"));
+            }
+        }
+    }
+
+    let meta = tokio::fs::metadata(&wav_out).await?;
+    if meta.len() < 1000 {
+        let _ = tokio::fs::remove_file(&wav_out).await;
+        return Err(anyhow!("XTTS v2 server returned invalid audio"));
+    }
+
+    play_wav(&wav_out, stop_rx).await?;
+    Ok(truncated)
+}
+
+/// Synthesise `text` and play it via XTTS v2.
 ///
-/// Priority: XTTS v2 server (GPU, fast) → XTTS v2 CLI → piper (last resort).
+/// Priority: XTTS v2 server (GPU, fast) → XTTS v2 CLI.
 /// `stop_rx` — send () to abort mid-synthesis or mid-playback.
 /// Returns `Ok(true)` if truncated (hit word limit), `Ok(false)` if complete, `Err` on failure.
 pub async fn speak(
@@ -614,8 +580,32 @@ pub async fn speak(
         return speak_xtts_default(text, stop_rx).await;
     }
 
-    // ── Piper fallback (robotic, last resort) ──────────────────────────────
-    speak_piper(text, _voice_model, stop_rx).await
+    Err(anyhow!(
+        "No TTS engine found.\n\n\
+         Install XTTS v2:\n  \
+         uv tool install TTS --python 3.11 \\\n    \
+         --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'"
+    ))
+}
+
+/// Synthesise using only the default speaker — ignores any voice clone.
+/// Used by `/voice test` so the demo is always clean and consistent.
+pub async fn speak_default_only(
+    text: &str,
+    stop_rx: tokio::sync::oneshot::Receiver<()>,
+) -> Result<bool> {
+    if xtts_server_running() {
+        return speak_via_server_default(text, stop_rx).await;
+    }
+    if xtts_available() {
+        return speak_xtts_default(text, stop_rx).await;
+    }
+    Err(anyhow!(
+        "No TTS engine found.\n\n\
+         Install XTTS v2:\n  \
+         uv tool install TTS --python 3.11 \\\n    \
+         --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'"
+    ))
 }
 
 /// Synthesise via XTTS v2 using a built-in default speaker (no clone needed).
@@ -669,69 +659,6 @@ async fn speak_xtts_default(
                 ));
             }
         }
-    }
-
-    play_wav(&wav_out, stop_rx).await?;
-    Ok(truncated)
-}
-
-/// Piper fallback — robotic but lightweight. Used only when XTTS v2 is not installed.
-async fn speak_piper(
-    text: &str,
-    voice_model: Option<&str>,
-    stop_rx: tokio::sync::oneshot::Receiver<()>,
-) -> Result<bool> {
-    let clean = strip_for_speech(text);
-    if clean.is_empty() { return Ok(false); }
-
-    let words: Vec<&str> = clean.split_whitespace().collect();
-    let truncated = words.len() > TTS_WORD_LIMIT;
-    let speech_text = if truncated {
-        words[..TTS_WORD_LIMIT].join(" ") + ". Response trimmed."
-    } else {
-        clean
-    };
-
-    let piper_bin = if which("piper") { "piper" }
-        else if which("piper-tts") { "piper-tts" }
-        else { return Err(anyhow!(
-            "No TTS engine found.\n\n\
-             Recommended (natural voice):  uv tool install TTS --python 3.11 --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'\n\
-             Fallback (robotic):           pipx install piper-tts"
-        )); };
-
-    let model = voice_model
-        .map(|s| s.to_string())
-        .or_else(find_default_voice)
-        .ok_or_else(|| anyhow!(
-            "No piper voice model found.\n\
-             mkdir -p ~/.local/share/piper && cd ~/.local/share/piper\n\
-             wget …/en_US-lessac-high.onnx  (run /voice for the full URL)"
-        ))?;
-
-    let wav_out = std::env::temp_dir().join("rustyclaw-tts.wav");
-    tokio::pin!(stop_rx);
-
-    let mut piper = Command::new(piper_bin)
-        .args(["--model", &model, "--output_file", &wav_out.display().to_string()])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-
-    if let Some(mut stdin) = piper.stdin.take() {
-        use tokio::io::AsyncWriteExt;
-        stdin.write_all(speech_text.as_bytes()).await?;
-    }
-
-    tokio::select! {
-        biased;
-        _ = &mut stop_rx => {
-            let _ = piper.kill().await;
-            let _ = tokio::fs::remove_file(&wav_out).await;
-            return Ok(truncated);
-        }
-        _ = piper.wait() => {}
     }
 
     play_wav(&wav_out, stop_rx).await?;
@@ -816,9 +743,8 @@ pub fn voice_status(enabled: bool, tts_enabled: bool) -> String {
         "DISABLED"
     };
 
-    // ── TTS status — XTTS v2 is primary, piper is last-resort fallback ─────
+    // ── TTS status (XTTS v2 only) ──────────────────────────────────────────
     let xtts_ok = xtts_available();
-    let piper_ok = piper_available();
     let player_ok = audio_player_available();
     let tts_overall = if tts_enabled { "ENABLED" } else { "DISABLED" };
 
@@ -828,10 +754,8 @@ pub fn voice_status(enabled: bool, tts_enabled: bool) -> String {
         if gpu { "✓ XTTS v2 server running (GPU — fast)" } else { "✓ XTTS v2 server running (CPU)" }
     } else if xtts_ok {
         "✓ XTTS v2 available (server will auto-start on use)"
-    } else if piper_ok {
-        "⚠ piper only — robotic fallback (install XTTS v2 for natural voice)"
     } else {
-        "✗ no TTS engine installed"
+        "✗ XTTS v2 not installed"
     };
 
     // Voice clone status
@@ -847,7 +771,7 @@ pub fn voice_status(enabled: bool, tts_enabled: bool) -> String {
         "— (requires XTTS v2)".to_string()
     };
 
-    let tts_ready = xtts_ok || piper_ok;
+    let tts_ready = xtts_ok;
     let all_input_ok = recorder_ok && transcription_ok;
 
     let mut out = format!(
@@ -868,7 +792,7 @@ pub fn voice_status(enabled: bool, tts_enabled: bool) -> String {
            /voice disable        — disable voice input\n\
            /voice speak on|off   — enable/disable TTS output\n\
            /voice test           — play a test phrase\n\
-           /voice clone          — clone your voice (XTTS v2)\n\
+           /voice clone          — record a custom voice for TTS\n\
            /voice clone remove   — revert to default speaker\n\
            Ctrl+R                — start/stop recording (when enabled)",
         if player_ok { "✓ available" } else { "✗ no player (install: sudo pacman -S mpv)" },
@@ -888,10 +812,9 @@ pub fn voice_status(enabled: bool, tts_enabled: bool) -> String {
                            \n    — or: echo 'OPENAI_API_KEY=sk-...' >> ~/.env");
         }
         if !xtts_ok {
-            out.push_str("\n\n  Setup needed — XTTS v2 (natural voice, STRONGLY recommended):\n\
+            out.push_str("\n\n  Setup needed — XTTS v2:\n\
                            \n    uv tool install TTS --python 3.11 \\\n\
-                             \x20     --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'\n\
-                           \n    ⚠ Piper is a robotic fallback. XTTS v2 sounds like a real human.");
+                             \x20     --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'");
         }
         if !player_ok {
             out.push_str("\n\n  Setup needed — audio player:\n\

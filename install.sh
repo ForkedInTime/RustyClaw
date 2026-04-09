@@ -2,10 +2,12 @@
 # RustyClaw installer — single-binary Claude Code alternative written in Rust
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/USER/RustyClaw/main/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/USER/RustyClaw/main/install.sh | bash -s v0.2.0
+#   curl -fsSL https://raw.githubusercontent.com/ForkedInTime/RustyClaw/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/ForkedInTime/RustyClaw/main/install.sh | bash -s v0.2.0
 #
 # Installs to ~/.local/bin/rustyclaw (or /usr/local/bin with --global)
+# Supports Linux (x64, arm64, musl) and macOS (Intel, Apple Silicon)
+# For Windows: download .exe from GitHub Releases or use `cargo install --path .`
 
 set -e
 
@@ -26,8 +28,14 @@ done
 
 case "$(uname -s)" in
   Linux)  os="linux" ;;
-  Darwin) echo "macOS support coming soon. Build from source: cargo install --path ." >&2; exit 1 ;;
-  *)      echo "Unsupported OS: $(uname -s)" >&2; exit 1 ;;
+  Darwin) os="macos" ;;
+  MINGW*|MSYS*|CYGWIN*)
+    echo "On Windows, download the .exe directly from:"
+    echo "  https://github.com/${REPO}/releases/latest"
+    echo "Or build from source: cargo install --path ."
+    exit 1
+    ;;
+  *) echo "Unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
 
 case "$(uname -m)" in
@@ -36,11 +44,15 @@ case "$(uname -m)" in
   *)               echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
 
-# Detect musl vs glibc
-if ldd --version 2>&1 | grep -qi musl || [ -f /lib/libc.musl-*.so.1 ] 2>/dev/null; then
-  platform="linux-${arch}-musl"
+# Detect musl vs glibc (Linux only)
+if [ "$os" = "linux" ]; then
+  if ldd --version 2>&1 | grep -qi musl || [ -f /lib/libc.musl-*.so.1 ] 2>/dev/null; then
+    platform="linux-${arch}-musl"
+  else
+    platform="linux-${arch}"
+  fi
 else
-  platform="linux-${arch}"
+  platform="macos-${arch}"
 fi
 
 ARTIFACT="rustyclaw-${platform}"
@@ -73,7 +85,14 @@ curl -fsSL -o "${TMPDIR}/checksum.txt" "$CHECKSUM_URL"
 # ── Verify checksum ──────────────────────────────────────────────────────────
 
 EXPECTED=$(cut -d' ' -f1 "${TMPDIR}/checksum.txt")
-ACTUAL=$(sha256sum "${TMPDIR}/rustyclaw" | cut -d' ' -f1)
+if command -v sha256sum &>/dev/null; then
+  ACTUAL=$(sha256sum "${TMPDIR}/rustyclaw" | cut -d' ' -f1)
+elif command -v shasum &>/dev/null; then
+  ACTUAL=$(shasum -a 256 "${TMPDIR}/rustyclaw" | cut -d' ' -f1)
+else
+  echo "Warning: no sha256sum or shasum found — skipping checksum verification"
+  ACTUAL="$EXPECTED"
+fi
 
 if [ "$EXPECTED" != "$ACTUAL" ]; then
   echo "Checksum verification FAILED" >&2
