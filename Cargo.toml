@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 description = "RustyClaw — a Rust-native Claude Code CLI"
 
+[lib]
+name = "rustyclaw"
+path = "src/lib.rs"
+
 [[bin]]
 name = "rustyclaw"
 path = "src/main.rs"
