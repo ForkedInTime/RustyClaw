@@ -1,0 +1,47 @@
+# Security Policy
+
+## Supported Versions
+
+| Version | Supported |
+|---------|-----------|
+| 0.1.x   | Yes       |
+
+## Reporting a Vulnerability
+
+If you discover a security vulnerability in RustyClaw, please report it responsibly.
+
+**Do NOT open a public GitHub issue for security vulnerabilities.**
+
+Instead, please email the maintainers or use [GitHub's private vulnerability reporting](https://github.com/ForkedInTime/RustyClaw/security/advisories/new).
+
+### What to Include
+
+- Description of the vulnerability
+- Steps to reproduce
+- Potential impact
+- Suggested fix (if any)
+
+### Response Timeline
+
+- **Acknowledgment** — within 48 hours
+- **Assessment** — within 1 week
+- **Fix or mitigation** — as soon as practical, depending on severity
+
+## Security Considerations
+
+RustyClaw executes shell commands and modifies files as part of its core functionality. Users should be aware of:
+
+- **API keys** — stored in `.env` files. Never commit these to version control.
+- **Tool execution** — the AI agent can run Bash commands. Use sandboxing (`bwrap`, `firejail`, `strict`) for untrusted workloads.
+- **MCP plugins** — third-party plugins execute with the same permissions as RustyClaw.
+- **SDK / Headless mode** — the NDJSON server accepts commands on stdin. Secure the transport layer in production deployments.
+
+## Sandboxing
+
+RustyClaw supports multiple sandbox backends to limit tool execution:
+
+```
+bwrap      — bubblewrap, lightweight Linux sandboxing
+firejail   — security sandbox with predefined profiles
+strict     — most restrictive, minimal filesystem access
+```
