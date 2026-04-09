@@ -1,79 +1,35 @@
-# RustyClaw
+<p align="center">
+  <img src="assets/welcome.png" alt="RustyClaw" width="700">
+</p>
 
-A Rust-native Claude Code CLI. Single binary, no runtime, ~10ms startup.
+<h3 align="center">A Rust-native Claude Code CLI</h3>
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/ForkedInTime/RustyClaw/main/install.sh | bash
-```
+<p align="center">
+  Single binary · No runtime · ~10ms startup · ~10MB RAM
+</p>
 
-![Welcome screen](assets/welcome.png)
-
----
-
-## Why?
-
-| | Claude Code (npm) | RustyClaw |
-|---|---|---|
-| Runtime | Node.js / Bun | None (native binary) |
-| Startup | ~300ms | ~10ms |
-| Memory | ~150MB | ~10MB |
-| Binary | ~50MB JS bundle | ~8MB stripped |
-| Ollama | No | Built-in |
-| Voice TTS | No | Piper integration |
-| Sandbox | No | bwrap / firejail / strict |
-
-Same Claude API, same tools, same CLAUDE.md format. Just faster and self-contained.
-
----
-
-## Features at a Glance
-
-### Interactive Model Picker
-
-Switch between Claude models and local Ollama models mid-session. Tab-complete model names, or browse with `/model`.
-
-![Ollama model picker](assets/ollama-models.png)
-
-### Session Manager
-
-Browse, resume, and delete sessions with `/session`. Previews show what each session was about.
-
-![Session picker](assets/session-picker.png)
-
-### Interactive Help
-
-`/help` opens a two-level menu. Pick a category, then pick a command to run it.
-
-![Help menu](assets/help-menu.png)
-
-### Voice Input & TTS
-
-Record with `Ctrl+R`, transcribe with Whisper, and hear responses spoken back via Piper TTS. Pick your voice model with `/voice model`.
-
-![Voice status](assets/voice-status.png)
-
-### 30+ Tools
-
-Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch, Agent, LSP, Jupyter notebooks, git worktrees, background tasks, cron scheduling, MCP plugins, and more.
-
-### Custom Spinner
-
-Animated `∙ ✦ ✸ ❊ ✺ ❋` glyphs with 260+ themed verbs (*Boss-fighting, Infusing, Cadence-checking...*) and completion stats (*Sprinted for 3m 44s · 1.2k tokens*).
+<p align="center">
+  <a href="https://github.com/ForkedInTime/RustyClaw/releases"><img src="https://img.shields.io/github/v/release/ForkedInTime/RustyClaw?style=flat-square&color=blue" alt="Release"></a>
+  <a href="https://github.com/ForkedInTime/RustyClaw/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ForkedInTime/RustyClaw/ci.yml?style=flat-square&label=CI" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="License"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-2024_edition-orange?style=flat-square&logo=rust" alt="Rust"></a>
+</p>
 
 ---
 
 ## Install
 
-**One-liner (Linux):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ForkedInTime/RustyClaw/main/install.sh | bash
 ```
 
+<details>
+<summary>Other methods</summary>
+
 **From source:**
 ```bash
 git clone https://github.com/ForkedInTime/RustyClaw.git
-cd RustyClaw
-cargo build --release
+cd RustyClaw && cargo build --release
 ./target/release/rustyclaw
 ```
 
@@ -81,131 +37,114 @@ cargo build --release
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ForkedInTime/RustyClaw/main/install.sh | bash -s v0.1.0
 ```
+</details>
+
+---
+
+## Why RustyClaw?
+
+| | Claude Code (npm) | RustyClaw |
+|---|---|---|
+| Runtime | Node.js / Bun | None (native binary) |
+| Startup | ~300ms | **~10ms** |
+| Memory | ~150MB | **~10MB** |
+| Binary | ~50MB JS bundle | **~8MB stripped** |
+| Ollama | No | **Built-in** |
+| Voice / TTS | No | **XTTS v2 voice cloning** |
+| Codebase RAG | No | **tree-sitter + FTS5** |
+| Model routing | No | **Auto complexity routing** |
+| Cost tracking | No | **Real-time dashboard** |
+| Sandbox | No | **bwrap / firejail** |
+| SDK / Headless | No | **NDJSON stdio** |
+
+Same Claude API. Same tools. Same CLAUDE.md format. Just faster and self-contained.
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1. Set your API key
+# Set your API key
 echo 'ANTHROPIC_API_KEY=sk-ant-...' >> ~/.env
 
-# 2. Run
+# Run
 rustyclaw
 
-# 3. Try some commands
+# Explore
 /help              # interactive command menu
-/model              # pick a model
-/session            # browse sessions
-/voice model        # pick a TTS voice
+/model             # pick a model (Claude + Ollama)
+/doctor            # verify setup
 ```
 
-`.env` files are auto-loaded from `$CWD/.env`, `~/.env`, or `~/.config/rustyclaw/.env`.
-
-### /doctor — everything green on Arch
-
-Run `/doctor` to verify your setup. API keys, voice, MCP plugins, system tools — all checked in one shot.
-
-![Doctor diagnostics](assets/doctor.png)
+`.env` files auto-load from `$CWD/.env`, `~/.env`, or `~/.config/rustyclaw/.env`.
 
 ---
 
-## Ollama (Local Models)
+## Screenshots
 
-```bash
-ollama pull dolphin3
-rustyclaw
-```
-```
-/model ollama:dolphin3     # switch to local model
-/model                     # interactive picker (Claude + Ollama)
-/model default             # back to Claude
-```
+<table>
+<tr>
+<td width="50%">
 
-Models that don't support tool use get automatic text-only fallback.
+**Interactive Help**
+![Help menu](assets/help-menu.png)
 
----
+</td>
+<td width="50%">
 
-## Voice
+**Model Picker**
+![Model picker](assets/ollama-models.png)
 
-```bash
-# Install piper for TTS
-pip install piper-tts
-mkdir -p ~/.local/share/piper && cd ~/.local/share/piper
-wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx
-wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx.json
-```
+</td>
+</tr>
+<tr>
+<td width="50%">
 
-```
-/voice enable       # voice input (Ctrl+R to record)
-/voice speak on     # TTS responses
-/voice model        # pick a voice (plays preview)
-/doctor             # check everything is set up
-```
+**Session Manager**
+![Session picker](assets/session-picker.png)
 
----
+</td>
+<td width="50%">
 
-## Keyboard Shortcuts
+**Doctor Diagnostics**
+![Doctor](assets/doctor.png)
 
-| Key | Action |
-|-----|--------|
-| `Enter` | Send message |
-| `Shift+Enter` | Newline |
-| `Esc` | Cancel request / stop TTS / close overlay |
-| `Ctrl+S` | Stop TTS |
-| `Ctrl+R` | Voice record toggle |
-| `?` | Shortcuts overlay |
-| `PgUp/PgDn` | Scroll chat |
-| `Tab` | Autocomplete commands / models / history |
-| `Shift+click` | Select text |
-| `Ctrl+Shift+C` | Copy selection |
+</td>
+</tr>
+</table>
 
 ---
 
-## SDK / Headless Mode
+## Highlights
 
-Embed RustyClaw in any application — editors, CI/CD, scripts, custom UIs.
+- **30+ tools** — Bash, Read, Write, Edit, Glob, Grep, WebFetch, Agent, LSP, Jupyter, MCP plugins, and more
+- **60+ slash commands** — `/help`, `/model`, `/session`, `/voice`, `/doctor`, `/rag`, `/budget`, `/reload`
+- **Ollama integration** — Local models with automatic tool-use fallback
+- **Voice I/O** — Whisper STT + XTTS v2 TTS with voice cloning
+- **RAG indexing** — tree-sitter AST parsing, 8 languages, SQLite FTS5 search
+- **Smart routing** — Auto-route simple tasks to cheaper models
+- **Cost dashboard** — Real-time token/cost tracking with budget limits
+- **SDK mode** — `--headless` NDJSON server for editor/CI embedding ([docs](sdk/))
+- **Session management** — Save, resume, search, export conversations
+- **Sandboxing** — bwrap / firejail / strict isolation
+- **XDG compliant** — Respects `$XDG_CONFIG_HOME`, `$XDG_DATA_HOME`, `$XDG_CACHE_HOME`
 
-```bash
-rustyclaw --headless
-```
-
-Starts a long-running NDJSON server on stdin/stdout. Pipe JSON requests in, read streaming responses out. Works from any language.
-
-```bash
-# Health check (no API key needed)
-(echo '{"id":"1","type":"health/check"}'; sleep 1) | rustyclaw --headless
-
-# Ask a question
-(echo '{"id":"1","type":"session/start","prompt":"What is 2+2?","max_turns":1}'; sleep 15) \
-  | rustyclaw --headless 2>/dev/null
-```
-
-Full docs, protocol reference, and examples: **[`sdk/`](sdk/)**
+See **[FEATURES.md](FEATURES.md)** for the full reference.
 
 ---
 
-## Architecture
+## Documentation
 
-```
-src/
-├── main.rs           # Entry point, CLI args, .env auto-load
-├── api/              # Anthropic + Ollama backends (streaming SSE)
-├── sdk/              # Headless NDJSON server (--headless mode)
-├── tui/              # ratatui UI (inline viewport, no alt screen)
-├── tools/            # 30+ tools (Bash, Read, Write, Edit, Glob, Grep, ...)
-├── commands/         # 60+ slash commands
-├── mcp/              # MCP plugin client
-├── session/          # Save/resume/search/export sessions
-├── voice.rs          # Recording + Whisper + Piper TTS
-├── sandbox.rs        # bwrap / firejail / strict
-└── config.rs         # Settings, CLAUDE.md injection
-```
-
-Built with `tokio`, `ratatui`, `reqwest` (rustls), `clap`, `serde_json`.
+| Document | Description |
+|----------|-------------|
+| [FEATURES.md](FEATURES.md) | Complete feature reference — every command, shortcut, and config option |
+| [sdk/](sdk/) | SDK / headless mode — protocol, examples, integration guide |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
+| [SECURITY.md](SECURITY.md) | Security policy and vulnerability reporting |
 
 ---
 
 ## License
 
-Derived from [Claude Code](https://github.com/anthropics/claude-code). For personal and educational use.
+Apache 2.0 — see [LICENSE](LICENSE).
