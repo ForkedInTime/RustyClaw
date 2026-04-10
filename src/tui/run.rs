@@ -3854,11 +3854,11 @@ async fn run_api_task(
                 ctx.live_ollama_host = Some(config.ollama_host.clone());
                 let mut results: Vec<ContentBlock> = Vec::new();
 
-                // Auto-rollback: accumulate file paths touched by Write/Edit/MultiEdit
-                // in this assistant turn. After the loop we run the detected test
-                // command (e.g. `cargo test`) and `git checkout --` these paths if
-                // tests fail. We only run tests once per turn, even if many edits
-                // happened.
+                // Auto-fix loop: accumulate file paths touched by Write/Edit/MultiEdit
+                // in this assistant turn. After the tool-use loop we run the detected
+                // lint + test commands and, on failure, feed the output back to the
+                // model as a synthetic user turn via `continue`, up to
+                // `config.auto_fix.max_retries` times.
                 let mut auto_fix_touched: Vec<std::path::PathBuf> = Vec::new();
 
                 // Drain any pending plan_mode changes before processing tools
