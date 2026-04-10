@@ -10,6 +10,7 @@ mod deeplink;
 mod distro;
 mod hooks;
 mod mcp;
+mod memory;
 mod permissions;
 mod query_engine;
 mod rag;

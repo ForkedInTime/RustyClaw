@@ -40,7 +40,7 @@ impl SearchResult {
 /// Sanitize a query string for FTS5.
 /// FTS5 syntax uses quotes, AND, OR, NOT, NEAR etc.
 /// We escape user input to prevent syntax errors.
-fn sanitize_fts_query(query: &str) -> String {
+pub(crate) fn sanitize_fts_query(query: &str) -> String {
     // Split into words, quote each, join with space (implicit AND)
     query
         .split_whitespace()
