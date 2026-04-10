@@ -162,6 +162,13 @@ pub(crate) struct HttpTransport {
 }
 
 impl HttpTransport {
+    // TODO(oauth): MCP streamable-HTTP servers may return 401 when a bearer
+    // token expires. RustyClaw currently takes auth headers from static
+    // config (settings.json → mcpServers.*.headers), so there is no refresh
+    // flow — an expired token surfaces as a plain "HTTP MCP <method> failed:
+    // 401" error and the user has to restart. Adding a real OAuth client
+    // (discovery, refresh tokens, PKCE) is a larger feature and is tracked
+    // separately; until then, the failure mode is loud but not silent.
     pub fn new(url: &str, headers: &HashMap<String, String>) -> Result<Self> {
         let mut builder = reqwest::Client::builder();
 
@@ -239,6 +246,50 @@ impl McpClient {
         self.transport.call(id, method, params).await
     }
 
+    /// Call a paginated MCP `*/list` endpoint and accumulate every page.
+    ///
+    /// MCP servers return `{ "<field>": [...], "next[redacted]": "..." }`. If
+    /// `next[redacted]` is present, the client MUST repeat the request with
+    /// `params = { "cursor": "<next[redacted]>" }` until `next[redacted]` is absent
+    /// or empty. Previously we only fetched the first page, silently
+    /// truncating tool/resource lists for any server with more than one
+    /// page's worth of items (spec §Pagination).
+    async fn list_paginated(&self, method: &str, field: &str) -> Result<Vec<Value>> {
+        let mut out: Vec<Value> = Vec::new();
+        let mut cursor: Option<String> = None;
+        // Hard cap on pages as a safety rail — a buggy server that always
+        // returns the same next[redacted] would otherwise loop forever.
+        const MAX_PAGES: usize = 256;
+
+        for _ in 0..MAX_PAGES {
+            let params = match &cursor {
+                Some(c) => json!({ "cursor": c }),
+                None => json!({}),
+            };
+            let result = self.request(method, params).await?;
+
+            if let Some(arr) = result.get(field).and_then(|v| v.as_array()) {
+                out.extend(arr.iter().cloned());
+            }
+
+            cursor = result
+                .get("next[redacted]")
+                .and_then(|c| c.as_str())
+                .filter(|s| !s.is_empty())
+                .map(String::from);
+
+            if cursor.is_none() {
+                return Ok(out);
+            }
+        }
+        // Hit the page cap — return what we have with a warn but don't fail.
+        tracing::warn!(
+            "MCP {method} for '{}' exceeded {MAX_PAGES} pages — possible server bug, truncating",
+            self.server_name
+        );
+        Ok(out)
+    }
+
     /// Run the MCP initialize handshake and populate self.tools.
     async fn init(&mut self) -> Result<()> {
         // 1. initialize
@@ -257,12 +308,16 @@ impl McpClient {
         // 2. Notify server that client is ready (fire-and-forget)
         self.transport.notify("notifications/initialized").await;
 
-        // 3. Fetch tool list
-        let result = self.request("tools/list", json!({})).await.unwrap_or(Value::Null);
-        self.tools = result
-            .get("tools")
-            .and_then(|t| serde_json::from_value(t.clone()).ok())
+        // 3. Fetch tool list — with cursor pagination so servers that return
+        //    more than one page worth of tools aren't silently truncated.
+        let pages = self
+            .list_paginated("tools/list", "tools")
+            .await
             .unwrap_or_default();
+        self.tools = pages
+            .into_iter()
+            .filter_map(|v| serde_json::from_value(v).ok())
+            .collect();
 
         Ok(())
     }
@@ -308,11 +363,11 @@ impl McpClient {
 
     /// List MCP resources exposed by this server.
     pub async fn list_resources(&self) -> Result<Vec<McpResource>> {
-        let result = self.request("resources/list", json!({})).await?;
-        let resources: Vec<McpResource> = result
-            .get("resources")
-            .and_then(|r| serde_json::from_value(r.clone()).ok())
-            .unwrap_or_default();
+        let pages = self.list_paginated("resources/list", "resources").await?;
+        let resources: Vec<McpResource> = pages
+            .into_iter()
+            .filter_map(|v| serde_json::from_value(v).ok())
+            .collect();
         Ok(resources)
     }
 
@@ -389,5 +444,215 @@ impl McpClient {
         } else {
             Ok(output)
         }
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex as StdMutex;
+
+    /// Fake transport that returns scripted responses for a given method.
+    /// Records every request it sees (for assertion ordering and cursor flow).
+    struct MockTransport {
+        /// Per-method response queues. Each call to `call()` pops the next
+        /// response from the queue for that method.
+        responses: StdMutex<HashMap<String, Vec<Value>>>,
+        /// Recorded (method, params) tuples in call order.
+        calls: StdMutex<Vec<(String, Value)>>,
+    }
+
+    impl MockTransport {
+        fn new(responses: HashMap<String, Vec<Value>>) -> Self {
+            Self {
+                responses: StdMutex::new(responses),
+                calls: StdMutex::new(Vec::new()),
+            }
+        }
+
+        fn calls(&self) -> Vec<(String, Value)> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl McpTransport for MockTransport {
+        async fn call(&self, _id: u64, method: &str, params: Value) -> Result<Value> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((method.to_string(), params));
+            let mut queues = self.responses.lock().unwrap();
+            let queue = queues
+                .get_mut(method)
+                .ok_or_else(|| anyhow!("mock: unexpected method '{}'", method))?;
+            if queue.is_empty() {
+                return Err(anyhow!("mock: response queue empty for '{}'", method));
+            }
+            Ok(queue.remove(0))
+        }
+
+        async fn notify(&self, _method: &str) {}
+    }
+
+    fn client_with_mock(mock: MockTransport) -> McpClient {
+        McpClient {
+            server_name: "mock".into(),
+            tools: Vec::new(),
+            transport_kind: "stdio",
+            transport: Box::new(mock),
+            next_id: AtomicU64::new(1),
+        }
+    }
+
+    #[tokio::test]
+    async fn tools_list_follows_next_cursor_across_pages() {
+        // Three pages of tools. Pages 1 and 2 return `next[redacted]`; page 3
+        // omits it (end of list).
+        let page1 = json!({
+            "tools": [
+                { "name": "alpha", "description": "a", "inputSchema": { "type": "object" } },
+                { "name": "beta",  "description": "b", "inputSchema": { "type": "object" } }
+            ],
+            "next[redacted]": "cur-2"
+        });
+        let page2 = json!({
+            "tools": [
+                { "name": "gamma", "description": "c", "inputSchema": { "type": "object" } }
+            ],
+            "next[redacted]": "cur-3"
+        });
+        let page3 = json!({
+            "tools": [
+                { "name": "delta", "description": "d", "inputSchema": { "type": "object" } }
+            ]
+            // no next[redacted] → end
+        });
+
+        let mut responses = HashMap::new();
+        responses.insert("tools/list".to_string(), vec![page1, page2, page3]);
+        let mock = MockTransport::new(responses);
+        let client = client_with_mock(mock);
+
+        let all = client
+            .list_paginated("tools/list", "tools")
+            .await
+            .expect("paginated call succeeds");
+
+        assert_eq!(all.len(), 4, "all 4 tools across 3 pages must be returned");
+        let names: Vec<String> = all
+            .iter()
+            .filter_map(|v| v.get("name").and_then(|n| n.as_str()).map(String::from))
+            .collect();
+        assert_eq!(names, vec!["alpha", "beta", "gamma", "delta"]);
+        // Explicit cursor-param verification lives in the separate
+        // `list_paginated_sends_cursor_param_on_each_follow_up` test below,
+        // which keeps an Arc<MockTransport> handle so it can inspect calls.
+    }
+
+    #[tokio::test]
+    async fn list_paginated_sends_cursor_param_on_each_follow_up() {
+        // Explicit check: second and third requests must carry
+        // `{ "cursor": "<prev-next[redacted]>" }`, first carries `{}`.
+        let page1 = json!({ "tools": [], "next[redacted]": "cur-2" });
+        let page2 = json!({ "tools": [], "next[redacted]": "cur-3" });
+        let page3 = json!({ "tools": [] });
+
+        let mut responses = HashMap::new();
+        responses.insert("tools/list".to_string(), vec![page1, page2, page3]);
+        let mock = Arc::new(MockTransport::new(responses));
+        let mock_handle = Arc::clone(&mock);
+
+        // Build a client that wraps the Arc via a thin adapter.
+        struct ArcAdapter(Arc<MockTransport>);
+        #[async_trait]
+        impl McpTransport for ArcAdapter {
+            async fn call(&self, id: u64, method: &str, params: Value) -> Result<Value> {
+                self.0.call(id, method, params).await
+            }
+        }
+
+        let client = McpClient {
+            server_name: "mock".into(),
+            tools: Vec::new(),
+            transport_kind: "stdio",
+            transport: Box::new(ArcAdapter(mock)),
+            next_id: AtomicU64::new(1),
+        };
+
+        let all = client
+            .list_paginated("tools/list", "tools")
+            .await
+            .expect("ok");
+        assert!(all.is_empty());
+
+        let calls = mock_handle.calls();
+        assert_eq!(calls.len(), 3, "exactly 3 pages fetched");
+        assert_eq!(calls[0].0, "tools/list");
+        assert_eq!(calls[0].1, json!({}));
+        assert_eq!(calls[1].1, json!({ "cursor": "cur-2" }));
+        assert_eq!(calls[2].1, json!({ "cursor": "cur-3" }));
+    }
+
+    #[tokio::test]
+    async fn list_paginated_stops_on_empty_next_cursor_string() {
+        // Edge case: server returns `"next[redacted]": ""`. Spec-compliant clients
+        // treat empty string as "no more pages" — we must not loop.
+        let page1 = json!({
+            "resources": [ { "uri": "file://a", "name": "a" } ],
+            "next[redacted]": ""
+        });
+        let mut responses = HashMap::new();
+        responses.insert("resources/list".to_string(), vec![page1]);
+        let mock = MockTransport::new(responses);
+        let client = client_with_mock(mock);
+
+        let all = client
+            .list_paginated("resources/list", "resources")
+            .await
+            .expect("ok");
+        assert_eq!(all.len(), 1, "first page returned, loop terminated");
+    }
+
+    #[tokio::test]
+    async fn list_paginated_caps_runaway_page_loop() {
+        // A buggy server that ALWAYS returns the same next[redacted] would loop
+        // forever without the MAX_PAGES safety rail. Feed 300 identical pages
+        // and verify we stop gracefully instead of hanging (or exhausting the
+        // mock queue with an Err).
+        let page = json!({ "tools": [], "next[redacted]": "stuck" });
+        let responses = {
+            let mut m = HashMap::new();
+            m.insert("tools/list".to_string(), vec![page; 300]);
+            m
+        };
+        let mock = Arc::new(MockTransport::new(responses));
+
+        struct ArcAdapter(Arc<MockTransport>);
+        #[async_trait]
+        impl McpTransport for ArcAdapter {
+            async fn call(&self, id: u64, method: &str, params: Value) -> Result<Value> {
+                self.0.call(id, method, params).await
+            }
+        }
+
+        let client = McpClient {
+            server_name: "mock".into(),
+            tools: Vec::new(),
+            transport_kind: "stdio",
+            transport: Box::new(ArcAdapter(Arc::clone(&mock))),
+            next_id: AtomicU64::new(1),
+        };
+
+        // Should return Ok (graceful cap), not hang or Err.
+        let all = client
+            .list_paginated("tools/list", "tools")
+            .await
+            .expect("ok");
+        assert!(all.is_empty());
+        // Must have stopped at MAX_PAGES (256), not consumed all 300.
+        assert_eq!(mock.calls().len(), 256, "must cap at MAX_PAGES");
     }
 }
