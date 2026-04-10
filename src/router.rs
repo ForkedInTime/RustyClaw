@@ -218,6 +218,157 @@ pub fn detect_complexity(input: &str) -> Complexity {
     }
 }
 
+// ─── Phase enum ─────────────────────────────────────────────────────────────
+
+/// Conversational phase — what kind of work the user is asking for right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    /// Reading, understanding, searching the codebase
+    Research,
+    /// Designing, planning, strategising
+    Plan,
+    /// Writing or modifying code
+    Edit,
+    /// Checking, verifying, auditing
+    Review,
+    /// Couldn't determine a phase
+    Default,
+}
+
+impl std::fmt::Display for Phase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Phase::Research => write!(f, "research"),
+            Phase::Plan     => write!(f, "plan"),
+            Phase::Edit     => write!(f, "edit"),
+            Phase::Review   => write!(f, "review"),
+            Phase::Default  => write!(f, "default"),
+        }
+    }
+}
+
+// ─── Phase detection signals ─────────────────────────────────────────────────
+
+const RESEARCH_SIGNALS: &[&str] = &[
+    "what does", "how does", "find", "search", "explain",
+    "show me", "where is", "list", "read", "what is",
+];
+
+const PLAN_SIGNALS: &[&str] = &[
+    "plan", "design", "approach", "strategy", "how should we",
+    "architecture", "propose", "outline",
+];
+
+// NOTE: single words here are matched as whole words (space-delimited) to
+// avoid "implement" matching inside "implementation", etc.
+const EDIT_SIGNALS: &[&str] = &[
+    "implement", "add", "fix", "change", "refactor",
+    "write", "create", "update", "modify", "build",
+];
+
+const REVIEW_SIGNALS: &[&str] = &[
+    "review", "check", "verify", "test", "does this look",
+    "is this correct", "audit", "validate",
+];
+
+/// Match a signal phrase against a lowercased input string.
+/// Single-word signals are matched as whole words to avoid false positives
+/// (e.g. "implement" inside "implementation").
+fn signal_matches(input: &str, signal: &str) -> bool {
+    if !input.contains(signal) {
+        return false;
+    }
+    // Multi-word signals: substring match is fine.
+    if signal.contains(' ') {
+        return true;
+    }
+    // Single-word signal: require word boundaries (space, start, or end).
+    for (i, _) in input.match_indices(signal) {
+        let before_ok = i == 0 || !input.as_bytes()[i - 1].is_ascii_alphanumeric();
+        let after  = i + signal.len();
+        let after_ok  = after >= input.len() || !input.as_bytes()[after].is_ascii_alphanumeric();
+        if before_ok && after_ok {
+            return true;
+        }
+    }
+    false
+}
+
+/// Detect the conversational phase of the user's request.
+///
+/// Scores each phase by the number of matching signals.  If the top score is
+/// ≥ 1 **and** that phase is the sole winner (no tie), it is returned.
+/// Ties or all-zero inputs return `Phase::Default`.
+pub fn detect_phase(input: &str) -> Phase {
+    let lower = input.to_lowercase();
+
+    let score = |signals: &[&str]| -> usize {
+        signals.iter().filter(|&&s| signal_matches(&lower, s)).count()
+    };
+
+    let research = score(RESEARCH_SIGNALS);
+    let plan     = score(PLAN_SIGNALS);
+    let edit     = score(EDIT_SIGNALS);
+    let review   = score(REVIEW_SIGNALS);
+
+    let max = research.max(plan).max(edit).max(review);
+
+    if max == 0 {
+        return Phase::Default;
+    }
+
+    // Unique winner required — ties yield Default
+    let winners: usize = [research, plan, edit, review].iter().filter(|&&s| s == max).count();
+    if winners > 1 {
+        return Phase::Default;
+    }
+
+    if research == max { Phase::Research }
+    else if plan == max { Phase::Plan }
+    else if edit == max { Phase::Edit }
+    else { Phase::Review }
+}
+
+// ─── Phase router configuration ──────────────────────────────────────────────
+
+/// Model assignments per conversational phase.
+#[derive(Debug, Clone)]
+pub struct PhaseRouterConfig {
+    /// Whether phase-based routing is active (default: false)
+    pub enabled: bool,
+    pub research_model: String,
+    pub plan_model: String,
+    pub edit_model: String,
+    pub review_model: String,
+    pub default_model: String,
+}
+
+impl Default for PhaseRouterConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            research_model: "claude-haiku-4-5".into(),
+            plan_model:     "claude-sonnet-4-6".into(),
+            edit_model:     "claude-sonnet-4-6".into(),
+            review_model:   "claude-opus-4-6".into(),
+            default_model:  "claude-sonnet-4-6".into(),
+        }
+    }
+}
+
+impl PhaseRouterConfig {
+    /// Select the model for a given phase.
+    pub fn model_for(&self, phase: Phase) -> &str {
+        match phase {
+            Phase::Research => &self.research_model,
+            Phase::Plan     => &self.plan_model,
+            Phase::Edit     => &self.edit_model,
+            Phase::Review   => &self.review_model,
+            Phase::Default  => &self.default_model,
+        }
+    }
+}
+
 // ─── Router state (shared across turns) ─────────────────────────────────────
 
 #[cfg(test)]

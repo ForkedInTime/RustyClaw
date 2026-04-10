@@ -328,6 +328,10 @@ pub struct Config {
 
     /// Auto-capture notable decisions/preferences from assistant responses into memory.
     pub memory_auto_capture: bool,
+
+    /// Phase-declarative model routing config.
+    #[serde(skip)]
+    pub phase_router: crate::router::PhaseRouterConfig,
 }
 
 impl Default for Config {
@@ -400,6 +404,7 @@ impl Default for Config {
             router_super_high_model: None,
             autonomy: "auto-edit".to_string(),
             memory_auto_capture: false,
+            phase_router: crate::router::PhaseRouterConfig::default(),
         }
     }
 }
@@ -466,6 +471,18 @@ impl Config {
         }
         cfg.memory_auto_capture = settings.memory_auto_capture.unwrap_or(false);
 
+        // Phase-declarative model router settings
+        if let Some(pr) = &settings.phase_router {
+            cfg.phase_router.enabled = pr.enabled.unwrap_or(false);
+            if let Some(phases) = &pr.phases {
+                if let Some(m) = phases.get("research") { cfg.phase_router.research_model = crate::commands::resolve_model_alias(m); }
+                if let Some(m) = phases.get("plan")     { cfg.phase_router.plan_model     = crate::commands::resolve_model_alias(m); }
+                if let Some(m) = phases.get("edit")     { cfg.phase_router.edit_model     = crate::commands::resolve_model_alias(m); }
+                if let Some(m) = phases.get("review")   { cfg.phase_router.review_model   = crate::commands::resolve_model_alias(m); }
+                if let Some(m) = phases.get("default")  { cfg.phase_router.default_model  = crate::commands::resolve_model_alias(m); }
+            }
+        }
+
         // Resolve output style: load name from settings, look up prompt
         if let Some(ref style_name) = settings.output_style {
             if style_name != "default" {
@@ -481,6 +498,13 @@ impl Config {
         if !cfg.bare_mode {
             cfg.claudemd = Self::load_claude_md(&cfg.cwd);
             cfg.agentsmd = Self::load_agents_md(&cfg.cwd);
+        }
+
+        // ── CLAUDE.md phase-routing directive override
+        // Syntax: <!-- phase-routing: research=haiku, edit=opus -->
+        // Settings file wins; CLAUDE.md only applies when no settings phase_router block exists.
+        if settings.phase_router.is_none() {
+            Self::apply_phase_routing_from_claudemd(&cfg.claudemd, &mut cfg.phase_router);
         }
 
         // ── API key from environment (not required for Ollama models)
@@ -542,6 +566,42 @@ impl Config {
         }
 
         Ok(cfg)
+    }
+
+    /// Parse `<!-- phase-routing: research=haiku, edit=opus -->` directives from
+    /// CLAUDE.md content and apply them to `phase_cfg`.  Only overrides models
+    /// that are explicitly listed; leaves others at their defaults.
+    fn apply_phase_routing_from_claudemd(
+        claudemd: &str,
+        phase_cfg: &mut crate::router::PhaseRouterConfig,
+    ) {
+        for line in claudemd.lines() {
+            let trimmed = line.trim();
+            // Match <!-- phase-routing: ... -->
+            if let Some(inner) = trimmed
+                .strip_prefix("<!--")
+                .and_then(|s| s.strip_suffix("-->"))
+            {
+                let inner = inner.trim();
+                if let Some(payload) = inner.strip_prefix("phase-routing:") {
+                    phase_cfg.enabled = true;
+                    for pair in payload.split(',') {
+                        let pair = pair.trim();
+                        if let Some((k, v)) = pair.split_once('=') {
+                            let model = crate::commands::resolve_model_alias(v.trim());
+                            match k.trim() {
+                                "research" => phase_cfg.research_model = model,
+                                "plan"     => phase_cfg.plan_model     = model,
+                                "edit"     => phase_cfg.edit_model     = model,
+                                "review"   => phase_cfg.review_model   = model,
+                                "default"  => phase_cfg.default_model  = model,
+                                _          => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Load and merge all CLAUDE.md files in priority order:

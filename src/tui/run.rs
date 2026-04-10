@@ -3154,8 +3154,25 @@ async fn handle_key(
             let msgs = messages.clone();
             let mut cfg = config.clone();
 
-            // Smart model router: detect complexity and override model if enabled
-            if app.router.enabled && !crate::api::is_ollama_model(&config.model)
+            // Model routing: phase routing takes priority over complexity routing.
+            // 1. Phase router (if enabled) — research/plan/edit/review → specific model
+            // 2. Complexity router (if enabled) — low/medium/high/super-high → model tier
+            // 3. Fallback: config.model unchanged
+            if config.phase_router.enabled
+                && !crate::api::is_ollama_model(&config.model)
+                && !crate::api::is_openai_compat_model(&config.model)
+            {
+                let phase = crate::router::detect_phase(&final_text);
+                if phase != crate::router::Phase::Default {
+                    let routed_model = config.phase_router.model_for(phase).to_string();
+                    if routed_model != config.model {
+                        app.entries.push(ChatEntry::system(
+                            format!("[phase: {} → {}]", phase, crate::tui::app::pretty_model_name(&routed_model))
+                        ));
+                        cfg.model = routed_model;
+                    }
+                }
+            } else if app.router.enabled && !crate::api::is_ollama_model(&config.model)
                 && !crate::api::is_openai_compat_model(&config.model)
             {
                 let complexity = crate::router::detect_complexity(&final_text);
