@@ -3613,6 +3613,9 @@ async fn run_api_task(
     const LOOP_THRESHOLD: usize = 3;
 
     let mut iterations: u32 = 0;
+    // Retries consumed by the auto-fix loop within the current user turn.
+    // Reset to 0 on every user prompt; the retry helper enforces the cap.
+    let mut auto_fix_retries: u32 = 0;
     loop {
         iterations += 1;
         if iterations > turn_limit {
@@ -4050,62 +4053,52 @@ async fn run_api_task(
                     }
                 }
 
-                // ── Auto-fix check (pre-retry-loop intermediate) ─────────────
-                // Run the detected test command once per turn after all tool
-                // calls complete. On failure, surface the output as a
-                // SystemMessage. The retry loop lands in a follow-up commit.
-                if !auto_fix_touched.is_empty()
-                    && crate::autofix::should_trigger(
+                // ── Auto-fix check with retry loop ───────────────────────────
+                // After all tool calls complete, run lint + tests. On failure
+                // and under cap, append a synthetic user message with the
+                // failure output and re-enter the agentic loop. On cap reached,
+                // emit a SystemMessage and end the turn preserving partial work.
+                if !auto_fix_touched.is_empty() {
+                    let action = crate::autofix::run_auto_fix_check(
+                        &config.cwd,
                         &config.auto_fix,
                         &config.autonomy,
-                    )
-                {
-                    let test_cmd = crate::autofix::detect_test_command(
-                        &config.cwd,
-                        &config.auto_fix.test_command,
+                        auto_fix_retries,
                     );
-                    if let Some(cmd) = test_cmd {
-                        let _ = tx.send(AppEvent::SystemMessage(
-                            format!("[auto-fix] running tests: {cmd}"),
-                        ));
-                        match crate::autofix::run_command(
-                            &config.cwd,
-                            &cmd,
-                            config.auto_fix.timeout_secs,
-                        ) {
-                            crate::autofix::CommandResult::Pass => {
-                                let _ = tx.send(AppEvent::SystemMessage(
-                                    "[auto-fix] tests pass".into(),
-                                ));
-                            }
-                            crate::autofix::CommandResult::Fail { stderr } => {
-                                let trimmed: String =
-                                    stderr.chars().take(2000).collect();
-                                let _ = tx.send(AppEvent::SystemMessage(
-                                    format!(
-                                        "[auto-fix] tests failed:\n{trimmed}"
-                                    ),
-                                ));
-                            }
-                            crate::autofix::CommandResult::Timeout => {
-                                let _ = tx.send(AppEvent::SystemMessage(
-                                    format!(
-                                        "[auto-fix] test run timed out after {}s, skipping",
-                                        config.auto_fix.timeout_secs,
-                                    ),
-                                ));
-                            }
-                            crate::autofix::CommandResult::NoTestRunner => {
-                                // Silent skip.
-                            }
-                            crate::autofix::CommandResult::Skipped { reason } => {
-                                let _ = tx.send(AppEvent::SystemMessage(
-                                    format!("[auto-fix] skipped: {reason}"),
-                                ));
+                    auto_fix_touched.clear();
+
+                    match action {
+                        crate::autofix::AutoFixAction::Continue { status } => {
+                            if let Some(msg) = status {
+                                let _ = tx.send(AppEvent::SystemMessage(msg));
                             }
                         }
+                        crate::autofix::AutoFixAction::Retry { feedback, status } => {
+                            let _ = tx.send(AppEvent::SystemMessage(status));
+                            // Append the synthetic user turn so the model sees
+                            // the lint/test failure on the next API round.
+                            messages.push(Message {
+                                role: Role::User,
+                                content: vec![ContentBlock::Text { text: feedback }],
+                            });
+                            auto_fix_retries += 1;
+                            // Re-enter the outer loop to call the model again
+                            // with the injected feedback in history.
+                            continue;
+                        }
+                        crate::autofix::AutoFixAction::GiveUp { status } => {
+                            let _ = tx.send(AppEvent::SystemMessage(status));
+                            let _ = tx.send(AppEvent::Done {
+                                tokens_in: response.usage.input_tokens,
+                                tokens_out: response.usage.output_tokens,
+                                cache_read: response.usage.cache_read_input_tokens,
+                                cache_write: response.usage.cache_creation_input_tokens,
+                                messages: messages.clone(),
+                                model_used: config.model.clone(),
+                            });
+                            return;
+                        }
                     }
-                    auto_fix_touched.clear();
                 }
 
                 // If no tool blocks were found (e.g. model returned finish_reason=tool_calls
