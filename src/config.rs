@@ -516,7 +516,21 @@ impl Config {
             if ar.test_command.is_some() {
                 cfg.auto_rollback.test_command = ar.test_command.clone();
             }
-            if let Some(m) = ar.max_retries { cfg.auto_rollback.max_retries = m; }
+            if let Some(m) = ar.max_retries {
+                cfg.auto_rollback.max_retries = m;
+                // max_retries is reserved for a future multi-turn retry loop.
+                // The current hook runs tests exactly once per turn, reverts on
+                // failure, and emits a system message. Warn the user so they
+                // don't expect retries to take effect yet.
+                if m != 3 {
+                    tracing::warn!(
+                        "autoRollback.maxRetries = {m} is reserved — the current \
+                         hook runs tests exactly once per turn and does not retry. \
+                         This field will become active in a future multi-turn loop."
+                    );
+                }
+            }
+            if let Some(t) = ar.timeout_secs { cfg.auto_rollback.timeout_secs = t; }
         }
 
         // Resolve output style: load name from settings, look up prompt

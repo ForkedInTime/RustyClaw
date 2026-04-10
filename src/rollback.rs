@@ -28,8 +28,18 @@ pub struct RollbackConfig {
     pub enabled: bool,
     pub trigger: RollbackTrigger,
     pub test_command: Option<String>,
+    /// Reserved for a future multi-turn retry loop. The current hook runs
+    /// tests exactly once per turn and does not retry — setting this to
+    /// anything other than the default has no runtime effect today, and
+    /// `Config::load` emits a warning when the user overrides it.
     pub max_retries: u32,
+    /// Maximum wall-clock seconds to let the test command run before killing
+    /// it and returning `TestResult::Timeout`. `0` means no timeout.
+    pub timeout_secs: u64,
 }
+
+/// Default test timeout if the user hasn't overridden it.
+pub const DEFAULT_TEST_TIMEOUT_SECS: u64 = 60;
 
 /// When should the rollback check run?
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +71,7 @@ impl Default for RollbackConfig {
             trigger: RollbackTrigger::Autonomous,
             test_command: None,
             max_retries: 3,
+            timeout_secs: DEFAULT_TEST_TIMEOUT_SECS,
         }
     }
 }
@@ -177,12 +188,14 @@ pub fn git_restore_files(cwd: &Path, files: &[PathBuf]) -> Result<(), String> {
 ///
 /// `test_cmd` is a shell-style command string like `"cargo test"` or
 /// `"npm test"`. The first whitespace-separated token is the program,
-/// the rest are argv.
+/// the rest are argv. `timeout_secs` caps total wall-clock runtime; if the
+/// process is still running past it we send SIGKILL and return
+/// `TestResult::Timeout`. Pass `0` to wait indefinitely.
 ///
-/// NOTE on timeout: the spec calls for a 60s timeout via `wait_timeout`,
-/// but that dep is not in `Cargo.toml`. We implement a simple poll-and-kill
-/// loop using `try_wait` to avoid introducing a new dependency.
-pub fn run_tests(cwd: &Path, test_cmd: &str) -> TestResult {
+/// NOTE on implementation: the original spec called for `wait_timeout`, but
+/// pulling in a new dep for ~20 lines isn't worth it. We use a poll+kill loop
+/// via `try_wait`, which has the same behavior with no extra deps.
+pub fn run_tests(cwd: &Path, test_cmd: &str, timeout_secs: u64) -> TestResult {
     let mut parts = test_cmd.split_whitespace();
     let Some(prog) = parts.next() else {
         return TestResult::Skipped {
@@ -207,8 +220,9 @@ pub fn run_tests(cwd: &Path, test_cmd: &str) -> TestResult {
         }
     };
 
-    // Poll for up to 60 seconds before killing the child.
-    let timeout = std::time::Duration::from_secs(60);
+    // Poll until exit or timeout. `timeout_secs == 0` means "wait forever".
+    let timeout = std::time::Duration::from_secs(timeout_secs);
+    let has_timeout = timeout_secs > 0;
     let start = std::time::Instant::now();
     let poll = std::time::Duration::from_millis(100);
 
@@ -216,7 +230,7 @@ pub fn run_tests(cwd: &Path, test_cmd: &str) -> TestResult {
         match child.try_wait() {
             Ok(Some(_status)) => break,
             Ok(None) => {
-                if start.elapsed() >= timeout {
+                if has_timeout && start.elapsed() >= timeout {
                     let _ = child.kill();
                     let _ = child.wait();
                     return TestResult::Timeout;

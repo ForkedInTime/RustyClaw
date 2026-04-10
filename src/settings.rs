@@ -267,6 +267,9 @@ pub struct AutoRollbackSettings {
     pub test_command: Option<String>,
     /// Max consecutive retries before giving up (reserved for future multi-turn loop).
     pub max_retries: Option<u32>,
+    /// Max wall-clock seconds the test command may run before being killed.
+    /// Defaults to 60 when unset. Set to 0 for no timeout.
+    pub timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
