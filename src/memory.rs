@@ -119,47 +119,36 @@ impl MemoryStore {
 
     /// Auto-add a memory, skipping if a near-duplicate already exists.
     ///
-    /// Uses word-overlap ratio: if any existing value shares > 0.8 of its words
-    /// with `text`, the entry is considered a duplicate and skipped.
+    /// Deduplication is FTS-first: runs an FTS5 search against existing memories
+    /// to get the top 10 candidates, then checks Jaccard word-overlap. If any
+    /// candidate has overlap > 0.8, the entry is considered a duplicate and
+    /// skipped. This is O(FTS) rather than O(N) over the full table.
     ///
     /// Returns `true` if a new memory was stored, `false` if skipped.
     pub fn add_auto(&self, text: &str, source: &str) -> Result<bool> {
-        // Check for near-duplicates against all existing values.
-        let mut stmt = self.conn.prepare("SELECT value FROM memory")?;
-        let existing_values: Vec<String> = stmt
-            .query_map([], |r| r.get(0))?
-            .filter_map(|r| r.ok())
-            .collect();
+        // FTS search for the top 10 nearest candidates.
+        let candidates = self.search(text, 10)?;
 
         let text_words: std::collections::HashSet<&str> =
             text.split_whitespace().collect();
 
-        for existing in &existing_values {
-            let existing_words: std::collections::HashSet<&str> =
-                existing.split_whitespace().collect();
-            if existing_words.is_empty() {
-                continue;
-            }
-            let intersection = text_words.intersection(&existing_words).count();
-            let union = text_words.union(&existing_words).count();
-            if union == 0 {
-                continue;
-            }
-            let overlap = intersection as f64 / union as f64;
-            if overlap > 0.8 {
-                debug!("add_auto: skipping near-duplicate (overlap={:.2})", overlap);
+        for candidate in &candidates {
+            if jaccard_overlap(&text_words, &candidate.value) > 0.8 {
+                debug!("add_auto: skipping near-duplicate (candidate key={})", candidate.key);
                 return Ok(false);
             }
         }
 
-        // Generate a key from the first few words.
-        let key = text
+        // Generate a collision-resistant key: first 4 words + 8-char content hash.
+        let prefix = text
             .split_whitespace()
             .take(4)
             .collect::<Vec<_>>()
             .join("_")
             .to_lowercase();
-        let key = sanitize_key(&key);
+        let hash8 = fnv32(text);
+        let raw_key = format!("{}_{:08x}", prefix, hash8);
+        let key = sanitize_key(&raw_key);
 
         let cat = auto_categorize(text);
         self.add(&key, text, cat, source)?;
@@ -381,18 +370,39 @@ fn sanitize_key(key: &str) -> String {
         .collect()
 }
 
+/// Jaccard overlap between `a_words` (pre-built set) and the whitespace-split
+/// words of `b`. Returns 0.0 when the union is empty.
+fn jaccard_overlap<'a>(
+    a_words: &std::collections::HashSet<&'a str>,
+    b: &str,
+) -> f64 {
+    let b_words: std::collections::HashSet<&str> = b.split_whitespace().collect();
+    if b_words.is_empty() && a_words.is_empty() {
+        return 0.0;
+    }
+    let intersection = a_words.intersection(&b_words).count();
+    let union = a_words.union(&b_words).count();
+    if union == 0 { 0.0 } else { intersection as f64 / union as f64 }
+}
+
+/// Simple FNV-1a 32-bit hash — no external deps, deterministic.
+fn fnv32(s: &str) -> u32 {
+    let mut hash: u32 = 2166136261;
+    for byte in s.bytes() {
+        hash ^= byte as u32;
+        hash = hash.wrapping_mul(16777619);
+    }
+    hash
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
-    fn make() -> (TempDir, MemoryStore) {
-        let tmp = TempDir::new().unwrap();
-        let s = MemoryStore::open(tmp.path()).unwrap();
-        (tmp, s)
-    }
+    // Tests for private helper functions only.
+    // Public API tests live in tests/memory_tests.rs.
 
     #[test]
     fn test_format_unix_date() {
@@ -408,32 +418,39 @@ mod tests {
     fn test_sanitize_key() {
         assert_eq!(sanitize_key("hello world!"), "helloworld");
         assert_eq!(sanitize_key("foo_bar_42"), "foo_bar_42");
+        // hash suffix format: alphanumeric + underscore allowed
+        assert_eq!(sanitize_key("we_decided_1a2b3c4d"), "we_decided_1a2b3c4d");
     }
 
     #[test]
-    fn test_category_roundtrip() {
-        assert_eq!(Category::from_str("decision").as_str(), "decision");
-        assert_eq!(Category::from_str("custom_val").as_str(), "custom_val");
+    fn test_jaccard_overlap_identical() {
+        let words: std::collections::HashSet<&str> = "foo bar baz".split_whitespace().collect();
+        assert!((jaccard_overlap(&words, "foo bar baz") - 1.0).abs() < 1e-9);
     }
 
     #[test]
-    fn test_auto_capture_memories() {
-        let response = "We decided to use PostgreSQL as the primary database.\n\
-                        Also, let's use Tokio for async runtime.\n\
-                        This line has no signal phrase.";
-        let candidates = auto_capture_memories(response);
-        assert_eq!(candidates.len(), 2);
-        assert!(candidates[0].contains("PostgreSQL"));
-        assert!(candidates[1].contains("Tokio"));
+    fn test_jaccard_overlap_disjoint() {
+        let words: std::collections::HashSet<&str> = "alpha beta".split_whitespace().collect();
+        assert!((jaccard_overlap(&words, "gamma delta")).abs() < 1e-9);
     }
 
     #[test]
-    fn test_upsert_via_add() {
-        let (_tmp, s) = make();
-        s.add("auth", "jwt", Category::Decision, "user").unwrap();
-        s.add("auth", "oauth2", Category::Decision, "user").unwrap();
-        assert_eq!(s.count().unwrap(), 1);
-        let all = s.list(None).unwrap();
-        assert_eq!(all[0].value, "oauth2");
+    fn test_jaccard_overlap_partial() {
+        let words: std::collections::HashSet<&str> = "a b c d".split_whitespace().collect();
+        // "a b c x" — intersection={a,b,c}, union={a,b,c,d,x} => 3/5 = 0.6
+        let overlap = jaccard_overlap(&words, "a b c x");
+        assert!((overlap - 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_jaccard_overlap_empty_b() {
+        let words: std::collections::HashSet<&str> = "foo".split_whitespace().collect();
+        assert_eq!(jaccard_overlap(&words, ""), 0.0);
+    }
+
+    #[test]
+    fn test_fnv32_deterministic() {
+        assert_eq!(fnv32("hello"), fnv32("hello"));
+        assert_ne!(fnv32("hello"), fnv32("world"));
     }
 }
