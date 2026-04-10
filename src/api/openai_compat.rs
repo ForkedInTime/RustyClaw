@@ -591,6 +591,10 @@ impl OpenAiCompatClient {
             .collect();
 
         let client = Client::builder()
+            // 10s connect timeout — fail fast on dead upstreams. Don't set
+            // an overall timeout here because legitimate long streams would
+            // be killed mid-response.
+            .connect_timeout(std::time::Duration::from_secs(10))
             .build()
             .context("Failed to build HTTP client")?;
 
