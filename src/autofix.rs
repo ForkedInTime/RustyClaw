@@ -7,7 +7,7 @@
 //! This module provides only the building blocks:
 //!   - `detect_test_command` — infer runner from project files
 //!   - `should_trigger`      — apply trigger-mode rules
-//!   - `run_tests`           — execute the configured test command
+//!   - `run_command`         — execute the configured test command
 
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -26,7 +26,7 @@ pub struct AutoFixConfig {
     /// `Config::load` emits a warning when the user overrides it.
     pub max_retries: u32,
     /// Maximum wall-clock seconds to let the test command run before killing
-    /// it and returning `TestResult::Timeout`. `0` means no timeout.
+    /// it and returning `CommandResult::Timeout`. `0` means no timeout.
     pub timeout_secs: u64,
 }
 
@@ -44,9 +44,9 @@ pub enum AutoFixTrigger {
     Off,
 }
 
-/// Result of running the test command.
+/// Result of running a single lint or test command.
 #[derive(Debug)]
-pub enum TestResult {
+pub enum CommandResult {
     Pass,
     Fail { stderr: String },
     /// No command detected and none configured.
@@ -121,21 +121,21 @@ pub fn should_trigger(config: &AutoFixConfig, autonomy_mode: &str) -> bool {
 
 // ── Test runner ───────────────────────────────────────────────────────────────
 
-/// Run the test command and return a `TestResult`.
+/// Run a single command and return a `CommandResult`.
 ///
-/// `test_cmd` is a shell-style command string like `"cargo test"` or
+/// `cmd` is a shell-style command string like `"cargo test"` or
 /// `"npm test"`. The first whitespace-separated token is the program,
 /// the rest are argv. `timeout_secs` caps total wall-clock runtime; if the
 /// process is still running past it we send SIGKILL and return
-/// `TestResult::Timeout`. Pass `0` to wait indefinitely.
+/// `CommandResult::Timeout`. Pass `0` to wait indefinitely.
 ///
 /// NOTE on implementation: the original spec called for `wait_timeout`, but
 /// pulling in a new dep for ~20 lines isn't worth it. We use a poll+kill loop
 /// via `try_wait`, which has the same behavior with no extra deps.
-pub fn run_tests(cwd: &Path, test_cmd: &str, timeout_secs: u64) -> TestResult {
-    let mut parts = test_cmd.split_whitespace();
+pub fn run_command(cwd: &Path, cmd: &str, timeout_secs: u64) -> CommandResult {
+    let mut parts = cmd.split_whitespace();
     let Some(prog) = parts.next() else {
-        return TestResult::Skipped {
+        return CommandResult::Skipped {
             reason: "empty test command".to_string(),
         };
     };
@@ -151,8 +151,8 @@ pub fn run_tests(cwd: &Path, test_cmd: &str, timeout_secs: u64) -> TestResult {
     let mut child = match spawn {
         Ok(c) => c,
         Err(e) => {
-            return TestResult::Skipped {
-                reason: format!("failed to spawn `{test_cmd}`: {e}"),
+            return CommandResult::Skipped {
+                reason: format!("failed to spawn `{cmd}`: {e}"),
             };
         }
     };
@@ -170,12 +170,12 @@ pub fn run_tests(cwd: &Path, test_cmd: &str, timeout_secs: u64) -> TestResult {
                 if has_timeout && start.elapsed() >= timeout {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return TestResult::Timeout;
+                    return CommandResult::Timeout;
                 }
                 std::thread::sleep(poll);
             }
             Err(e) => {
-                return TestResult::Skipped {
+                return CommandResult::Skipped {
                     reason: format!("failed to wait on child: {e}"),
                 };
             }
@@ -186,20 +186,20 @@ pub fn run_tests(cwd: &Path, test_cmd: &str, timeout_secs: u64) -> TestResult {
     let output = match child.wait_with_output() {
         Ok(o) => o,
         Err(e) => {
-            return TestResult::Skipped {
+            return CommandResult::Skipped {
                 reason: format!("failed to collect output: {e}"),
             };
         }
     };
 
     if output.status.success() {
-        TestResult::Pass
+        CommandResult::Pass
     } else {
         let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
         // Some runners (cargo test, go test) print failure details to stdout.
         if stderr.trim().is_empty() {
             stderr = String::from_utf8_lossy(&output.stdout).to_string();
         }
-        TestResult::Fail { stderr }
+        CommandResult::Fail { stderr }
     }
 }
