@@ -170,6 +170,7 @@ rustyclaw
 - **SDK mode** — `--headless` NDJSON server for editor/CI embedding ([docs](sdk/))
 - **Session management** — Save, resume, search, export conversations
 - **Parallel agents** — Spawn background agents in isolated git worktrees
+- **Auto-fix loop** — After every Write/Edit, lint + tests run automatically; failures feed back to the model for up to 3 retries. [redacted]-style post-edit feedback, anti-cheat protected.
 - **Sandboxing** — bwrap / firejail / strict isolation
 - **XDG compliant** — Respects `$XDG_CONFIG_HOME`, `$XDG_DATA_HOME`, `$XDG_CACHE_HOME`
 

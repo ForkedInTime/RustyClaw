@@ -32,9 +32,12 @@ You are a 0.1% expert in computer science, systems programming, infrastructure, 
 - **Spinner style toggle** — `spinnerStyle: "themed" | "minimal" | "silent"` in settings.json
 - **/reload settings** — Hot-reload settings.json + CLAUDE.md + AGENTS.md without restart
 
+### PHASE 2 (shipping now)
+- **Auto-fix loop (2026-04-10)** — Post-edit lint + tests + feedback-driven retries replace the old rollback revert. [redacted]-style, anti-cheat protected. `autoFixLoop` in settings.json, `autoRollback` alias kept for backward compat.
+
 ### NEXT UP
 6. **SDK/headless sidecar** — NDJSON stdio binary for editor embedding. Uncontested.
-7. **Phase 2 robustness** — Auto git commits + /undo, auto lint/test loop, diff review, loop detection, self-update, shell completions.
+7. **Phase 2 robustness** — Auto git commits + /undo, diff review, loop detection, self-update, shell completions.
 
 ### THE PITCH
 "A single 5MB Rust binary that indexes your codebase, routes tasks to the cheapest model, runs parallel agents in worktrees, speaks in your voice, shows you every token spent, and works offline via Ollama. Sub-50ms startup. Zero dependencies. Zero flickering. XDG-compliant. AGENTS.md + CLAUDE.md."
