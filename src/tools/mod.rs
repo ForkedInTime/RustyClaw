@@ -376,6 +376,177 @@ mod sensitive_path_tests {
         assert!(check_sensitive_path(&p("/proj/src/main.rs"), SensitiveOp::Write).is_none());
         assert!(check_sensitive_path(&p("/proj/README.md"), SensitiveOp::Write).is_none());
     }
+
+    // ── Glob-semantics regression tests (Sprint #2 HIGH) ────────────────────
+    //
+    // The deny-list is implemented with literal equality (`PRIVATE_KEY_NAMES`,
+    // `SECRET_WRITE_BLOCK_NAMES`, `SECRET_DIR_COMPONENTS`) and case-insensitive
+    // `ends_with` (`PRIVATE_KEY_SUFFIXES`). It does NOT interpret glob
+    // metacharacters. A past competitor bug ([redacted]-adjacent) was adding
+    // entries like `"*.pem"` thinking they'd be globbed, which then silently
+    // failed to match anything because literal-equality saw the asterisk as
+    // part of the filename. These tests lock in the invariant that every
+    // entry is a plain literal and that each one actually matches a realistic
+    // path.
+
+    /// Static-assertion: no deny-list entry contains glob metacharacters.
+    /// If this test fails, someone added a pattern assuming globs are
+    /// supported — the match is literal, so the "rule" is a no-op.
+    #[test]
+    fn no_deny_list_entry_contains_glob_metacharacters() {
+        const META: &[char] = &['*', '?', '[', ']', '{', '}'];
+        let all_entries: Vec<(&str, &str)> = PRIVATE_KEY_NAMES
+            .iter()
+            .map(|e| ("PRIVATE_KEY_NAMES", *e))
+            .chain(PRIVATE_KEY_SUFFIXES.iter().map(|e| ("PRIVATE_KEY_SUFFIXES", *e)))
+            .chain(
+                SECRET_WRITE_BLOCK_NAMES
+                    .iter()
+                    .map(|e| ("SECRET_WRITE_BLOCK_NAMES", *e)),
+            )
+            .chain(
+                SECRET_DIR_COMPONENTS
+                    .iter()
+                    .map(|e| ("SECRET_DIR_COMPONENTS", *e)),
+            )
+            .collect();
+
+        for (list, entry) in all_entries {
+            for ch in META {
+                assert!(
+                    !entry.contains(*ch),
+                    "{list}: entry {entry:?} contains glob metacharacter {ch:?} — \
+                     the deny-list uses literal equality, not glob matching. \
+                     Either drop the glob chars or convert the check to a \
+                     real glob matcher."
+                );
+            }
+        }
+    }
+
+    /// Coverage: every literal entry in the deny-lists actually blocks a
+    /// representative path that a well-meaning engineer would expect it to.
+    /// If someone silently adds an entry that never fires, this catches it.
+    #[test]
+    fn every_deny_list_entry_blocks_a_representative_path() {
+        // PRIVATE_KEY_NAMES — blocked in both modes.
+        for name in PRIVATE_KEY_NAMES {
+            let path = p(&format!("/home/u/.ssh/{name}"));
+            assert!(
+                check_sensitive_path(&path, SensitiveOp::Read).is_some(),
+                "PRIVATE_KEY_NAMES entry {name:?} did not block a read of {path:?}"
+            );
+            assert!(
+                check_sensitive_path(&path, SensitiveOp::Write).is_some(),
+                "PRIVATE_KEY_NAMES entry {name:?} did not block a write of {path:?}"
+            );
+        }
+
+        // PRIVATE_KEY_SUFFIXES — blocked in both modes via ends_with.
+        for suffix in PRIVATE_KEY_SUFFIXES {
+            let path = p(&format!("/proj/server{suffix}"));
+            assert!(
+                check_sensitive_path(&path, SensitiveOp::Read).is_some(),
+                "PRIVATE_KEY_SUFFIXES entry {suffix:?} did not block {path:?}"
+            );
+            assert!(
+                check_sensitive_path(&path, SensitiveOp::Write).is_some(),
+                "PRIVATE_KEY_SUFFIXES entry {suffix:?} did not block {path:?}"
+            );
+        }
+
+        // SECRET_WRITE_BLOCK_NAMES — write only.
+        for name in SECRET_WRITE_BLOCK_NAMES {
+            let path = p(&format!("/proj/{name}"));
+            assert!(
+                check_sensitive_path(&path, SensitiveOp::Write).is_some(),
+                "SECRET_WRITE_BLOCK_NAMES entry {name:?} did not block a write of {path:?}"
+            );
+        }
+
+        // SECRET_DIR_COMPONENTS — any file beneath should be write-blocked.
+        for dir in SECRET_DIR_COMPONENTS {
+            let path = p(&format!("/home/u/{dir}/some_file.txt"));
+            assert!(
+                check_sensitive_path(&path, SensitiveOp::Write).is_some(),
+                "SECRET_DIR_COMPONENTS entry {dir:?} did not block a write of {path:?}"
+            );
+        }
+    }
+
+    /// Case-insensitivity on the suffix side: `FOO.PEM` / `server.Key` /
+    /// mixed-case suffix variants must still match PRIVATE_KEY_SUFFIXES
+    /// because the check lowercases the filename before comparing.
+    #[test]
+    fn private_key_suffixes_match_case_insensitively() {
+        for case in &["SERVER.PEM", "tls.KEY", "Secrets.P12", "foo.JKS"] {
+            let path = p(&format!("/proj/{case}"));
+            assert!(
+                check_sensitive_path(&path, SensitiveOp::Write).is_some(),
+                "uppercase/mixed-case suffix {case:?} must still match the deny-list"
+            );
+            assert!(
+                check_sensitive_path(&path, SensitiveOp::Read).is_some(),
+                "uppercase/mixed-case suffix {case:?} must still block reads of private-key material"
+            );
+        }
+    }
+
+    /// A file nested arbitrarily deep inside a secret directory must still
+    /// be blocked — the check walks every path component, not just the
+    /// immediate parent.
+    #[test]
+    fn secret_dir_blocks_nested_children() {
+        assert!(
+            check_sensitive_path(
+                &p("/home/u/.aws/sub/dir/deep/creds.toml"),
+                SensitiveOp::Write
+            )
+            .is_some(),
+            "deeply nested file under .aws/ must be write-blocked"
+        );
+        assert!(
+            check_sensitive_path(
+                &p("/srv/secrets/.gnupg/private-keys-v1.d/ABCDEF.key"),
+                SensitiveOp::Write
+            )
+            .is_some(),
+            "nested file under .gnupg/ must be write-blocked"
+        );
+    }
+
+    /// A path using `..` to traverse INTO a secret directory must still be
+    /// blocked. We do not canonicalize (symlink traversal is a separate
+    /// threat model), but the component walk should still see the `.ssh`
+    /// component in the path.
+    #[test]
+    fn secret_dir_blocked_through_traversal_component() {
+        assert!(
+            check_sensitive_path(
+                &p("/proj/../home/u/.ssh/authorized_keys"),
+                SensitiveOp::Write
+            )
+            .is_some(),
+            ".ssh component in a traversal path must still trip the deny-list"
+        );
+    }
+
+    /// A literal filename that happens to CONTAIN a deny-list entry as a
+    /// substring must NOT be blocked. For example, `my_id_rsa_notes.md` is
+    /// not `id_rsa`. This locks in that PRIVATE_KEY_NAMES uses equality,
+    /// not substring matching.
+    #[test]
+    fn private_key_names_require_exact_filename_match() {
+        // These are NOT id_rsa — they merely contain the substring.
+        assert!(
+            check_sensitive_path(&p("/proj/my_id_rsa_notes.md"), SensitiveOp::Read).is_none(),
+            "substring match must not block unrelated files"
+        );
+        assert!(
+            check_sensitive_path(&p("/proj/not_id_ed25519.txt"), SensitiveOp::Write).is_none(),
+            "substring match must not block unrelated files"
+        );
+    }
 }
 
 /// The core Tool trait — mirrors the Tool interface in Tool.ts
