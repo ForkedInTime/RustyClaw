@@ -1,4 +1,4 @@
-//! Auto-rollback on test regression — core primitives.
+//! Auto-fix loop — core primitives.
 //!
 //! Watches Write/Edit tool calls. If resulting code breaks tests, the caller
 //! uses these primitives to restore modified files via `git checkout --` and
@@ -22,11 +22,11 @@ use std::process::{Command, Stdio};
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
-/// Configuration for auto-rollback feature.
+/// Configuration for auto-fix loop feature.
 #[derive(Debug, Clone)]
-pub struct RollbackConfig {
+pub struct AutoFixConfig {
     pub enabled: bool,
-    pub trigger: RollbackTrigger,
+    pub trigger: AutoFixTrigger,
     pub test_command: Option<String>,
     /// Reserved for a future multi-turn retry loop. The current hook runs
     /// tests exactly once per turn and does not retry — setting this to
@@ -41,9 +41,9 @@ pub struct RollbackConfig {
 /// Default test timeout if the user hasn't overridden it.
 pub const DEFAULT_TEST_TIMEOUT_SECS: u64 = 60;
 
-/// When should the rollback check run?
+/// When should the auto-fix check run?
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RollbackTrigger {
+pub enum AutoFixTrigger {
     /// Only run when `/autonomy` mode is `auto-edit` or `full-auto`.
     Autonomous,
     /// Run after every edit regardless of autonomy.
@@ -64,11 +64,11 @@ pub enum TestResult {
     Timeout,
 }
 
-impl Default for RollbackConfig {
+impl Default for AutoFixConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            trigger: RollbackTrigger::Autonomous,
+            trigger: AutoFixTrigger::Autonomous,
             test_command: None,
             max_retries: 3,
             timeout_secs: DEFAULT_TEST_TIMEOUT_SECS,
@@ -114,14 +114,14 @@ pub fn detect_test_command(cwd: &Path, override_cmd: &Option<String>) -> Option<
 ///
 /// `autonomy_mode` is a &str matching the current autonomy level:
 /// `"read-only"`, `"plan-only"`, `"auto-edit"`, or `"full-auto"`.
-pub fn should_trigger(config: &RollbackConfig, autonomy_mode: &str) -> bool {
+pub fn should_trigger(config: &AutoFixConfig, autonomy_mode: &str) -> bool {
     if !config.enabled {
         return false;
     }
     match config.trigger {
-        RollbackTrigger::Off => false,
-        RollbackTrigger::Always => true,
-        RollbackTrigger::Autonomous => {
+        AutoFixTrigger::Off => false,
+        AutoFixTrigger::Always => true,
+        AutoFixTrigger::Autonomous => {
             matches!(autonomy_mode, "auto-edit" | "full-auto")
         }
     }

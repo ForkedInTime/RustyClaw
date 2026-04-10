@@ -241,9 +241,9 @@ pub struct Settings {
     #[serde(rename = "phaseRouter")]
     pub phase_router: Option<PhaseRouterSettings>,
 
-    /// Auto-rollback on test regression — run tests after Write/Edit and revert on failure.
+    /// Auto-fix loop: run lint + tests after Write/Edit and re-prompt on failure.
     #[serde(rename = "autoRollback")]
-    pub auto_rollback: Option<AutoRollbackSettings>,
+    pub auto_fix: Option<AutoFixSettings>,
 }
 
 /// Settings for phase-declarative model routing.
@@ -255,10 +255,10 @@ pub struct PhaseRouterSettings {
     pub phases: Option<std::collections::HashMap<String, String>>,
 }
 
-/// Settings for auto-rollback on test regression.
+/// Settings for the auto-fix loop (lint + tests + retry feedback).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct AutoRollbackSettings {
+pub struct AutoFixSettings {
     /// Enable the auto-rollback hook (default: true when feature is wired).
     pub enabled: Option<bool>,
     /// When to run: `"autonomous"` (default), `"always"`, `"off"`. Parsed case-insensitively.
@@ -387,7 +387,7 @@ impl Settings {
             autonomy:             other.autonomy.or(self.autonomy),
             memory_auto_capture:  other.memory_auto_capture.or(self.memory_auto_capture),
             phase_router:         other.phase_router.or(self.phase_router),
-            auto_rollback:        other.auto_rollback.or(self.auto_rollback),
+            auto_fix:             other.auto_fix.or(self.auto_fix),
             permissions: PermissionsConfig {
                 // Union both lists — project additions stack on top of global
                 allow: {

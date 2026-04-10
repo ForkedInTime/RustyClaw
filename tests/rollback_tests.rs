@@ -1,7 +1,7 @@
 //! Integration tests for auto-rollback core logic — TDD, written before implementation.
 
 use rustyclaw::autofix::{
-    detect_test_command, should_trigger, RollbackConfig, RollbackTrigger,
+    detect_test_command, should_trigger, AutoFixConfig, AutoFixTrigger,
 };
 use std::fs;
 use tempfile::TempDir;
@@ -67,9 +67,9 @@ fn test_custom_override() {
 
 #[test]
 fn test_should_trigger_off() {
-    let cfg = RollbackConfig {
-        trigger: RollbackTrigger::Off,
-        ..RollbackConfig::default()
+    let cfg = AutoFixConfig {
+        trigger: AutoFixTrigger::Off,
+        ..AutoFixConfig::default()
     };
     assert!(!should_trigger(&cfg, "auto-edit"));
     assert!(!should_trigger(&cfg, "full-auto"));
@@ -78,9 +78,9 @@ fn test_should_trigger_off() {
 
 #[test]
 fn test_should_trigger_always() {
-    let cfg = RollbackConfig {
-        trigger: RollbackTrigger::Always,
-        ..RollbackConfig::default()
+    let cfg = AutoFixConfig {
+        trigger: AutoFixTrigger::Always,
+        ..AutoFixConfig::default()
     };
     assert!(should_trigger(&cfg, "read-only"));
     assert!(should_trigger(&cfg, "plan-only"));
@@ -90,9 +90,9 @@ fn test_should_trigger_always() {
 
 #[test]
 fn test_should_trigger_autonomous_auto_edit() {
-    let cfg = RollbackConfig {
-        trigger: RollbackTrigger::Autonomous,
-        ..RollbackConfig::default()
+    let cfg = AutoFixConfig {
+        trigger: AutoFixTrigger::Autonomous,
+        ..AutoFixConfig::default()
     };
     assert!(should_trigger(&cfg, "auto-edit"));
     assert!(should_trigger(&cfg, "full-auto"));
@@ -100,9 +100,9 @@ fn test_should_trigger_autonomous_auto_edit() {
 
 #[test]
 fn test_should_trigger_autonomous_read_only() {
-    let cfg = RollbackConfig {
-        trigger: RollbackTrigger::Autonomous,
-        ..RollbackConfig::default()
+    let cfg = AutoFixConfig {
+        trigger: AutoFixTrigger::Autonomous,
+        ..AutoFixConfig::default()
     };
     assert!(!should_trigger(&cfg, "read-only"));
     assert!(!should_trigger(&cfg, "plan-only"));
@@ -110,10 +110,10 @@ fn test_should_trigger_autonomous_read_only() {
 
 #[test]
 fn test_should_trigger_disabled() {
-    let cfg = RollbackConfig {
+    let cfg = AutoFixConfig {
         enabled: false,
-        trigger: RollbackTrigger::Always,
-        ..RollbackConfig::default()
+        trigger: AutoFixTrigger::Always,
+        ..AutoFixConfig::default()
     };
     assert!(!should_trigger(&cfg, "auto-edit"));
     assert!(!should_trigger(&cfg, "full-auto"));
@@ -123,9 +123,9 @@ fn test_should_trigger_disabled() {
 
 #[test]
 fn test_default_config() {
-    let cfg = RollbackConfig::default();
+    let cfg = AutoFixConfig::default();
     assert!(cfg.enabled);
-    assert_eq!(cfg.trigger, RollbackTrigger::Autonomous);
+    assert_eq!(cfg.trigger, AutoFixTrigger::Autonomous);
     assert_eq!(cfg.max_retries, 3);
     assert!(cfg.test_command.is_none());
     assert_eq!(cfg.timeout_secs, rustyclaw::autofix::DEFAULT_TEST_TIMEOUT_SECS);
@@ -145,7 +145,7 @@ fn test_settings_parse_auto_rollback_full() {
         }
     }"#;
     let s: rustyclaw::settings::Settings = serde_json::from_str(json).unwrap();
-    let ar = s.auto_rollback.expect("autoRollback missing");
+    let ar = s.auto_fix.expect("autoRollback missing");
     assert_eq!(ar.enabled, Some(true));
     assert_eq!(ar.trigger.as_deref(), Some("always"));
     assert_eq!(ar.test_command.as_deref(), Some("cargo test --all"));
@@ -160,7 +160,7 @@ fn test_settings_parse_auto_rollback_trigger_case_insensitive() {
     for t in &["autonomous", "AUTONOMOUS", "Always", "off", "Off"] {
         let json = format!(r#"{{"autoRollback": {{"trigger": "{t}"}}}}"#);
         let s: rustyclaw::settings::Settings = serde_json::from_str(&json).unwrap();
-        let ar = s.auto_rollback.expect("autoRollback missing");
+        let ar = s.auto_fix.expect("autoRollback missing");
         assert_eq!(ar.trigger.as_deref(), Some(*t));
     }
 }
