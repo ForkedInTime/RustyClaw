@@ -464,15 +464,17 @@ mod auto_fix_key_tests {
 
     #[test]
     fn serialises_with_new_key() {
-        let mut s = Settings::default();
-        s.auto_fix = Some(AutoFixSettings {
-            enabled: Some(true),
-            trigger: None,
-            lint_command: None,
-            test_command: Some("cargo test".to_string()),
-            max_retries: Some(3),
-            timeout_secs: None,
-        });
+        let s = Settings {
+            auto_fix: Some(AutoFixSettings {
+                enabled: Some(true),
+                trigger: None,
+                lint_command: None,
+                test_command: Some("cargo test".to_string()),
+                max_retries: Some(3),
+                timeout_secs: None,
+            }),
+            ..Default::default()
+        };
         let out = serde_json::to_string(&s).unwrap();
         assert!(out.contains("autoFixLoop"), "serialised form should use the new key: {out}");
         assert!(!out.contains("autoRollback"), "serialised form should not use the legacy key: {out}");
