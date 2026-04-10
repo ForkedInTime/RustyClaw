@@ -3856,7 +3856,7 @@ async fn run_api_task(
                 // command (e.g. `cargo test`) and `git checkout --` these paths if
                 // tests fail. We only run tests once per turn, even if many edits
                 // happened.
-                let mut rollback_touched: Vec<std::path::PathBuf> = Vec::new();
+                let mut auto_fix_touched: Vec<std::path::PathBuf> = Vec::new();
 
                 // Drain any pending plan_mode changes before processing tools
                 while let Ok(enabled) = plan_rx.try_recv() {
@@ -4037,8 +4037,8 @@ async fn run_api_task(
                                 input.get("file_path").and_then(|v| v.as_str())
                         {
                             let path = std::path::PathBuf::from(fp);
-                            if !rollback_touched.contains(&path) {
-                                rollback_touched.push(path);
+                            if !auto_fix_touched.contains(&path) {
+                                auto_fix_touched.push(path);
                             }
                         }
 
@@ -4058,15 +4058,15 @@ async fn run_api_task(
                 // so without a matching ToolUse would violate the Anthropic
                 // API contract; the user sees the failure and can re-prompt.
                 // (max_retries is reserved for a future multi-turn loop.)
-                if !rollback_touched.is_empty()
+                if !auto_fix_touched.is_empty()
                     && crate::autofix::should_trigger(
-                        &config.auto_rollback,
+                        &config.auto_fix,
                         &config.autonomy,
                     )
                 {
                     let test_cmd = crate::autofix::detect_test_command(
                         &config.cwd,
-                        &config.auto_rollback.test_command,
+                        &config.auto_fix.test_command,
                     );
                     if let Some(cmd) = test_cmd {
                         let _ = tx.send(AppEvent::SystemMessage(
@@ -4075,7 +4075,7 @@ async fn run_api_task(
                         match crate::autofix::run_tests(
                             &config.cwd,
                             &cmd,
-                            config.auto_rollback.timeout_secs,
+                            config.auto_fix.timeout_secs,
                         ) {
                             crate::autofix::TestResult::Pass => {
                                 let _ = tx.send(AppEvent::SystemMessage(
@@ -4087,13 +4087,13 @@ async fn run_api_task(
                                     stderr.chars().take(2000).collect();
                                 match crate::autofix::git_restore_files(
                                     &config.cwd,
-                                    &rollback_touched,
+                                    &auto_fix_touched,
                                 ) {
                                     Ok(()) => {
                                         let _ = tx.send(AppEvent::SystemMessage(
                                             format!(
                                                 "[auto-rollback] tests failed, {} file(s) reverted:\n{}",
-                                                rollback_touched.len(),
+                                                auto_fix_touched.len(),
                                                 trimmed,
                                             ),
                                         ));

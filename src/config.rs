@@ -340,10 +340,10 @@ pub struct Config {
     #[serde(skip)]
     pub phase_router: crate::router::PhaseRouterConfig,
 
-    /// Auto-rollback on test regression: run tests after Write/Edit and
-    /// `git checkout --` the modified files if tests fail.
+    /// Auto-fix loop: after Write/Edit, run lint + tests and re-prompt the
+    /// model with the failure output up to `max_retries` times.
     #[serde(skip)]
-    pub auto_rollback: crate::autofix::RollbackConfig,
+    pub auto_fix: crate::autofix::AutoFixConfig,
 }
 
 impl Default for Config {
@@ -418,7 +418,7 @@ impl Default for Config {
             autonomy: "auto-edit".to_string(),
             memory_auto_capture: false,
             phase_router: crate::router::PhaseRouterConfig::default(),
-            auto_rollback: crate::autofix::RollbackConfig::default(),
+            auto_fix: crate::autofix::AutoFixConfig::default(),
         }
     }
 }
@@ -503,21 +503,21 @@ impl Config {
             }
         }
 
-        // Auto-rollback settings → RollbackConfig
-        if let Some(ar) = &settings.auto_rollback {
-            if let Some(e) = ar.enabled { cfg.auto_rollback.enabled = e; }
+        // Auto-fix settings → AutoFixConfig
+        if let Some(ar) = &settings.auto_fix {
+            if let Some(e) = ar.enabled { cfg.auto_fix.enabled = e; }
             if let Some(t) = &ar.trigger {
-                cfg.auto_rollback.trigger = match t.to_ascii_lowercase().as_str() {
-                    "always" => crate::autofix::RollbackTrigger::Always,
-                    "off"    => crate::autofix::RollbackTrigger::Off,
-                    _        => crate::autofix::RollbackTrigger::Autonomous,
+                cfg.auto_fix.trigger = match t.to_ascii_lowercase().as_str() {
+                    "always" => crate::autofix::AutoFixTrigger::Always,
+                    "off"    => crate::autofix::AutoFixTrigger::Off,
+                    _        => crate::autofix::AutoFixTrigger::Autonomous,
                 };
             }
             if ar.test_command.is_some() {
-                cfg.auto_rollback.test_command = ar.test_command.clone();
+                cfg.auto_fix.test_command = ar.test_command.clone();
             }
             if let Some(m) = ar.max_retries {
-                cfg.auto_rollback.max_retries = m;
+                cfg.auto_fix.max_retries = m;
                 // max_retries is reserved for a future multi-turn retry loop.
                 // The current hook runs tests exactly once per turn, reverts on
                 // failure, and emits a system message. Warn the user so they
@@ -530,7 +530,7 @@ impl Config {
                     );
                 }
             }
-            if let Some(t) = ar.timeout_secs { cfg.auto_rollback.timeout_secs = t; }
+            if let Some(t) = ar.timeout_secs { cfg.auto_fix.timeout_secs = t; }
         }
 
         // Resolve output style: load name from settings, look up prompt
