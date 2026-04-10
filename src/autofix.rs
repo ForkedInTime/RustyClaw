@@ -1,13 +1,17 @@
 //! Auto-fix loop — core primitives.
 //!
-//! Watches Write/Edit tool calls. If resulting code breaks tests, the caller
-//! uses these primitives to restore modified files via `git checkout --` and
-//! feed the test error back to the model for a retry.
+//! Watches Write/Edit tool calls. On lint/test failure, the caller feeds the
+//! failure output back to the model as a synthetic user turn and re-enters the
+//! agentic loop, up to `max_retries` times. No files are reverted; the working
+//! tree is left as-is on retry-cap.
 //!
 //! This module provides only the building blocks:
-//!   - `detect_test_command` — infer runner from project files
-//!   - `should_trigger`      — apply trigger-mode rules
-//!   - `run_command`         — execute the configured test command
+//!   - `detect_lint_command` / `detect_test_command` — infer runners from project files
+//!   - `should_trigger`       — apply trigger-mode rules
+//!   - `run_command`          — execute a single lint or test command
+//!   - `run_checks`           — run lint + test together and classify the outcome
+//!   - `format_feedback_message` — build the anti-cheat retry prompt
+//!   - `run_auto_fix_check`   — top-level decision helper returning `AutoFixAction`
 
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -134,7 +138,7 @@ pub fn detect_lint_command(cwd: &Path, override_cmd: &Option<String>) -> Option<
 
 // ── Trigger logic ─────────────────────────────────────────────────────────────
 
-/// Check if rollback should trigger right now.
+/// Check if the auto-fix loop should trigger right now.
 ///
 /// `autonomy_mode` is a &str matching the current autonomy level:
 /// `"read-only"`, `"plan-only"`, `"auto-edit"`, or `"full-auto"`.
