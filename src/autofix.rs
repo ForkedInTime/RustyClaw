@@ -396,6 +396,102 @@ fn trim_section(s: &str) -> String {
     format!("... (output trimmed)\n{}", &s[start..])
 }
 
+/// The decision returned by `run_auto_fix_check` — tells the TUI turn
+/// loop what to do next.
+#[derive(Debug)]
+pub enum AutoFixAction {
+    /// Trigger rules said skip, no runners detected, or checks passed.
+    /// `status` is a short human-readable description for the
+    /// SystemMessage stream (or `None` for silent skip).
+    Continue { status: Option<String> },
+    /// Checks failed and we have retries left. Caller should append
+    /// `Message { role: User, content: [Text { feedback }] }` to the
+    /// conversation and re-enter the agentic loop. `status` is the
+    /// SystemMessage to emit before the retry.
+    Retry { feedback: String, status: String },
+    /// Checks failed and we're at the retry cap. Caller should emit
+    /// `status` as a SystemMessage and end the turn with a `Done`
+    /// event preserving the partial work.
+    GiveUp { status: String },
+}
+
+/// Run lint + tests and decide what the TUI turn loop should do next.
+///
+/// `autonomy_mode` is the current autonomy string (`"read-only"` /
+/// `"plan-only"` / `"auto-edit"` / `"full-auto"`).
+/// `retries_used` is the number of retries *already consumed* by this
+/// user-prompt turn (so the first call passes `0`).
+pub fn run_auto_fix_check(
+    cwd: &Path,
+    config: &AutoFixConfig,
+    autonomy_mode: &str,
+    retries_used: u32,
+) -> AutoFixAction {
+    if !should_trigger(config, autonomy_mode) {
+        return AutoFixAction::Continue { status: None };
+    }
+
+    let lint_cmd = detect_lint_command(cwd, &config.lint_command);
+    let test_cmd = detect_test_command(cwd, &config.test_command);
+
+    if lint_cmd.is_none() && test_cmd.is_none() {
+        return AutoFixAction::Continue { status: None };
+    }
+
+    let outcome = run_checks(
+        cwd,
+        lint_cmd.as_deref(),
+        test_cmd.as_deref(),
+        config.timeout_secs,
+    );
+
+    match outcome {
+        CheckOutcome::Pass => AutoFixAction::Continue {
+            status: Some("[auto-fix] checks passed".to_string()),
+        },
+        CheckOutcome::NoRunners => AutoFixAction::Continue { status: None },
+        CheckOutcome::Skipped { reason } => AutoFixAction::Continue {
+            status: Some(format!("[auto-fix] skipped: {reason}")),
+        },
+        CheckOutcome::Fail { lint_stderr, test_stderr } => {
+            if retries_used >= config.max_retries {
+                let lint_tail = lint_stderr
+                    .as_deref()
+                    .map(trim_section)
+                    .unwrap_or_else(|| "(no output)".to_string());
+                let test_tail = test_stderr
+                    .as_deref()
+                    .map(trim_section)
+                    .unwrap_or_else(|| "(skipped: lint failed)".to_string());
+                AutoFixAction::GiveUp {
+                    status: format!(
+                        "[auto-fix] cap reached ({0}/{0}) — giving up, \
+                         working tree left as-is\n\
+                         Final lint output:\n{1}\n\
+                         Final test output:\n{2}",
+                        config.max_retries, lint_tail, test_tail,
+                    ),
+                }
+            } else {
+                let feedback = format_feedback_message(
+                    lint_cmd.as_deref(),
+                    test_cmd.as_deref(),
+                    lint_stderr.as_deref(),
+                    test_stderr.as_deref(),
+                );
+                AutoFixAction::Retry {
+                    feedback,
+                    status: format!(
+                        "[auto-fix] checks failed — retry {}/{}",
+                        retries_used + 1,
+                        config.max_retries,
+                    ),
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -621,5 +717,142 @@ mod tests {
         // trim_section should not panic and should return valid UTF-8
         let out = trim_section(&s);
         assert!(out.is_char_boundary(0));
+    }
+
+    #[test]
+    fn run_auto_fix_check_pass() {
+        let dir = tempdir().unwrap();
+        let cfg = AutoFixConfig {
+            enabled: true,
+            trigger: AutoFixTrigger::Always,
+            lint_command: Some("true".to_string()),
+            test_command: Some("true".to_string()),
+            max_retries: 3,
+            timeout_secs: 5,
+        };
+        let action = run_auto_fix_check(dir.path(), &cfg, "auto-edit", 0);
+        assert!(matches!(action, AutoFixAction::Continue { .. }), "got {action:?}");
+    }
+
+    #[test]
+    fn run_auto_fix_check_lint_fail_under_cap() {
+        let dir = tempdir().unwrap();
+        let cfg = AutoFixConfig {
+            enabled: true,
+            trigger: AutoFixTrigger::Always,
+            lint_command: Some("false".to_string()),
+            test_command: Some("true".to_string()),
+            max_retries: 3,
+            timeout_secs: 5,
+        };
+        let action = run_auto_fix_check(dir.path(), &cfg, "auto-edit", 0);
+        match action {
+            AutoFixAction::Retry { feedback, status } => {
+                assert!(feedback.contains("Your last edits failed"));
+                assert!(feedback.contains("Do not disable lints"));
+                assert!(feedback.contains("(skipped: lint failed)"));
+                assert!(status.contains("1/3"));
+            }
+            other => panic!("expected Retry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_auto_fix_check_tests_fail_under_cap() {
+        let dir = tempdir().unwrap();
+        let cfg = AutoFixConfig {
+            enabled: true,
+            trigger: AutoFixTrigger::Always,
+            lint_command: Some("true".to_string()),
+            test_command: Some("false".to_string()),
+            max_retries: 3,
+            timeout_secs: 5,
+        };
+        let action = run_auto_fix_check(dir.path(), &cfg, "auto-edit", 1);
+        match action {
+            AutoFixAction::Retry { feedback, status } => {
+                assert!(feedback.contains("## Tests"));
+                assert!(status.contains("2/3"));
+            }
+            other => panic!("expected Retry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_auto_fix_check_cap_reached() {
+        let dir = tempdir().unwrap();
+        let cfg = AutoFixConfig {
+            enabled: true,
+            trigger: AutoFixTrigger::Always,
+            lint_command: Some("false".to_string()),
+            test_command: Some("true".to_string()),
+            max_retries: 3,
+            timeout_secs: 5,
+        };
+        let action = run_auto_fix_check(dir.path(), &cfg, "auto-edit", 3);
+        match action {
+            AutoFixAction::GiveUp { status } => {
+                assert!(status.contains("cap reached"));
+                assert!(status.contains("3/3"));
+                assert!(status.contains("working tree left as-is"));
+            }
+            other => panic!("expected GiveUp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_auto_fix_check_trigger_off() {
+        let dir = tempdir().unwrap();
+        let cfg = AutoFixConfig {
+            enabled: true,
+            trigger: AutoFixTrigger::Off,
+            lint_command: Some("false".to_string()),
+            test_command: Some("false".to_string()),
+            max_retries: 3,
+            timeout_secs: 5,
+        };
+        let action = run_auto_fix_check(dir.path(), &cfg, "auto-edit", 0);
+        match action {
+            AutoFixAction::Continue { status } => {
+                assert!(status.is_none(), "trigger off should be silent");
+            }
+            other => panic!("expected Continue, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_auto_fix_check_autonomous_skips_in_suggest_mode() {
+        let dir = tempdir().unwrap();
+        let cfg = AutoFixConfig {
+            enabled: true,
+            trigger: AutoFixTrigger::Autonomous,
+            lint_command: Some("false".to_string()),
+            test_command: Some("false".to_string()),
+            max_retries: 3,
+            timeout_secs: 5,
+        };
+        let action = run_auto_fix_check(dir.path(), &cfg, "suggest", 0);
+        assert!(matches!(
+            action,
+            AutoFixAction::Continue { status: None }
+        ));
+    }
+
+    #[test]
+    fn run_auto_fix_check_no_runners() {
+        let dir = tempdir().unwrap();
+        let cfg = AutoFixConfig {
+            enabled: true,
+            trigger: AutoFixTrigger::Always,
+            lint_command: None,
+            test_command: None,
+            max_retries: 3,
+            timeout_secs: 5,
+        };
+        let action = run_auto_fix_check(dir.path(), &cfg, "auto-edit", 0);
+        assert!(matches!(
+            action,
+            AutoFixAction::Continue { status: None }
+        ));
     }
 }
