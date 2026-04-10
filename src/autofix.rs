@@ -100,6 +100,36 @@ pub fn detect_test_command(cwd: &Path, override_cmd: &Option<String>) -> Option<
     None
 }
 
+/// Detect a lint command based on project files in `cwd`.
+/// If `override_cmd` is `Some`, return it unchanged.
+/// Returns `None` if no linter detected AND no override given.
+///
+/// Detection order (first hit wins, mirrors `detect_test_command`):
+///   1. Cargo.toml      → `cargo clippy --all-targets -- -D warnings`
+///   2. package.json    → `npx --no-install eslint .`
+///   3. pyproject.toml  → `ruff check .`
+///   4. setup.py        → `ruff check .`
+///   5. go.mod          → `go vet ./...`
+pub fn detect_lint_command(cwd: &Path, override_cmd: &Option<String>) -> Option<String> {
+    if let Some(cmd) = override_cmd {
+        return Some(cmd.clone());
+    }
+
+    if cwd.join("Cargo.toml").is_file() {
+        return Some("cargo clippy --all-targets -- -D warnings".to_string());
+    }
+    if cwd.join("package.json").is_file() {
+        return Some("npx --no-install eslint .".to_string());
+    }
+    if cwd.join("pyproject.toml").is_file() || cwd.join("setup.py").is_file() {
+        return Some("ruff check .".to_string());
+    }
+    if cwd.join("go.mod").is_file() {
+        return Some("go vet ./...".to_string());
+    }
+    None
+}
+
 // ── Trigger logic ─────────────────────────────────────────────────────────────
 
 /// Check if rollback should trigger right now.
@@ -201,5 +231,253 @@ pub fn run_command(cwd: &Path, cmd: &str, timeout_secs: u64) -> CommandResult {
             stderr = String::from_utf8_lossy(&output.stdout).to_string();
         }
         CommandResult::Fail { stderr }
+    }
+}
+
+/// Aggregate outcome of `run_checks`: lint + tests combined.
+#[derive(Debug)]
+pub enum CheckOutcome {
+    /// Both commands passed (or were not configured and had no effect).
+    Pass,
+    /// At least one command failed. `test_stderr` is `None` when lint
+    /// failed and tests were skipped (fast-fail).
+    Fail {
+        lint_stderr: Option<String>,
+        test_stderr: Option<String>,
+    },
+    /// Neither lint nor tests are configured/detected. Caller should
+    /// treat this as a silent pass.
+    NoRunners,
+    /// Something prevented the checks from running (bad command string,
+    /// spawn error, etc.). Caller should log and continue.
+    Skipped { reason: String },
+}
+
+/// Run the lint command (if any), then the test command (if any), and
+/// return a combined `CheckOutcome`. If lint fails, tests are skipped
+/// (fast-fail) — `test_stderr` will be `None` in that case.
+pub fn run_checks(
+    cwd: &Path,
+    lint_cmd: Option<&str>,
+    test_cmd: Option<&str>,
+    timeout_secs: u64,
+) -> CheckOutcome {
+    if lint_cmd.is_none() && test_cmd.is_none() {
+        return CheckOutcome::NoRunners;
+    }
+
+    let mut lint_stderr: Option<String> = None;
+    let mut lint_failed = false;
+
+    if let Some(cmd) = lint_cmd {
+        match run_command(cwd, cmd, timeout_secs) {
+            CommandResult::Pass => {}
+            CommandResult::Fail { stderr } => {
+                lint_failed = true;
+                lint_stderr = Some(stderr);
+            }
+            CommandResult::Timeout => {
+                lint_failed = true;
+                lint_stderr = Some(format!(
+                    "(lint timed out after {timeout_secs}s)"
+                ));
+            }
+            CommandResult::Skipped { reason } => {
+                return CheckOutcome::Skipped { reason };
+            }
+            CommandResult::NoTestRunner => {
+                // Shouldn't happen for a concrete command string, but
+                // handle defensively.
+            }
+        }
+    }
+
+    // Fast-fail: skip tests if lint failed.
+    if lint_failed {
+        return CheckOutcome::Fail {
+            lint_stderr,
+            test_stderr: None,
+        };
+    }
+
+    let mut test_stderr: Option<String> = None;
+    let mut test_failed = false;
+
+    if let Some(cmd) = test_cmd {
+        match run_command(cwd, cmd, timeout_secs) {
+            CommandResult::Pass => {}
+            CommandResult::Fail { stderr } => {
+                test_failed = true;
+                test_stderr = Some(stderr);
+            }
+            CommandResult::Timeout => {
+                test_failed = true;
+                test_stderr = Some(format!(
+                    "(tests timed out after {timeout_secs}s)"
+                ));
+            }
+            CommandResult::Skipped { reason } => {
+                return CheckOutcome::Skipped { reason };
+            }
+            CommandResult::NoTestRunner => {
+                // Defensive; same as above.
+            }
+        }
+    }
+
+    if test_failed {
+        CheckOutcome::Fail {
+            lint_stderr,
+            test_stderr,
+        }
+    } else {
+        CheckOutcome::Pass
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn detect_lint_command_cargo() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"x\"\nversion = \"0.1.0\"\n").unwrap();
+        assert_eq!(
+            detect_lint_command(dir.path(), &None),
+            Some("cargo clippy --all-targets -- -D warnings".to_string())
+        );
+    }
+
+    #[test]
+    fn detect_lint_command_npm() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("package.json"), "{}").unwrap();
+        assert_eq!(
+            detect_lint_command(dir.path(), &None),
+            Some("npx --no-install eslint .".to_string())
+        );
+    }
+
+    #[test]
+    fn detect_lint_command_python_pyproject() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("pyproject.toml"), "[project]\nname = \"x\"\n").unwrap();
+        assert_eq!(
+            detect_lint_command(dir.path(), &None),
+            Some("ruff check .".to_string())
+        );
+    }
+
+    #[test]
+    fn detect_lint_command_python_setuppy() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("setup.py"), "from setuptools import setup; setup()").unwrap();
+        assert_eq!(
+            detect_lint_command(dir.path(), &None),
+            Some("ruff check .".to_string())
+        );
+    }
+
+    #[test]
+    fn detect_lint_command_go() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("go.mod"), "module x\n").unwrap();
+        assert_eq!(
+            detect_lint_command(dir.path(), &None),
+            Some("go vet ./...".to_string())
+        );
+    }
+
+    #[test]
+    fn detect_lint_command_override_wins() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "").unwrap();
+        assert_eq!(
+            detect_lint_command(dir.path(), &Some("my-linter".to_string())),
+            Some("my-linter".to_string())
+        );
+    }
+
+    #[test]
+    fn detect_lint_command_no_runner() {
+        let dir = tempdir().unwrap();
+        assert_eq!(detect_lint_command(dir.path(), &None), None);
+    }
+
+    #[test]
+    fn run_checks_both_pass() {
+        let dir = tempdir().unwrap();
+        let outcome = run_checks(
+            dir.path(),
+            Some("true"),  // lint: unix `true` exits 0
+            Some("true"),  // tests: same
+            5,
+        );
+        assert!(matches!(outcome, CheckOutcome::Pass), "got {outcome:?}");
+    }
+
+    #[test]
+    fn run_checks_lint_fail_skips_tests() {
+        let dir = tempdir().unwrap();
+        // lint `false` exits 1; tests command writes a sentinel file if run.
+        let sentinel = dir.path().join("tests_ran");
+        let sentinel_str = sentinel.display().to_string();
+        let test_cmd = format!("sh -c 'touch {sentinel_str}'");
+        let outcome = run_checks(
+            dir.path(),
+            Some("false"),
+            Some(&test_cmd),
+            5,
+        );
+        match outcome {
+            CheckOutcome::Fail { lint_stderr: _, test_stderr } => {
+                assert!(test_stderr.is_none(), "tests must be skipped when lint fails");
+            }
+            other => panic!("expected Fail, got {other:?}"),
+        }
+        assert!(!sentinel.exists(), "sentinel file should not exist — tests must not have run");
+    }
+
+    #[test]
+    fn run_checks_lint_pass_tests_fail() {
+        let dir = tempdir().unwrap();
+        let outcome = run_checks(dir.path(), Some("true"), Some("false"), 5);
+        match outcome {
+            CheckOutcome::Fail { lint_stderr, test_stderr } => {
+                assert!(lint_stderr.is_none());
+                assert!(test_stderr.is_some());
+            }
+            other => panic!("expected Fail, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_checks_no_runners() {
+        let dir = tempdir().unwrap();
+        let outcome = run_checks(dir.path(), None, None, 5);
+        assert!(matches!(outcome, CheckOutcome::NoRunners), "got {outcome:?}");
+    }
+
+    #[test]
+    fn run_checks_lint_only_pass() {
+        let dir = tempdir().unwrap();
+        let outcome = run_checks(dir.path(), Some("true"), None, 5);
+        assert!(matches!(outcome, CheckOutcome::Pass), "got {outcome:?}");
+    }
+
+    #[test]
+    fn run_checks_tests_only_fail() {
+        let dir = tempdir().unwrap();
+        let outcome = run_checks(dir.path(), None, Some("false"), 5);
+        match outcome {
+            CheckOutcome::Fail { lint_stderr, test_stderr } => {
+                assert!(lint_stderr.is_none());
+                assert!(test_stderr.is_some());
+            }
+            other => panic!("expected Fail, got {other:?}"),
+        }
     }
 }
