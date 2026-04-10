@@ -68,10 +68,8 @@ fn test_custom_override() {
 #[test]
 fn test_should_trigger_off() {
     let cfg = RollbackConfig {
-        enabled: true,
         trigger: RollbackTrigger::Off,
-        test_command: None,
-        max_retries: 3,
+        ..RollbackConfig::default()
     };
     assert!(!should_trigger(&cfg, "auto-edit"));
     assert!(!should_trigger(&cfg, "full-auto"));
@@ -81,10 +79,8 @@ fn test_should_trigger_off() {
 #[test]
 fn test_should_trigger_always() {
     let cfg = RollbackConfig {
-        enabled: true,
         trigger: RollbackTrigger::Always,
-        test_command: None,
-        max_retries: 3,
+        ..RollbackConfig::default()
     };
     assert!(should_trigger(&cfg, "read-only"));
     assert!(should_trigger(&cfg, "plan-only"));
@@ -95,10 +91,8 @@ fn test_should_trigger_always() {
 #[test]
 fn test_should_trigger_autonomous_auto_edit() {
     let cfg = RollbackConfig {
-        enabled: true,
         trigger: RollbackTrigger::Autonomous,
-        test_command: None,
-        max_retries: 3,
+        ..RollbackConfig::default()
     };
     assert!(should_trigger(&cfg, "auto-edit"));
     assert!(should_trigger(&cfg, "full-auto"));
@@ -107,10 +101,8 @@ fn test_should_trigger_autonomous_auto_edit() {
 #[test]
 fn test_should_trigger_autonomous_read_only() {
     let cfg = RollbackConfig {
-        enabled: true,
         trigger: RollbackTrigger::Autonomous,
-        test_command: None,
-        max_retries: 3,
+        ..RollbackConfig::default()
     };
     assert!(!should_trigger(&cfg, "read-only"));
     assert!(!should_trigger(&cfg, "plan-only"));
@@ -121,8 +113,7 @@ fn test_should_trigger_disabled() {
     let cfg = RollbackConfig {
         enabled: false,
         trigger: RollbackTrigger::Always,
-        test_command: None,
-        max_retries: 3,
+        ..RollbackConfig::default()
     };
     assert!(!should_trigger(&cfg, "auto-edit"));
     assert!(!should_trigger(&cfg, "full-auto"));
@@ -137,6 +128,7 @@ fn test_default_config() {
     assert_eq!(cfg.trigger, RollbackTrigger::Autonomous);
     assert_eq!(cfg.max_retries, 3);
     assert!(cfg.test_command.is_none());
+    assert_eq!(cfg.timeout_secs, rustyclaw::rollback::DEFAULT_TEST_TIMEOUT_SECS);
 }
 
 // ── settings parsing ──────────────────────────────────────────────────────────
@@ -148,7 +140,8 @@ fn test_settings_parse_auto_rollback_full() {
             "enabled": true,
             "trigger": "always",
             "testCommand": "cargo test --all",
-            "maxRetries": 5
+            "maxRetries": 5,
+            "timeoutSecs": 120
         }
     }"#;
     let s: rustyclaw::settings::Settings = serde_json::from_str(json).unwrap();
@@ -157,6 +150,7 @@ fn test_settings_parse_auto_rollback_full() {
     assert_eq!(ar.trigger.as_deref(), Some("always"));
     assert_eq!(ar.test_command.as_deref(), Some("cargo test --all"));
     assert_eq!(ar.max_retries, Some(5));
+    assert_eq!(ar.timeout_secs, Some(120));
 }
 
 #[test]

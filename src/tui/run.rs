@@ -4025,7 +4025,11 @@ async fn run_api_task(
                         let _ = tx.send(AppEvent::SystemMessage(
                             format!("[auto-rollback] running tests: {cmd}"),
                         ));
-                        match crate::rollback::run_tests(&config.cwd, &cmd) {
+                        match crate::rollback::run_tests(
+                            &config.cwd,
+                            &cmd,
+                            config.auto_rollback.timeout_secs,
+                        ) {
                             crate::rollback::TestResult::Pass => {
                                 let _ = tx.send(AppEvent::SystemMessage(
                                     "[auto-rollback] tests pass, continuing".into(),
