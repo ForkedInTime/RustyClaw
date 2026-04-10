@@ -261,7 +261,7 @@ pub struct PhaseRouterSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoFixSettings {
-    /// Enable the auto-rollback hook (default: true when feature is wired).
+    /// Enable the auto-fix loop (default: true).
     pub enabled: Option<bool>,
     /// When to run: `"autonomous"` (default), `"always"`, `"off"`. Parsed case-insensitively.
     pub trigger: Option<String>,
