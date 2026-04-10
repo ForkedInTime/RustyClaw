@@ -502,10 +502,9 @@ impl Config {
 
         // ── CLAUDE.md phase-routing directive override
         // Syntax: <!-- phase-routing: research=haiku, edit=opus -->
-        // Settings file wins; CLAUDE.md only applies when no settings phase_router block exists.
-        if settings.phase_router.is_none() {
-            Self::apply_phase_routing_from_claudemd(&cfg.claudemd, &mut cfg.phase_router);
-        }
+        // CLAUDE.md merges on top of settings.json per-phase: a user can set
+        // base defaults in settings and override individual phases in CLAUDE.md.
+        Self::apply_phase_routing_from_claudemd(&cfg.claudemd, &mut cfg.phase_router);
 
         // ── API key from environment (not required for Ollama models)
         cfg.api_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
