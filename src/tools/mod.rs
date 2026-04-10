@@ -88,6 +88,15 @@ pub struct ToolContext {
     /// Shared Read-tool cache: path → content hash. Lets the Read tool skip
     /// re-emitting a file body that hasn't changed since the last read.
     pub read_cache: Option<ReadCache>,
+
+    /// Live provider snapshot taken at turn start. Tools that spawn a new
+    /// `QueryEngine` (AgentTool, background spawn) must read these instead
+    /// of their own cached `config` snapshot, which goes stale the moment
+    /// the user runs `/model foo` mid-session. When `None`, tools fall back
+    /// to their internal snapshot.
+    pub live_model: Option<String>,
+    pub live_api_key: Option<String>,
+    pub live_ollama_host: Option<String>,
 }
 
 impl std::fmt::Debug for ToolContext {
@@ -114,6 +123,9 @@ impl ToolContext {
             sandbox_mode: None,
             sandbox_allow_network: true,
             read_cache: None,
+            live_model: None,
+            live_api_key: None,
+            live_ollama_host: None,
         }
     }
 

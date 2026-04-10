@@ -323,6 +323,10 @@ impl QueryEngine {
         }
         ctx.sandbox_allow_network = self.config.sandbox_allow_network;
         ctx.read_cache = Some(self.read_cache.clone());
+        // Publish live provider snapshot for AgentTool / spawn sub-agents.
+        ctx.live_model = Some(self.config.model.clone());
+        ctx.live_api_key = Some(self.config.api_key.clone());
+        ctx.live_ollama_host = Some(self.config.ollama_host.clone());
         let mut results = Vec::new();
 
         for block in content {
