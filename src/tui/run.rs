@@ -4030,7 +4030,7 @@ async fn run_api_task(
                         });
 
                         // Track files touched by successful Write/Edit/MultiEdit
-                        // calls for the auto-rollback post-loop check.
+                        // calls for the auto-fix post-loop check.
                         if !output.is_error
                             && matches!(name.as_str(), "Write" | "Edit" | "MultiEdit")
                             && let Some(fp) =
@@ -4050,14 +4050,10 @@ async fn run_api_task(
                     }
                 }
 
-                // ── Auto-rollback check ──────────────────────────────────────
+                // ── Auto-fix check (pre-retry-loop intermediate) ─────────────
                 // Run the detected test command once per turn after all tool
-                // calls complete. On failure, revert touched files via
-                // `git checkout --` and emit a system message. We do NOT
-                // inject a synthetic ToolResult into `results` because doing
-                // so without a matching ToolUse would violate the Anthropic
-                // API contract; the user sees the failure and can re-prompt.
-                // (max_retries is reserved for a future multi-turn loop.)
+                // calls complete. On failure, surface the output as a
+                // SystemMessage. The retry loop lands in a follow-up commit.
                 if !auto_fix_touched.is_empty()
                     && crate::autofix::should_trigger(
                         &config.auto_fix,
@@ -4070,7 +4066,7 @@ async fn run_api_task(
                     );
                     if let Some(cmd) = test_cmd {
                         let _ = tx.send(AppEvent::SystemMessage(
-                            format!("[auto-rollback] running tests: {cmd}"),
+                            format!("[auto-fix] running tests: {cmd}"),
                         ));
                         match crate::autofix::run_tests(
                             &config.cwd,
@@ -4079,49 +4075,37 @@ async fn run_api_task(
                         ) {
                             crate::autofix::TestResult::Pass => {
                                 let _ = tx.send(AppEvent::SystemMessage(
-                                    "[auto-rollback] tests pass, continuing".into(),
+                                    "[auto-fix] tests pass".into(),
                                 ));
                             }
                             crate::autofix::TestResult::Fail { stderr } => {
                                 let trimmed: String =
                                     stderr.chars().take(2000).collect();
-                                match crate::autofix::git_restore_files(
-                                    &config.cwd,
-                                    &auto_fix_touched,
-                                ) {
-                                    Ok(()) => {
-                                        let _ = tx.send(AppEvent::SystemMessage(
-                                            format!(
-                                                "[auto-rollback] tests failed, {} file(s) reverted:\n{}",
-                                                auto_fix_touched.len(),
-                                                trimmed,
-                                            ),
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        let _ = tx.send(AppEvent::SystemMessage(
-                                            format!(
-                                                "[auto-rollback] tests failed but restore errored: {e}\n{trimmed}"
-                                            ),
-                                        ));
-                                    }
-                                }
+                                let _ = tx.send(AppEvent::SystemMessage(
+                                    format!(
+                                        "[auto-fix] tests failed:\n{trimmed}"
+                                    ),
+                                ));
                             }
                             crate::autofix::TestResult::Timeout => {
                                 let _ = tx.send(AppEvent::SystemMessage(
-                                    "[auto-rollback] test run timed out after 60s, skipping".into(),
+                                    format!(
+                                        "[auto-fix] test run timed out after {}s, skipping",
+                                        config.auto_fix.timeout_secs,
+                                    ),
                                 ));
                             }
                             crate::autofix::TestResult::NoTestRunner => {
-                                // Silent skip — expected without a test runner.
+                                // Silent skip.
                             }
                             crate::autofix::TestResult::Skipped { reason } => {
                                 let _ = tx.send(AppEvent::SystemMessage(
-                                    format!("[auto-rollback] skipped: {reason}"),
+                                    format!("[auto-fix] skipped: {reason}"),
                                 ));
                             }
                         }
                     }
+                    auto_fix_touched.clear();
                 }
 
                 // If no tool blocks were found (e.g. model returned finish_reason=tool_calls
