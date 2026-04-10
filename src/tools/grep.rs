@@ -11,7 +11,7 @@ use tokio::process::Command;
 use walkdir::WalkDir;
 
 /// Directories skipped by walkers: VCS metadata + common vendor dirs.
-/// `.jj` (Jujutsu) and `.sl` (Sapling) were added in Claude Code v2.1.92.
+/// Includes `.jj` (Jujutsu) and `.sl` (Sapling) VCS directories.
 pub(crate) const EXCLUDED_DIRS: &[&str] = &[
     ".git", ".jj", ".sl", ".hg", ".svn", ".husky",
     "node_modules", "target", "dist", "build", ".next", ".cache",

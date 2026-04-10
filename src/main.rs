@@ -1,5 +1,5 @@
-/// rustyclaw — Rust port of rustyclaw (Claude Code fork)
-/// Entry point — port of entrypoints/cli.tsx
+/// rustyclaw — Rust-native AI coding CLI
+/// Entry point
 
 mod api;
 mod commands;
@@ -81,7 +81,7 @@ enum ThinkingMode {
 #[command(
     name = "rustyclaw",
     version = VERSION,
-    about = "A Rust port of Claude Code — AI-powered CLI for software engineering",
+    about = "RustyClaw — Rust-native AI coding CLI",
     long_about = None,
 )]
 struct Cli {
@@ -354,13 +354,12 @@ enum McpSubcommand {
 
 /// Safe allowlist of env vars that rustyclaw may load from .env files.
 /// Project .env files often contain DATABASE_URL, AWS keys, etc. — loading those
-/// into the Bash tool's environment caused a user's production database to be dropped
-/// (anthropics/claude-code#401). Only load vars that are ours.
+/// into the Bash tool's environment can be dangerous. Only load vars that are ours.
 const SAFE_ENV_KEYS: &[&str] = &[
     "ANTHROPIC_API_KEY",
-    "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
+    "RUSTYCLAW_API_KEY_FILE_DESCRIPTOR",
     "CLAUDE_CONFIG_DIR",
-    "CLAUDE_CODE_VERBOSE",
+    "RUSTYCLAW_VERBOSE",
     "CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS",
     "ANTHROPIC_MODEL",
     "OLLAMA_HOST",
@@ -423,6 +422,17 @@ fn load_dotenv_auto() {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Suppress broken-pipe errors — these happen when stdout is piped to `head`
+    // or any consumer that exits early. Without this, Rust panics with
+    // "failed to write ... Broken pipe" instead of exiting silently.
+    #[cfg(unix)]
+    {
+        // SAFETY: single-threaded before tokio runtime; no signal handlers yet.
+        unsafe {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        }
+    }
+
     // Load .env files before anything else so API keys are available
     // to Config::load() and all downstream code.
     load_dotenv_auto();

@@ -1,9 +1,9 @@
 /// SendMessageTool — inter-agent messaging for swarm mode.
 ///
-/// Enabled when CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1.
+/// Enabled when RUSTYCLAW_EXPERIMENTAL_AGENT_TEAMS=1.
 ///
-/// In rustyclaw (TS) this integrates with a full mailbox/team-file
-/// infrastructure and in-process routing. This Rust port implements
+/// The TS predecessor integrates with a full mailbox/team-file
+/// infrastructure and in-process routing. This implementation uses
 /// the file-based mailbox protocol (same format) so agents running
 /// in separate processes can exchange messages.
 ///
@@ -18,7 +18,7 @@ pub struct SendMessageTool;
 
 /// Check whether agent swarms are enabled.
 pub fn is_agent_swarms_enabled() -> bool {
-    std::env::var("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS")
+    std::env::var("RUSTYCLAW_EXPERIMENTAL_AGENT_TEAMS")
         .map(|v| matches!(v.as_str(), "1" | "true" | "yes"))
         .unwrap_or(false)
 }
@@ -31,7 +31,7 @@ impl Tool for SendMessageTool {
 
     fn description(&self) -> &str {
         "Send a message to an agent teammate (swarm protocol). \
-         Enabled when CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1. \
+         Enabled when RUSTYCLAW_EXPERIMENTAL_AGENT_TEAMS=1. \
          Use to coordinate with other Claude agents in a team. \
          The 'to' field is a teammate name or '*' to broadcast."
     }
@@ -75,7 +75,7 @@ impl Tool for SendMessageTool {
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
         if !is_agent_swarms_enabled() {
             return Ok(ToolOutput::error(
-                "Agent swarms are not enabled. Set CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 to use this tool."
+                "Agent swarms are not enabled. Set RUSTYCLAW_EXPERIMENTAL_AGENT_TEAMS=1 to use this tool."
             ));
         }
 
@@ -92,8 +92,8 @@ impl Tool for SendMessageTool {
 
         let message = &input["message"];
         let summary = input["summary"].as_str();
-        let team_name = std::env::var("CLAUDE_CODE_TEAM_NAME").unwrap_or_else(|_| "default".into());
-        let sender_name = std::env::var("CLAUDE_CODE_AGENT_NAME").unwrap_or_else(|_| "team-lead".into());
+        let team_name = std::env::var("RUSTYCLAW_TEAM_NAME").unwrap_or_else(|_| "default".into());
+        let sender_name = std::env::var("RUSTYCLAW_AGENT_NAME").unwrap_or_else(|_| "team-lead".into());
         let timestamp = {
             let secs = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

@@ -138,8 +138,8 @@ pub struct MessagesRequest {
     /// Beta headers to include in the request (not serialised to body).
     #[serde(skip)]
     pub betas: Vec<String>,
-    /// Session UUID sent as X-Claude-Code-Session-Id header (not serialised to body).
-    /// Enables proxies and backends to aggregate requests by session (v2.1.86).
+    /// Session UUID sent via header to the Anthropic API (not serialised to body).
+    /// Enables proxies and backends to aggregate requests by session.
     #[serde(skip)]
     pub session_id: Option<String>,
 }

@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 
-/// Max line size: 4MB (generous — Claude Code uses 1MB).
+/// Max line size: 4MB — generous limit for large tool outputs.
 const MAX_LINE_SIZE: usize = 4 * 1024 * 1024;
 
 pub struct StdioTransport {

@@ -1026,7 +1026,7 @@ fn cmd_init(ctx: &CommandContext) -> CommandAction {
     CommandAction::SendPrompt(format!(
         "Please analyze this codebase and {}
 
-CLAUDE.md is loaded into every Claude Code session. It must be concise — only include \
+CLAUDE.md is loaded into every RustyClaw session. It must be concise — only include \
 what Claude would get wrong without it.
 
 ## What to analyze
@@ -1064,7 +1064,7 @@ Start the file with:
 ```
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to RustyClaw when working with code in this repository.
 ```
 
 Then add only the sections that have real content. Use terse, actionable language.",
@@ -2112,10 +2112,10 @@ fn cmd_ide(ctx: &CommandContext) -> CommandAction {
         "IDE Integration\n\n",
         "rustyclaw runs as a standalone TUI — no IDE plugin required.\n\n",
         "For VS Code integration:\n",
-        "  1. Install the Claude Code extension from the VS Code marketplace\n",
-        "  2. Or run rustyclaw in the VS Code integrated terminal\n\n",
+        "  1. Run rustyclaw in the VS Code integrated terminal\n",
+        "  2. Full tool access — Bash, Read, Write, Edit, Grep, etc.\n\n",
         "For JetBrains IDEs:\n",
-        "  1. Install the Claude Code plugin from JetBrains Marketplace\n",
+        "  1. Run rustyclaw in the built-in terminal\n",
         "  2. Or run rustyclaw in the built-in terminal\n\n",
         "The LSP tool provides code intelligence directly in the chat:\n",
         "  Use the LSP tool to query language servers for definitions, references, hover docs, etc."
@@ -2665,7 +2665,7 @@ fn cmd_teleport(args: &str) -> CommandAction {
 // ── Feedback ───────────────────────────────────────────────────────────────────
 
 fn cmd_feedback() -> CommandAction {
-    CommandAction::OpenBrowser("https://github.com/anthropics/claude-code/issues".into())
+    CommandAction::OpenBrowser("https://github.com/ForkedInTime/RustyClaw/issues".into())
 }
 
 // ── Terminal Setup ─────────────────────────────────────────────────────────────
@@ -2757,50 +2757,27 @@ fn cmd_notifications(args: &str, ctx: &CommandContext) -> CommandAction {
 
 // ── Release Notes ──────────────────────────────────────────────────────────────
 
-/// Upstream Claude Code versions this port tracks. Keep newest first.
-/// Used by `/release-notes <version>` to open the matching GitHub release page.
-const UPSTREAM_VERSIONS: &[&str] = &[
-    "2.1.92", "2.1.91", "2.1.90", "2.1.89", "2.1.87", "2.1.86",
-];
-
-fn cmd_release_notes(args: &str) -> CommandAction {
-    let arg = args.trim().trim_start_matches('v');
-
-    // No arg — show local port notes + an index of upstream versions.
-    if arg.is_empty() {
-        let mut text = String::from(
-            "Release Notes — rustyclaw v0.1.0\n\n\
-             Features unique to the Rust port:\n\
-               • Voice input (/voice) — audio capture via arecord/sox/ffmpeg\n\
-                 + transcription via local whisper CLI or OpenAI-compatible API\n\
-               • Sandbox (/sandbox) — strict pattern-blocking, bwrap (bubblewrap),\n\
-                 or firejail execution isolation for Bash commands\n\
-               • Thinkback (/thinkback) — live session statistics overlay\n\
-               • Teleport (/teleport) — export/import session context between instances\n\
-               • File history (/rewind) — per-turn snapshots with automatic restore\n\
-               • Output styles (/output-style) — Explanatory, Learning, custom .md files\n\
-               • Themes (/theme) — dark, light, solarized\n\
-               • Share (/share) — enhanced markdown session export\n\n\
-             Full feature parity with the TypeScript rustyclaw fork plus the above.\n\n\
-             Upstream Claude Code versions tracked by this port:\n"
-        );
-        for v in UPSTREAM_VERSIONS {
-            text.push_str(&format!("  • /release-notes {v}\n"));
-        }
-        return CommandAction::Message(text);
-    }
-
-    // Arg = version string — open GitHub release page if recognised.
-    if UPSTREAM_VERSIONS.contains(&arg) {
-        return CommandAction::OpenBrowser(format!(
-            "https://github.com/anthropics/claude-code/releases/tag/v{arg}"
-        ));
-    }
-
-    CommandAction::Message(format!(
-        "Unknown version '{arg}'. Known versions: {}",
-        UPSTREAM_VERSIONS.join(", ")
-    ))
+fn cmd_release_notes(_args: &str) -> CommandAction {
+    CommandAction::Message(
+        "Release Notes — RustyClaw v0.1.0\n\n\
+         Features:\n\
+           • Voice input (/voice) — audio capture via arecord/sox/ffmpeg\n\
+             + transcription via local whisper CLI or OpenAI-compatible API\n\
+           • XTTS v2 TTS — voice cloning with custom voice models\n\
+           • Codebase RAG (/rag) — tree-sitter AST parsing, 8 languages, FTS5 search\n\
+           • Smart model router — auto-route by task complexity\n\
+           • Cost dashboard (/cost, /budget) — real-time token/cost tracking\n\
+           • Parallel agents (/spawn) — background agents in git worktrees\n\
+           • OpenAI-compatible providers — Groq, OpenRouter, DeepSeek, LM Studio, etc.\n\
+           • SDK mode (--headless) — NDJSON stdio server for editor/CI embedding\n\
+           • Sandbox (/sandbox) — bwrap / firejail execution isolation\n\
+           • Session management (/session) — save, resume, search, export\n\
+           • Output styles (/output-style) — Explanatory, Learning, custom .md files\n\
+           • Themes (/theme) — dark, light, solarized\n\n\
+         See CHANGELOG.md for full history.\n\
+         See https://github.com/ForkedInTime/RustyClaw/releases for downloads."
+            .into()
+    )
 }
 
 fn cmd_plugin(args: &str) -> CommandAction {

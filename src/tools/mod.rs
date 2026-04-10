@@ -168,7 +168,7 @@ impl ToolOutput {
 }
 
 /// Directories that Write/Edit tools must never modify.
-/// Matches upstream Claude Code protected-directory list.
+/// Protected directories that Write/Edit tools must never modify.
 pub const PROTECTED_DIRS: &[&str] = &[".git", ".husky"];
 
 /// Returns Some(error ToolOutput) if `path` is inside a protected directory.
@@ -271,7 +271,7 @@ pub fn all_tools_with_state(config: &crate::config::Config) -> (Vec<DynTool>, Sh
     // BriefTool — always-on in Rust (no build-time KAIROS flag system)
     tools.push(Arc::new(brief_tool::BriefTool));
 
-    // Agent swarm tools — enabled when CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+    // Agent swarm tools — enabled when RUSTYCLAW_EXPERIMENTAL_AGENT_TEAMS=1
     if send_message::is_agent_swarms_enabled() {
         tools.push(Arc::new(send_message::SendMessageTool));
         tools.push(Arc::new(team_tools::TeamCreateTool));
