@@ -32,12 +32,19 @@ pub struct QueryEngine {
 
 impl QueryEngine {
     pub fn new(config: Config, tools: Vec<DynTool>) -> Result<Self> {
-        // Validate that an API key is present when using Anthropic models
-        if !crate::api::is_ollama_model(&config.model) && config.api_key.is_empty() {
+        // Validate that an API key is present when using Anthropic models.
+        // Ollama and OpenAI-compat providers fetch their own credentials
+        // (Ollama needs none; each OpenAI-compat provider has its own env var
+        // like GROQ_API_KEY, and local ones like lmstudio/openai-compat are
+        // key-less). So config.api_key is only required for Anthropic.
+        let is_non_anthropic = crate::api::is_ollama_model(&config.model)
+            || crate::api::is_openai_compat_model(&config.model);
+        if !is_non_anthropic && config.api_key.is_empty() {
             return Err(anyhow::anyhow!(
                 "ANTHROPIC_API_KEY is not set.\n\
                  Set it with: export ANTHROPIC_API_KEY=sk-ant-...\n\
-                 To use a local model instead: --model ollama:<name>"
+                 To use a local model instead: --model ollama:<name>\n\
+                 Or a cloud OpenAI-compatible model: --model groq:<name>, --model openrouter:<name>, ..."
             ));
         }
 

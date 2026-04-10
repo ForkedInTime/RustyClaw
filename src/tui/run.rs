@@ -394,12 +394,16 @@ async fn run_loop(
     let mut last_term_cols = init_cols;
     let mut last_term_rows = init_rows; // cached — updated only on Resize events
     let mut system_prompt = config.build_system_prompt();
-    // Validate Anthropic API key only when the initial model isn't Ollama
-    if !crate::api::is_ollama_model(&config.model) && config.api_key.is_empty() {
+    // Validate Anthropic API key only when the initial model is Anthropic.
+    // Ollama + OpenAI-compat providers manage their own credentials elsewhere.
+    let is_non_anthropic = crate::api::is_ollama_model(&config.model)
+        || crate::api::is_openai_compat_model(&config.model);
+    if !is_non_anthropic && config.api_key.is_empty() {
         return Err(anyhow::anyhow!(
             "ANTHROPIC_API_KEY is not set.\n\
              Set it with: export ANTHROPIC_API_KEY=sk-ant-...\n\
-             To use a local model: --model ollama:<name>"
+             To use a local model: --model ollama:<name>\n\
+             Or a cloud OpenAI-compatible model: --model groq:<name>, --model openrouter:<name>, ..."
         ));
     }
     let mut client: ApiBackend = ApiBackend::new(&config.model, &config.api_key, &config.ollama_host)?;
