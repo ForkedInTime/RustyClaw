@@ -263,6 +263,8 @@ pub struct AutoFixSettings {
     pub enabled: Option<bool>,
     /// When to run: `"autonomous"` (default), `"always"`, `"off"`. Parsed case-insensitively.
     pub trigger: Option<String>,
+    /// Lint command override; `null` → auto-detect from project files.
+    pub lint_command: Option<String>,
     /// Test command override; `null` → auto-detect from project files.
     pub test_command: Option<String>,
     /// Max consecutive retries before giving up (reserved for future multi-turn loop).

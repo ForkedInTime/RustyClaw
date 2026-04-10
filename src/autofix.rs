@@ -19,6 +19,7 @@ use std::process::{Command, Stdio};
 pub struct AutoFixConfig {
     pub enabled: bool,
     pub trigger: AutoFixTrigger,
+    pub lint_command: Option<String>,
     pub test_command: Option<String>,
     /// Reserved for a future multi-turn retry loop. The current hook runs
     /// tests exactly once per turn and does not retry — setting this to
@@ -61,6 +62,7 @@ impl Default for AutoFixConfig {
         Self {
             enabled: true,
             trigger: AutoFixTrigger::Autonomous,
+            lint_command: None,
             test_command: None,
             max_retries: 3,
             timeout_secs: DEFAULT_TEST_TIMEOUT_SECS,
@@ -335,6 +337,65 @@ pub fn run_checks(
     }
 }
 
+/// Maximum stderr bytes to include per section in the retry feedback message.
+/// Keeps context cost predictable across retries.
+pub const MAX_FEEDBACK_SECTION_BYTES: usize = 2048;
+
+/// Build the synthetic user-text message sent to the model after a
+/// failed lint/test round. Trims each stderr section to
+/// `MAX_FEEDBACK_SECTION_BYTES` and appends an explicit anti-cheat
+/// clause so the model does not converge on `#[allow(...)]` /
+/// `eslint-disable` / etc.
+pub fn format_feedback_message(
+    lint_cmd: Option<&str>,
+    test_cmd: Option<&str>,
+    lint_stderr: Option<&str>,
+    test_stderr: Option<&str>,
+) -> String {
+    let lint_cmd_str = lint_cmd.unwrap_or("(none)");
+    let test_cmd_str = test_cmd.unwrap_or("(none)");
+
+    let lint_body = match lint_stderr {
+        Some(s) => trim_section(s),
+        None => "(no output)".to_string(),
+    };
+    let test_body = match test_stderr {
+        Some(s) => trim_section(s),
+        None if lint_stderr.is_some() => "(skipped: lint failed)".to_string(),
+        None => "(no output)".to_string(),
+    };
+
+    format!(
+        "Your last edits failed automated checks. Fix the issues below.\n\
+         \n\
+         ## Lint ({lint_cmd_str})\n\
+         {lint_body}\n\
+         \n\
+         ## Tests ({test_cmd_str})\n\
+         {test_body}\n\
+         \n\
+         Make the minimum edits required to make both pass. Do not disable \
+         lints, skip tests, or add `#[allow(...)]` / `# type: ignore` / \
+         `eslint-disable` / `//nolint` unless the original code had them. \
+         If a test assertion is genuinely wrong, explain why before changing it."
+    )
+}
+
+fn trim_section(s: &str) -> String {
+    if s.len() <= MAX_FEEDBACK_SECTION_BYTES {
+        return s.to_string();
+    }
+    // Trim from the start so the tail of the stderr (usually the most
+    // actionable part) is preserved.
+    let start = s.len() - MAX_FEEDBACK_SECTION_BYTES;
+    // Back up to the nearest char boundary so we don't slice inside a codepoint.
+    let mut start = start;
+    while start < s.len() && !s.is_char_boundary(start) {
+        start += 1;
+    }
+    format!("... (output trimmed)\n{}", &s[start..])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -479,5 +540,86 @@ mod tests {
             }
             other => panic!("expected Fail, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn format_feedback_message_both_failed() {
+        let msg = format_feedback_message(
+            Some("cargo clippy"),
+            Some("cargo test"),
+            Some("warning: unused variable `x`"),
+            Some("test foo ... FAILED"),
+        );
+        assert!(msg.contains("Your last edits failed"));
+        assert!(msg.contains("## Lint (cargo clippy)"));
+        assert!(msg.contains("warning: unused variable"));
+        assert!(msg.contains("## Tests (cargo test)"));
+        assert!(msg.contains("test foo ... FAILED"));
+        assert!(msg.contains("Do not disable lints"));
+        assert!(msg.contains("#[allow"));
+    }
+
+    #[test]
+    fn format_feedback_message_lint_only() {
+        let msg = format_feedback_message(
+            Some("cargo clippy"),
+            Some("cargo test"),
+            Some("warning: dead code"),
+            None,
+        );
+        assert!(msg.contains("## Lint (cargo clippy)"));
+        assert!(msg.contains("warning: dead code"));
+        assert!(msg.contains("(skipped: lint failed)"));
+    }
+
+    #[test]
+    fn format_feedback_message_tests_only() {
+        let msg = format_feedback_message(
+            Some("cargo clippy"),
+            Some("cargo test"),
+            None,
+            Some("assertion failed: x == 1"),
+        );
+        assert!(msg.contains("(no output)"));
+        assert!(msg.contains("assertion failed"));
+    }
+
+    #[test]
+    fn format_feedback_message_truncates_lint() {
+        let big = "x".repeat(5000);
+        let msg = format_feedback_message(
+            Some("cargo clippy"),
+            Some("cargo test"),
+            Some(&big),
+            None,
+        );
+        // Should contain the truncation marker
+        assert!(msg.contains("(output trimmed)"));
+        // Should not contain all 5000 x's
+        let x_count = msg.matches('x').count();
+        assert!(x_count <= MAX_FEEDBACK_SECTION_BYTES + 10, "x_count = {x_count}");
+    }
+
+    #[test]
+    fn format_feedback_message_truncates_tests() {
+        let big = "y".repeat(5000);
+        let msg = format_feedback_message(
+            Some("cargo clippy"),
+            Some("cargo test"),
+            Some("(lint passed)"),
+            Some(&big),
+        );
+        assert!(msg.contains("(output trimmed)"));
+        let y_count = msg.matches('y').count();
+        assert!(y_count <= MAX_FEEDBACK_SECTION_BYTES + 10);
+    }
+
+    #[test]
+    fn trim_section_respects_utf8_boundaries() {
+        // 2049 bytes where the byte at index 1 starts a 3-byte codepoint ('€' = E2 82 AC)
+        let s = format!("€{}", "a".repeat(MAX_FEEDBACK_SECTION_BYTES));
+        // trim_section should not panic and should return valid UTF-8
+        let out = trim_section(&s);
+        assert!(out.is_char_boundary(0));
     }
 }

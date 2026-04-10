@@ -513,6 +513,9 @@ impl Config {
                     _        => crate::autofix::AutoFixTrigger::Autonomous,
                 };
             }
+            if ar.lint_command.is_some() {
+                cfg.auto_fix.lint_command = ar.lint_command.clone();
+            }
             if ar.test_command.is_some() {
                 cfg.auto_fix.test_command = ar.test_command.clone();
             }
