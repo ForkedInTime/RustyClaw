@@ -325,6 +325,9 @@ pub struct Config {
     /// Autonomy level: "suggest" | "auto-edit" | "full-auto".
     /// Controls whether Write/Edit show diff previews before applying.
     pub autonomy: String,
+
+    /// Auto-capture notable decisions/preferences from assistant responses into memory.
+    pub memory_auto_capture: bool,
 }
 
 impl Default for Config {
@@ -396,6 +399,7 @@ impl Default for Config {
             router_high_model: None,
             router_super_high_model: None,
             autonomy: "auto-edit".to_string(),
+            memory_auto_capture: false,
         }
     }
 }
@@ -460,6 +464,7 @@ impl Config {
         if let Some(a) = settings.autonomy {
             cfg.autonomy = a;
         }
+        cfg.memory_auto_capture = settings.memory_auto_capture.unwrap_or(false);
 
         // Resolve output style: load name from settings, look up prompt
         if let Some(ref style_name) = settings.output_style {
@@ -1006,6 +1011,21 @@ Use the `gh` CLI for all GitHub-related tasks. When creating a PR:
             base
         } else {
             format!("{base}\n\n<agents_md>\n{}</agents_md>", self.agentsmd)
+        };
+
+        // Append persistent memory context (top 10 entries from MemoryStore)
+        let base = if let Ok(store) = crate::memory::MemoryStore::open(&self.cwd) {
+            if let Ok(mem_ctx) = store.build_context(10) {
+                if !mem_ctx.is_empty() {
+                    format!("{base}\n\n{mem_ctx}")
+                } else {
+                    base
+                }
+            } else {
+                base
+            }
+        } else {
+            base
         };
 
         // Output style prompt is appended after CLAUDE.md but before append_system_prompt

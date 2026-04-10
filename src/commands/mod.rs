@@ -24,7 +24,8 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "release-notes", "reload-plugins", "rename", "resume", "rewind", "review", "sandbox",
     "security-review", "session", "share", "skills", "stats", "status", "statusline", "summary",
     "tasks", "teleport", "terminal-setup", "theme", "thinkback", "ultraplan", "upgrade",
-    "rag", "router", "usage", "version", "vim", "voice", "autofix-pr", "issue", "color", "powerup",
+    "rag", "remember", "router", "usage", "version", "vim", "voice", "autofix-pr", "issue",
+    "color", "forget", "powerup",
 ];
 
 // ── Model catalogue ───────────────────────────────────────────────────────────
@@ -191,6 +192,20 @@ pub enum CommandAction {
     VoiceCloneRemove,
     /// Play a test phrase with current TTS (XTTS v2)
     VoiceTest,
+    /// Add a text snippet to persistent memory
+    MemoryAdd(String),
+    /// Remove memories matching a query string
+    MemoryForget(String),
+    /// Search persistent memory
+    MemorySearch(String),
+    /// List all persistent memories grouped by category
+    MemoryList,
+    /// Clear all persistent memories
+    MemoryClear,
+    /// Toggle auto-capture of decisions/preferences from assistant responses
+    MemoryAutoToggle(bool),
+    /// Show the current memory context (top 10 entries)
+    MemoryInject,
     /// Command not recognised — show error
     Unknown(String),
 }
@@ -304,7 +319,21 @@ pub fn dispatch(input: &str, ctx: &CommandContext) -> CommandAction {
         "image" =>
             cmd_image(args),
         "memory" =>
-            cmd_memory(ctx),
+            cmd_memory_dispatch(args, ctx),
+        "remember" => {
+            if args.is_empty() {
+                CommandAction::Message("Usage: /remember <text to remember>".into())
+            } else {
+                CommandAction::MemoryAdd(args.to_string())
+            }
+        }
+        "forget" => {
+            if args.is_empty() {
+                CommandAction::Message("Usage: /forget <query matching memories to remove>".into())
+            } else {
+                CommandAction::MemoryForget(args.to_string())
+            }
+        }
 
         // ── New commands (gap fill) ───────────────────────────────────────
         "commit"           => cmd_commit(args, ctx),
@@ -1498,6 +1527,7 @@ fn mcp_set_disabled(args: &str, disabled: bool) -> CommandAction {
     }
 }
 
+#[allow(dead_code)]
 fn cmd_memory(ctx: &CommandContext) -> CommandAction {
     let global_claude_md = Config::claude_dir().join("CLAUDE.md");
     let local_claude_md  = ctx.config.cwd.join("CLAUDE.md");
@@ -1554,6 +1584,54 @@ fn cmd_memory(ctx: &CommandContext) -> CommandAction {
     }
 
     CommandAction::Message(lines.join("\n"))
+}
+
+/// Dispatch the `/memory` command with subcommands for the persistent MemoryStore.
+fn cmd_memory_dispatch(args: &str, ctx: &CommandContext) -> CommandAction {
+    let (sub, rest) = split_first_word(args);
+    match sub {
+        "list" | "" => CommandAction::MemoryList,
+        "search" => {
+            if rest.is_empty() {
+                CommandAction::Message("Usage: /memory search <query>".into())
+            } else {
+                CommandAction::MemorySearch(rest.to_string())
+            }
+        }
+        "clear" => CommandAction::MemoryClear,
+        "inject" => CommandAction::MemoryInject,
+        "auto" => {
+            match rest {
+                "on"  => CommandAction::MemoryAutoToggle(true),
+                "off" => CommandAction::MemoryAutoToggle(false),
+                _ => CommandAction::Message(
+                    format!(
+                        "Memory auto-capture is currently {}.\n\
+                         Usage: /memory auto on|off",
+                        if ctx.config.memory_auto_capture { "ON" } else { "OFF" }
+                    )
+                ),
+            }
+        }
+        "add" => {
+            if rest.is_empty() {
+                CommandAction::Message("Usage: /memory add <text>".into())
+            } else {
+                CommandAction::MemoryAdd(rest.to_string())
+            }
+        }
+        "forget" => {
+            if rest.is_empty() {
+                CommandAction::Message("Usage: /memory forget <query>".into())
+            } else {
+                CommandAction::MemoryForget(rest.to_string())
+            }
+        }
+        _ => CommandAction::Message(format!(
+            "Unknown /memory subcommand '{sub}'.\n\
+             Available: list, search <q>, add <text>, forget <q>, clear, inject, auto on|off"
+        )),
+    }
 }
 
 fn cmd_tasks(ctx: &CommandContext) -> CommandAction {

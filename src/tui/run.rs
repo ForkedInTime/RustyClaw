@@ -882,6 +882,28 @@ async fn run_loop(
                                     });
                                 }
                             }
+                            // Auto-capture: scan assistant response for notable decisions
+                            if config.memory_auto_capture {
+                                let response_text: String = new_messages.iter()
+                                    .rfind(|m| m.role == Role::Assistant)
+                                    .map(|m| m.content.iter()
+                                        .filter_map(|b| if let ContentBlock::Text { text } = b {
+                                            Some(text.as_str())
+                                        } else { None })
+                                        .collect::<Vec<_>>()
+                                        .join(" "))
+                                    .unwrap_or_default();
+                                if !response_text.is_empty() {
+                                    let cwd = config.cwd.clone();
+                                    tokio::spawn(async move {
+                                        if let Ok(store) = crate::memory::MemoryStore::open(&cwd) {
+                                            for candidate in crate::memory::auto_capture_memories(&response_text) {
+                                                let _ = store.add_auto(&candidate, "auto");
+                                            }
+                                        }
+                                    });
+                                }
+                            }
                             app.apply(AppEvent::Done { tokens_in, tokens_out, cache_read, cache_write, messages: new_messages, model_used });
                         }
                         AppEvent::Compacted { ref replacement, summary_len } => {
@@ -2590,6 +2612,171 @@ async fn handle_key(
                             Err(e) => {
                                 app.entries.push(ChatEntry::system(format!("RAG database error: {e}")));
                             }
+                        }
+                        app.scroll_to_bottom();
+                    }
+                    // ── Persistent memory commands ───────────────────────────────────
+                    CommandAction::MemoryAdd(text) => {
+                        let cwd = config.cwd.clone();
+                        match crate::memory::MemoryStore::open(&cwd) {
+                            Ok(store) => {
+                                let cat = crate::memory::auto_categorize(&text);
+                                match store.add_auto(&text, "user") {
+                                    Ok(true) => app.entries.push(ChatEntry::system(
+                                        format!("Memory stored [{cat}]: {text}")
+                                    )),
+                                    Ok(false) => app.entries.push(ChatEntry::system(
+                                        "Memory skipped — near-duplicate already exists.".to_string()
+                                    )),
+                                    Err(e) => app.entries.push(ChatEntry::system(
+                                        format!("Memory store error: {e}")
+                                    )),
+                                }
+                            }
+                            Err(e) => app.entries.push(ChatEntry::system(format!("Memory store error: {e}"))),
+                        }
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::MemoryForget(query) => {
+                        let cwd = config.cwd.clone();
+                        match crate::memory::MemoryStore::open(&cwd) {
+                            Ok(store) => {
+                                match store.search(&query, 20) {
+                                    Ok(matches) if matches.is_empty() => {
+                                        app.entries.push(ChatEntry::system(
+                                            format!("No memories matched '{query}'.")
+                                        ));
+                                    }
+                                    Ok(matches) => {
+                                        let count = matches.len();
+                                        let mut errs = 0usize;
+                                        for m in &matches {
+                                            if store.forget(&m.key).is_err() { errs += 1; }
+                                        }
+                                        let ok = count - errs;
+                                        app.entries.push(ChatEntry::system(
+                                            format!("Forgot {ok} memory entries matching '{query}'.")
+                                        ));
+                                    }
+                                    Err(e) => app.entries.push(ChatEntry::system(
+                                        format!("Memory search error: {e}")
+                                    )),
+                                }
+                            }
+                            Err(e) => app.entries.push(ChatEntry::system(format!("Memory store error: {e}"))),
+                        }
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::MemorySearch(query) => {
+                        let cwd = config.cwd.clone();
+                        match crate::memory::MemoryStore::open(&cwd) {
+                            Ok(store) => {
+                                match store.search(&query, 10) {
+                                    Ok(results) if results.is_empty() => {
+                                        app.entries.push(ChatEntry::system(
+                                            format!("No memories found for '{query}'.")
+                                        ));
+                                    }
+                                    Ok(results) => {
+                                        let mut lines = vec![format!(
+                                            "Memory search: '{}' — {} results\n", query, results.len()
+                                        )];
+                                        for r in &results {
+                                            lines.push(format!(
+                                                "  [{}] {} ({})",
+                                                r.category, r.value, r.key
+                                            ));
+                                        }
+                                        app.entries.push(ChatEntry::system(lines.join("\n")));
+                                    }
+                                    Err(e) => app.entries.push(ChatEntry::system(
+                                        format!("Memory search error: {e}")
+                                    )),
+                                }
+                            }
+                            Err(e) => app.entries.push(ChatEntry::system(format!("Memory store error: {e}"))),
+                        }
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::MemoryList => {
+                        let cwd = config.cwd.clone();
+                        match crate::memory::MemoryStore::open(&cwd) {
+                            Ok(store) => {
+                                match store.list(None) {
+                                    Ok(memories) if memories.is_empty() => {
+                                        app.entries.push(ChatEntry::system(
+                                            "No memories stored yet. Use /remember <text> to add one.".to_string()
+                                        ));
+                                    }
+                                    Ok(memories) => {
+                                        let mut lines = vec![format!("Memories ({} total)\n", memories.len())];
+                                        let mut last_cat = String::new();
+                                        for m in &memories {
+                                            let cat = m.category.as_str().to_string();
+                                            if cat != last_cat {
+                                                lines.push(format!("\n[{cat}]"));
+                                                last_cat = cat;
+                                            }
+                                            lines.push(format!("  • {}", m.value));
+                                        }
+                                        app.entries.push(ChatEntry::system(lines.join("\n")));
+                                    }
+                                    Err(e) => app.entries.push(ChatEntry::system(
+                                        format!("Memory list error: {e}")
+                                    )),
+                                }
+                            }
+                            Err(e) => app.entries.push(ChatEntry::system(format!("Memory store error: {e}"))),
+                        }
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::MemoryClear => {
+                        let cwd = config.cwd.clone();
+                        match crate::memory::MemoryStore::open(&cwd) {
+                            Ok(store) => {
+                                match store.clear_all() {
+                                    Ok(()) => app.entries.push(ChatEntry::system(
+                                        "All memories cleared.".to_string()
+                                    )),
+                                    Err(e) => app.entries.push(ChatEntry::system(
+                                        format!("Memory clear error: {e}")
+                                    )),
+                                }
+                            }
+                            Err(e) => app.entries.push(ChatEntry::system(format!("Memory store error: {e}"))),
+                        }
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::MemoryAutoToggle(on) => {
+                        config.memory_auto_capture = on;
+                        app.entries.push(ChatEntry::system(format!(
+                            "Memory auto-capture {}.",
+                            if on { "enabled — notable decisions will be stored automatically" }
+                            else  { "disabled" }
+                        )));
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::MemoryInject => {
+                        let cwd = config.cwd.clone();
+                        match crate::memory::MemoryStore::open(&cwd) {
+                            Ok(store) => {
+                                match store.build_context(10) {
+                                    Ok(ctx_text) if ctx_text.is_empty() => {
+                                        app.entries.push(ChatEntry::system(
+                                            "No memories to inject — store is empty.".to_string()
+                                        ));
+                                    }
+                                    Ok(ctx_text) => {
+                                        app.entries.push(ChatEntry::system(
+                                            format!("Current memory context:\n\n{ctx_text}")
+                                        ));
+                                    }
+                                    Err(e) => app.entries.push(ChatEntry::system(
+                                        format!("Memory context error: {e}")
+                                    )),
+                                }
+                            }
+                            Err(e) => app.entries.push(ChatEntry::system(format!("Memory store error: {e}"))),
                         }
                         app.scroll_to_bottom();
                     }

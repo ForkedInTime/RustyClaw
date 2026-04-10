@@ -223,6 +223,10 @@ pub struct Settings {
     /// - "auto-edit": auto-apply edits to existing files, ask for new files (default)
     /// - "full-auto": apply all changes without asking
     pub autonomy: Option<String>,
+
+    /// Auto-capture notable decisions/preferences from assistant responses into persistent memory.
+    #[serde(rename = "memoryAutoCapture")]
+    pub memory_auto_capture: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -334,6 +338,7 @@ impl Settings {
             router_high_model:    other.router_high_model.or(self.router_high_model),
             router_super_high_model: other.router_super_high_model.or(self.router_super_high_model),
             autonomy:             other.autonomy.or(self.autonomy),
+            memory_auto_capture:  other.memory_auto_capture.or(self.memory_auto_capture),
             permissions: PermissionsConfig {
                 // Union both lists — project additions stack on top of global
                 allow: {
