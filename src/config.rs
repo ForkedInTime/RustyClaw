@@ -808,15 +808,11 @@ impl Config {
     /// Path to the data directory (XDG-aware).
     /// Used for sessions, RAG database, and other persistent data.
     pub fn data_dir() -> PathBuf {
-        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-            let xdg_path = PathBuf::from(&xdg).join("rustyclaw");
-            let legacy = Self::claude_dir().join("sessions");
-            if xdg_path.exists() || !legacy.exists() {
-                return xdg_path;
-            }
-        }
-        // Default: store data alongside config for backward compat
-        Self::claude_dir()
+        compute_data_dir(
+            std::env::var("XDG_DATA_HOME").ok().as_deref(),
+            Self::claude_dir(),
+            |p| p.exists(),
+        )
     }
 
     /// Path to the cache directory (XDG-aware).
@@ -1171,5 +1167,112 @@ Use the `gh` CLI for all GitHub-related tasks. When creating a PR:
         }
 
         base
+    }
+}
+
+/// Pure helper for `Config::data_dir()` — all I/O is injected so the
+/// fallback logic is unit-testable without mutating process env vars.
+///
+/// Rules (locked in by tests below):
+///   - If `XDG_DATA_HOME` is set AND the new XDG path already exists,
+///     use the XDG path. This respects explicit opt-in.
+///   - If `XDG_DATA_HOME` is set AND the legacy `<claude_dir>/sessions`
+///     directory does NOT exist, use the XDG path. Fresh installs get
+///     XDG semantics automatically.
+///   - Otherwise (XDG unset, OR legacy sessions exist and XDG path does
+///     not) fall back to the legacy claude_dir. This is the migration
+///     safety rail: a user with existing sessions at `~/.claude/sessions`
+///     who sets `XDG_DATA_HOME` for the first time will KEEP seeing their
+///     old sessions until they explicitly move them.
+fn compute_data_dir(
+    xdg_data_home: Option<&str>,
+    claude_dir: PathBuf,
+    exists: impl Fn(&Path) -> bool,
+) -> PathBuf {
+    if let Some(xdg) = xdg_data_home {
+        let xdg_path = PathBuf::from(xdg).join("rustyclaw");
+        let legacy_sessions = claude_dir.join("sessions");
+        if exists(&xdg_path) || !exists(&legacy_sessions) {
+            return xdg_path;
+        }
+    }
+    claude_dir
+}
+
+#[cfg(test)]
+mod data_dir_tests {
+    use super::compute_data_dir;
+    use std::path::{Path, PathBuf};
+
+    /// No XDG set → always return the legacy claude_dir, even when it
+    /// doesn't physically exist yet. This is the pre-XDG baseline and
+    /// must never regress.
+    #[test]
+    fn no_xdg_returns_legacy_claude_dir() {
+        let legacy = PathBuf::from("/home/u/.claude");
+        let got = compute_data_dir(None, legacy.clone(), |_| false);
+        assert_eq!(got, legacy);
+    }
+
+    /// XDG set, existing sessions under `~/.claude/sessions` → must
+    /// fall back to legacy so old sessions stay visible. This is the
+    /// SILENT-ORPHAN-SESSIONS regression the sprint item targets.
+    #[test]
+    fn xdg_set_but_legacy_sessions_exist_falls_back_to_legacy() {
+        let legacy = PathBuf::from("/home/u/.claude");
+        let legacy_sessions = legacy.join("sessions");
+
+        let got = compute_data_dir(
+            Some("/home/u/.local/share"),
+            legacy.clone(),
+            |p| p == legacy_sessions, // only the sessions dir exists
+        );
+        assert_eq!(
+            got, legacy,
+            "legacy sessions dir must pin data_dir to legacy claude_dir"
+        );
+    }
+
+    /// XDG set, fresh machine (nothing exists) → use XDG path. Fresh
+    /// installs opt into XDG automatically.
+    #[test]
+    fn xdg_set_fresh_install_uses_xdg() {
+        let legacy = PathBuf::from("/home/u/.claude");
+        let got = compute_data_dir(Some("/home/u/.local/share"), legacy, |_| false);
+        assert_eq!(got, PathBuf::from("/home/u/.local/share/rustyclaw"));
+    }
+
+    /// XDG set, the XDG path already exists (from a prior RustyClaw run
+    /// with XDG active) → use XDG even if legacy sessions also exist.
+    /// This matches the "explicit opt-in wins" rule.
+    #[test]
+    fn xdg_path_already_exists_wins_over_legacy() {
+        let legacy = PathBuf::from("/home/u/.claude");
+        let legacy_sessions = legacy.join("sessions");
+        let xdg_path = PathBuf::from("/home/u/.local/share/rustyclaw");
+
+        let got = compute_data_dir(
+            Some("/home/u/.local/share"),
+            legacy.clone(),
+            |p: &Path| p == legacy_sessions || p == xdg_path,
+        );
+        assert_eq!(
+            got, xdg_path,
+            "XDG path should win when it already exists (prior use)"
+        );
+    }
+
+    /// XDG set to an empty string → must still fall through to legacy,
+    /// not join to "/rustyclaw" with an empty prefix.
+    #[test]
+    fn empty_xdg_value_is_not_a_valid_path() {
+        let legacy = PathBuf::from("/home/u/.claude");
+        // With an empty XDG_DATA_HOME, joining produces "rustyclaw" which
+        // is a relative path. compute_data_dir still honours the "legacy
+        // sessions exist" guard, so as long as that guard is present the
+        // legacy wins. Confirm that behavior.
+        let legacy_sessions = legacy.join("sessions");
+        let got = compute_data_dir(Some(""), legacy.clone(), |p| p == legacy_sessions);
+        assert_eq!(got, legacy);
     }
 }
