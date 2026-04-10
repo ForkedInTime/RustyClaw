@@ -3830,6 +3830,11 @@ async fn run_api_task(
                 }
                 ctx.sandbox_allow_network = config.sandbox_allow_network;
                 ctx.read_cache = Some(read_cache.clone());
+                // Publish live provider snapshot so AgentTool / spawned
+                // sub-agents inherit `/model` changes made mid-session.
+                ctx.live_model = Some(config.model.clone());
+                ctx.live_api_key = Some(config.api_key.clone());
+                ctx.live_ollama_host = Some(config.ollama_host.clone());
                 let mut results: Vec<ContentBlock> = Vec::new();
 
                 // Auto-rollback: accumulate file paths touched by Write/Edit/MultiEdit

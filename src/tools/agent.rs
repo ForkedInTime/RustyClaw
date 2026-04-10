@@ -74,15 +74,31 @@ impl Tool for AgentTool {
         })
     }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput> {
+    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let input: AgentInput = serde_json::from_value(input)?;
 
         if let Some(desc) = &input.description {
             eprintln!("[Agent: {}]", desc);
         }
 
-        // Build config for sub-agent, potentially with restricted tools
+        // Build config for sub-agent, potentially with restricted tools.
+        //
+        // Our own `self.config` is a snapshot taken at tool-build time and
+        // goes stale the moment the user runs `/model foo` mid-session. The
+        // run loop publishes the live provider choice through `ToolContext`
+        // each turn — prefer it so sub-agents actually run against the
+        // currently-active provider instead of silently falling back to the
+        // startup model. (claurst #78 / #48, opencode #21738)
         let mut sub_config = self.config.clone();
+        if let Some(ref m) = ctx.live_model {
+            sub_config.model = m.clone();
+        }
+        if let Some(ref k) = ctx.live_api_key {
+            sub_config.api_key = k.clone();
+        }
+        if let Some(ref h) = ctx.live_ollama_host {
+            sub_config.ollama_host = h.clone();
+        }
 
         // Apply subagent_type: override system prompt + restrict tools as needed
         let (system_prompt_override, allowed_tools): (Option<String>, Option<Vec<String>>) =
