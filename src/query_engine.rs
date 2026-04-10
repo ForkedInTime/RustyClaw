@@ -124,7 +124,7 @@ impl QueryEngine {
 
             let request = MessagesRequest {
                 model: self.config.model.clone(),
-                max_tokens: self.config.max_tokens,
+                max_tokens: self.config.max_tokens_for(&self.config.model),
                 system: crate::api::types::SystemContent::Plain(effective_system),
                 messages: self.messages.clone(),
                 tools: tool_defs,
@@ -431,7 +431,7 @@ impl QueryEngine {
 
             let request = MessagesRequest {
                 model: self.config.model.clone(),
-                max_tokens: self.config.max_tokens,
+                max_tokens: self.config.max_tokens_for(&self.config.model),
                 system: crate::api::types::SystemContent::Plain(self.system_prompt.clone()),
                 messages: self.messages.clone(),
                 tools: tool_defs,

@@ -76,8 +76,17 @@ pub struct Settings {
     /// Model ID override (prefix "ollama:" for local Ollama models)
     pub model: Option<String>,
 
-    /// Max tokens per response
+    /// Max tokens per response (global fallback)
     pub max_tokens: Option<u32>,
+
+    /// Per-model max_tokens overrides. Keys may be alias or canonical
+    /// model IDs; values are the max output token budget for that model.
+    /// Example:
+    /// ```json
+    /// "maxTokensByModel": { "haiku": 4096, "opus": 16000 }
+    /// ```
+    #[serde(rename = "maxTokensByModel")]
+    pub max_tokens_by_model: Option<std::collections::HashMap<String, u32>>,
 
     /// Enable auto-compact when context fills
     pub auto_compact: Option<bool>,
@@ -335,6 +344,10 @@ impl Settings {
         Self {
             model:                  other.model.or(self.model),
             max_tokens:             other.max_tokens.or(self.max_tokens),
+            max_tokens_by_model:    match (self.max_tokens_by_model, other.max_tokens_by_model) {
+                (Some(mut a), Some(b)) => { for (k, v) in b { a.insert(k, v); } Some(a) }
+                (a, b) => b.or(a),
+            },
             auto_compact:           other.auto_compact.or(self.auto_compact),
             verbose:                other.verbose.or(self.verbose),
             ollama_host:            other.ollama_host.or(self.ollama_host),
