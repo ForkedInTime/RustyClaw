@@ -332,6 +332,11 @@ pub struct Config {
     /// Phase-declarative model routing config.
     #[serde(skip)]
     pub phase_router: crate::router::PhaseRouterConfig,
+
+    /// Auto-rollback on test regression: run tests after Write/Edit and
+    /// `git checkout --` the modified files if tests fail.
+    #[serde(skip)]
+    pub auto_rollback: crate::rollback::RollbackConfig,
 }
 
 impl Default for Config {
@@ -405,6 +410,7 @@ impl Default for Config {
             autonomy: "auto-edit".to_string(),
             memory_auto_capture: false,
             phase_router: crate::router::PhaseRouterConfig::default(),
+            auto_rollback: crate::rollback::RollbackConfig::default(),
         }
     }
 }
@@ -481,6 +487,22 @@ impl Config {
                 if let Some(m) = phases.get("review")   { cfg.phase_router.review_model   = crate::commands::resolve_model_alias(m); }
                 if let Some(m) = phases.get("default")  { cfg.phase_router.default_model  = crate::commands::resolve_model_alias(m); }
             }
+        }
+
+        // Auto-rollback settings → RollbackConfig
+        if let Some(ar) = &settings.auto_rollback {
+            if let Some(e) = ar.enabled { cfg.auto_rollback.enabled = e; }
+            if let Some(t) = &ar.trigger {
+                cfg.auto_rollback.trigger = match t.to_ascii_lowercase().as_str() {
+                    "always" => crate::rollback::RollbackTrigger::Always,
+                    "off"    => crate::rollback::RollbackTrigger::Off,
+                    _        => crate::rollback::RollbackTrigger::Autonomous,
+                };
+            }
+            if ar.test_command.is_some() {
+                cfg.auto_rollback.test_command = ar.test_command.clone();
+            }
+            if let Some(m) = ar.max_retries { cfg.auto_rollback.max_retries = m; }
         }
 
         // Resolve output style: load name from settings, look up prompt
