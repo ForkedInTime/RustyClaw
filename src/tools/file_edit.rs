@@ -62,6 +62,9 @@ impl Tool for FileEditTool {
         let path = resolve_path(&input.file_path, &ctx.cwd);
 
         if let Some(err) = super::check_protected_path(&path) { return Ok(err); }
+        if let Some(err) = super::check_sensitive_path(&path, super::SensitiveOp::Write) {
+            return Ok(err);
+        }
 
         // Snapshot the original before editing
         snapshot_file(ctx, &path).await;

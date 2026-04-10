@@ -59,6 +59,10 @@ impl Tool for FileReadTool {
         let input: FileReadInput = serde_json::from_value(input)?;
         let path = resolve_path(&input.file_path, &ctx.cwd);
 
+        if let Some(err) = super::check_sensitive_path(&path, super::SensitiveOp::Read) {
+            return Ok(err);
+        }
+
         // Check file exists
         if !path.exists() {
             return Ok(ToolOutput::error(format!(
