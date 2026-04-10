@@ -24,7 +24,7 @@ pub struct QueryEngine {
     include_partial_messages: bool,
     include_hook_events: bool,
     cumulative_cost_usd: f64,
-    /// UUID for the X-Claude-Code-Session-Id header (v2.1.86).
+    /// UUID for the session ID header sent to the Anthropic API.
     session_id: Option<String>,
     /// Shared Read-tool cache for deduplicating unchanged re-reads (v2.1.86).
     read_cache: crate::tools::ReadCache,
@@ -187,8 +187,8 @@ impl QueryEngine {
             if !self.json_output && !self.stream_json_output {
                 println!(); // newline after streamed text
             }
-            // JSON mode: emit result object at end of turn
-            if self.json_output && !full_text.is_empty() {
+            // JSON / stream-json mode: emit result object at end of turn
+            if (self.json_output || self.stream_json_output) && !full_text.is_empty() {
                 let result = serde_json::json!({
                     "type": "result",
                     "text": full_text,
@@ -229,7 +229,7 @@ impl QueryEngine {
                     eprintln!(
                         "{}",
                         format!(
-                            "Budget limit reached: ${:.4} / ${:.2} — stopping.",
+                            "Budget limit reached: ${:.4} / ${:.4} — stopping.",
                             self.cumulative_cost_usd, budget
                         )
                         .yellow()

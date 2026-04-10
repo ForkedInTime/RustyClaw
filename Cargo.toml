@@ -95,6 +95,7 @@ tree-sitter-java = "0.23"
 tree-sitter-bash = "0.25"
 clap_complete = "4.6.0"
 self_update = { version = "0.44.0", features = ["archive-tar", "archive-zip", "compression-flate2"] }
+libc = "0.2"
 
 [profile.release]
 opt-level = 3

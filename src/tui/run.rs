@@ -131,14 +131,14 @@ async fn upgrade_check_task(tx: tokio::sync::mpsc::UnboundedSender<AppEvent>) {
             String::from_utf8(o.stdout).ok().map(|s| s.trim().to_string())
         } else { None });
 
-    // Fetch latest Claude Code release from GitHub API
+    // Fetch latest RustyClaw release from GitHub API
     let latest = async {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(8))
             .user_agent("rustyclaw")
             .build()?;
         let resp: serde_json::Value = client
-            .get("https://api.github.com/repos/anthropics/claude-code/releases/latest")
+            .get("https://api.github.com/repos/ForkedInTime/RustyClaw/releases/latest")
             .send().await?
             .json().await?;
         anyhow::Ok(resp["tag_name"].as_str().unwrap_or("unknown").to_string())
@@ -149,9 +149,9 @@ async fn upgrade_check_task(tx: tokio::sync::mpsc::UnboundedSender<AppEvent>) {
         Ok(tag) => format!(
             "Upgrade Check\n\n\
              rustyclaw v{current_version}{hash_str}\n\
-             Claude Code upstream: {tag}\n\n\
+             Latest release: {tag}\n\n\
              To rebuild from source:\n\
-               cd ~/Claude-Source/RustyClaw\n\
+               cd ~/Projects/RustyClaw\n\
                git pull\n\
                cargo build --release"
         ),
@@ -160,7 +160,7 @@ async fn upgrade_check_task(tx: tokio::sync::mpsc::UnboundedSender<AppEvent>) {
              rustyclaw v{current_version}{hash_str}\n\
              (Could not reach GitHub — check your connection)\n\n\
              To rebuild from source:\n\
-               cd ~/Claude-Source/RustyClaw\n\
+               cd ~/Projects/RustyClaw\n\
                git pull\n\
                cargo build --release"
         ),

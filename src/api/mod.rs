@@ -213,7 +213,7 @@ impl ClaudeClient {
 /// Normalize streamed tool input: when the API emits array/object fields as
 /// JSON-encoded strings (e.g. `"[\"a\",\"b\"]"` instead of `["a","b"]`),
 /// re-parse them so downstream tools see the intended shape.
-/// Fix landed in Claude Code v2.1.89/92.
+/// Fixes double-encoded JSON from the API.
 fn normalize_tool_input(val: &mut serde_json::Value) {
     match val {
         serde_json::Value::Object(map) => {

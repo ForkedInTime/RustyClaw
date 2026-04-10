@@ -483,7 +483,7 @@ impl Config {
 
         // ── ANTHROPIC_API_KEY_FILE_DESCRIPTOR: read API key from an open fd
         if cfg.api_key.is_empty() {
-            if let Ok(fd_str) = std::env::var("CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR") {
+            if let Ok(fd_str) = std::env::var("RUSTYCLAW_API_KEY_FILE_DESCRIPTOR") {
                 if let Ok(fd) = fd_str.parse::<i32>() {
                     use std::os::unix::io::FromRawFd;
                     use std::io::Read;
@@ -529,7 +529,7 @@ impl Config {
         if let Ok(host) = std::env::var("OLLAMA_HOST") {
             cfg.ollama_host = host;
         }
-        if let Ok(v) = std::env::var("CLAUDE_CODE_VERBOSE") {
+        if let Ok(v) = std::env::var("RUSTYCLAW_VERBOSE") {
             cfg.verbose = v == "1" || v.eq_ignore_ascii_case("true");
         }
         if let Ok(v) = std::env::var("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") {
@@ -589,7 +589,7 @@ impl Config {
     }
 
     /// Load and merge all AGENTS.md files in priority order (same as CLAUDE.md).
-    /// Industry-standard agent configuration — works across Claude Code, [redacted], [redacted], etc.
+    /// Industry-standard agent configuration — works across RustyClaw, [redacted], [redacted], etc.
     pub fn load_agents_md(cwd: &Path) -> String {
         let mut parts: Vec<String> = Vec::new();
         let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
@@ -655,7 +655,7 @@ impl Config {
     /// Path to the config directory (XDG-aware).
     ///
     /// Priority: $CLAUDE_CONFIG_DIR > $XDG_CONFIG_HOME/rustyclaw > ~/.claude
-    /// Falls back to ~/.claude for backward compat with upstream Claude Code.
+    /// Falls back to ~/.claude for backward compatibility.
     pub fn claude_dir() -> PathBuf {
         // Explicit override
         if let Ok(dir) = std::env::var("CLAUDE_CONFIG_DIR") {
@@ -839,7 +839,7 @@ impl Config {
         }
 
         let base = format!(
-            r#"You are Claude Code, an interactive CLI agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
+            r#"You are RustyClaw, an interactive CLI agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
 
 IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, exploit development) require clear authorization context: pentesting engagements, CTF competitions, security research, or defensive use cases.
 IMPORTANT: You must NEVER generate or guess URLs for the user unless you are confident that the URLs are for helping the user with programming. You may use URLs provided by the user in their messages or local files.

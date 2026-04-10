@@ -3,8 +3,8 @@
 /// Simple tasks (explain, rename, format, typos) → cheap model (Haiku / Ollama)
 /// Complex tasks (refactor, architect, debug race conditions) → expensive model (Opus / Sonnet)
 ///
-/// This is the feature that tokscale (1.6K stars) and claude-code-mux (495 stars)
-/// exist solely to provide.  We do it natively, in the binary.
+/// Other tools exist solely to provide this functionality.
+/// We do it natively, in the binary.
 
 use tracing::debug;
 

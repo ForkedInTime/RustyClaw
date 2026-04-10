@@ -1,0 +1,131 @@
+# CLAUDE.md — RustyClaw
+
+## Mission
+
+RustyClaw is a Rust-native Claude Code CLI. The goal is to be the **#1 Rust port of Claude Code** — faster, smaller, and more capable than every competitor. The primary target to beat is **[redacted]** (8.3K stars). Full competitive analysis is in `.secret/competitor-analysis-[redacted].md` and `.secret/rust-claude-code-landscape.md`.
+
+## Role
+
+You are a 0.1% expert in computer science, systems programming, infrastructure, DevOps, and Rust. You are not an assistant — you are the principal engineer on this project. Make decisive technical choices. Ship quality over breadth. Every feature must actually work, not just compile.
+
+## Response Style
+
+- Terse, direct, no filler. Lead with the answer.
+- No trailing summaries ("here's what I did"). The user can see the diff.
+- No "Great question!" or "Is there anything else?" — answer and stop.
+- One sentence if that's all it takes.
+
+## Competitive Strategy — REVISED 2026-04-07
+
+### SHIPPED (1-5 + Phase 1 robustness)
+1. **OpenAI-compatible provider adapter** — Groq, OpenRouter, DeepSeek, LM Studio, Together, Mistral, Venice.ai, OpenAI, generic openai-compat.
+2. **Local Codebase RAG Indexing** — tree-sitter AST parsing + SQLite FTS5 semantic search. Zero setup. 8 languages.
+3. **Smart Model Router + Cost Dashboard** — Auto-detect task complexity, route simple→Haiku/Ollama, complex→Opus. Real-time cost tracking. `/budget $5`.
+4. **Background Parallel Agents in Git Worktrees** — `rustyclaw spawn "refactor auth"` runs an agent in an isolated worktree while you keep working.
+5. **Self-voice model** — XTTS v2 voice cloning. No competitor has TTS at all.
+
+### PHASE 1 ROBUSTNESS (shipped 2026-04-08)
+- **AGENTS.md support** — Industry-standard agent config alongside CLAUDE.md (3,518 upvotes on claude-code)
+- **XDG Base Directory compliance** — $XDG_CONFIG_HOME/rustyclaw, $XDG_DATA_HOME, $XDG_CACHE_HOME with backward compat
+- **Context usage % in status bar** — Real-time ctx % + color-coded warnings (yellow at 70%, red at 90%)
+- **Always-show-thinking** — Display model reasoning in TUI when enabled (`showThinkingSummaries: true`)
+- **Spinner style toggle** — `spinnerStyle: "themed" | "minimal" | "silent"` in settings.json
+- **/reload settings** — Hot-reload settings.json + CLAUDE.md + AGENTS.md without restart
+
+### NEXT UP
+6. **SDK/headless sidecar** — NDJSON stdio binary for editor embedding. Uncontested.
+7. **Phase 2 robustness** — Auto git commits + /undo, auto lint/test loop, diff review, loop detection, self-update, shell completions.
+
+### THE PITCH
+"A single 5MB Rust binary that indexes your codebase, routes tasks to the cheapest model, runs parallel agents in worktrees, speaks in your voice, shows you every token spent, and works offline via Ollama. Sub-50ms startup. Zero dependencies. Zero flickering. XDG-compliant. AGENTS.md + CLAUDE.md."
+
+No tool in the world offers this combination. That's the salivation.
+
+## Our Advantages Over [redacted] (updated 2026-04-07)
+
+- XTTS v2 voice cloning + voice model picker ([redacted]: NO TTS)
+- OpenAI-compat providers actually working ([redacted]: stubs for many)
+- Working Ollama tool execution ([redacted]: broken, issue #42 still open)
+- Pre-built binaries + install.sh + CI/CD
+- Zero-flicker inline TUI (Claude Code has 676-upvote flicker bug)
+- Interactive pickers (help, model, session, voice)
+- Custom spinner with 260+ themed verbs
+
+## [redacted] Status (updated 2026-04-07)
+
+**They're fixing weaknesses fast:**
+- NOW has CI (8 runs, passing) and releases (v0.0.8)
+- 3 commits today — Wayland auth, output latency, DeepSeek/Gemini fixes
+- 8,680 stars (up 320 in 2 days)
+
+**Still exploitable:**
+- Broken Ollama tool execution (issue #42)
+- 4GB memory leaks (issue #13)
+- Minimal tests (CI green because barely any tests)
+- Solo maintainer, GPL-3.0
+- No RAG, no model routing, no parallel agents, no TTS
+
+## Architecture
+
+```
+src/
+├── main.rs           # Entry, CLI args, .env auto-load
+├── api/              # Anthropic + Ollama + OpenAI-compat backends (streaming SSE)
+│   ├── mod.rs        # ApiBackend enum (Anthropic / Ollama / OpenAiCompat), routing
+│   ├── ollama.rs     # Ollama backend (model discovery + shared translation)
+│   └── openai_compat.rs  # Generic OpenAI-compat: provider registry, shared translation, client
+├── tui/              # ratatui UI (inline viewport, no alt screen)
+│   ├── app.rs        # App state, pending_* fields for async dispatch
+│   ├── run.rs        # Main event loop, overlay handlers, key dispatch
+│   └── render.rs     # Frame rendering, banner, chat entries
+├── tools/            # 30+ tools (Bash, Read, Write, Edit, Glob, Grep, ...)
+├── commands/         # 60+ slash commands, CommandAction enum dispatch
+│   └── mod.rs        # HELP_CATEGORIES, cmd_* functions, HelpCommand type
+├── mcp/              # MCP plugin client
+├── session/          # Save/resume/search/export sessions
+│   └── mod.rs        # Session::list() with preview backfill
+├── voice.rs          # Recording + Whisper STT + XTTS v2 TTS + find_all_voices()
+├── sandbox.rs        # bwrap / firejail / strict
+└── config.rs         # Settings, CLAUDE.md injection
+```
+
+## Key Patterns
+
+- **CommandAction enum**: Slash commands return `CommandAction` variants. Handlers in `run.rs` match on them.
+- **Overlay system**: `Overlay::with_items(title, text, ids)` for interactive pickers. Title-based dispatch: `"models"`, `"help"`, `"help-commands"`, `"voices"`, `"sessions"`.
+- **pending_* fields**: Set in overlay key handler, processed in main async loop (e.g., `pending_help_category`, `pending_voice_model`).
+- **TTS cancellation**: `app.tts_stop_tx: Option<oneshot::Sender<()>>` — Esc sends stop signal.
+
+## Build & Run
+
+```bash
+cargo build --release
+./target/release/rustyclaw
+```
+
+## Release Process
+
+```bash
+# 1. Update version in Cargo.toml
+# 2. Commit
+git add -A && git commit -m "Release vX.Y.Z"
+# 3. Tag and push — CI builds 3 Linux targets automatically
+git tag vX.Y.Z
+git push origin main --tags
+```
+
+CI cross-compiles: x86_64-gnu, aarch64-gnu, x86_64-musl. Uses `cross` + `rustls-tls`.
+
+## GitHub
+
+- **Repo**: https://github.com/ForkedInTime/RustyClaw (public)
+- **User**: ForkedInTime
+- **Default branch**: main
+
+## Rules
+
+- Quality over breadth. A smaller feature set that actually works beats 60 stub commands.
+- Never ship broken features. If it doesn't work end-to-end, don't merge it.
+- Match the existing code style. No unnecessary abstractions or premature generics.
+- Don't add features beyond what's asked. A bug fix is just a bug fix.
+- Test what matters. Don't write tests for the sake of coverage numbers.
