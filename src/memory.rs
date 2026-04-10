@@ -59,6 +59,7 @@ impl fmt::Display for Category {
 
 /// A single memory entry.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // fields consumed by future memory-UI overlay work
 pub struct Memory {
     pub id:         i64,
     pub key:        String,
@@ -204,6 +205,7 @@ impl MemoryStore {
     }
 
     /// Total memory count.
+    #[allow(dead_code)] // exposed for tests and future /memory stats command
     pub fn count(&self) -> Result<i64> {
         let n: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM memory",
