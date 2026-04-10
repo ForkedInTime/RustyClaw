@@ -1070,6 +1070,28 @@ async fn run_loop(
         }
 
         if app.should_quit {
+            // ── Security: fail any pending tool-approval to Deny ────────────
+            // If a tool permission prompt is still on screen when we start
+            // shutting down, we MUST drop its oneshot::Sender so the awaiting
+            // tool-executor task resolves to Deny (via the Err(_) branch in
+            // the PermissionRequest handler above). This prevents the
+            // terminal-close = auto-approve bug class (see [redacted] #17276).
+            //
+            // Dropping the PendingPermission is equivalent to "Deny" because
+            // the executor side already maps Err(_) on reply_rx to Deny.
+            // We do the same for PendingUserQuestion so AskUser prompts
+            // don't deadlock the shutdown path.
+            if app.pending_permission.take().is_some() {
+                app.entries.push(ChatEntry::system(
+                    "Shutdown: pending tool approval denied.",
+                ));
+            }
+            if app.pending_user_question.take().is_some() {
+                app.entries.push(ChatEntry::system(
+                    "Shutdown: pending question cancelled.",
+                ));
+            }
+
             // Stop hooks — fire before exiting
             if let Some(hook_cfg) = &config.hooks {
                 if !config.disable_all_hooks {
@@ -3926,6 +3948,12 @@ async fn run_api_task(
                                     description: desc,
                                     reply: reply_tx,
                                 }).is_err() { return; }
+                                // Security contract: if the oneshot sender is
+                                // dropped without a value, we MUST treat this
+                                // as Deny. This fires on TUI shutdown, panic,
+                                // terminal close (SIGHUP), or runtime tear-down,
+                                // preventing the "close terminal = auto-approve"
+                                // bug ([redacted] #17276).
                                 match reply_rx.await {
                                     Ok(d) => d,
                                     Err(_) => PermissionDecision::Deny,
