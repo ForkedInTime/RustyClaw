@@ -3807,7 +3807,21 @@ async fn run_api_task(
                 return;
             }
             Some(StopReason::MaxTokens) => {
-                let _ = tx.send(AppEvent::Error("Max tokens reached.".into()));
+                // Response hit the model's max_tokens cap. Preserve the partial
+                // assistant content (already pushed to `messages` above) and
+                // surface a warning instead of dropping the turn with an error.
+                let _ = tx.send(AppEvent::SystemMessage(
+                    "Response capped at max_tokens — partial output preserved. \
+                     Ask the model to continue if more output is needed.".into()
+                ));
+                let _ = tx.send(AppEvent::Done {
+                    tokens_in: response.usage.input_tokens,
+                    tokens_out: response.usage.output_tokens,
+                    cache_read: response.usage.cache_read_input_tokens,
+                    cache_write: response.usage.cache_creation_input_tokens,
+                    messages: messages.clone(),
+                    model_used: config.model.clone(),
+                });
                 return;
             }
             Some(StopReason::ToolUse) => {
