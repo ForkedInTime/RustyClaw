@@ -3659,7 +3659,7 @@ async fn run_api_task(
 
         let request = MessagesRequest {
             model: config.model.clone(),
-            max_tokens: config.max_tokens,
+            max_tokens: config.max_tokens_for(&config.model),
             system: system_content,
             messages: budgeted_messages,
             tools: tool_defs,

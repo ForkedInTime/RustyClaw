@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 // ── Output style definitions ──────────────────────────────────────────────────
@@ -128,8 +129,14 @@ pub struct Config {
     /// Use "ollama:<name>" to route to a local Ollama instance instead.
     pub model: String,
 
-    /// Max tokens per response
+    /// Max tokens per response (global fallback)
     pub max_tokens: u32,
+
+    /// Per-model max_tokens overrides. Keys are matched exact-then-alias
+    /// against the resolved request model. Falls back to `max_tokens`
+    /// when no entry exists.
+    #[serde(default)]
+    pub max_tokens_by_model: HashMap<String, u32>,
 
     /// Working directory for tool operations
     pub cwd: PathBuf,
@@ -345,6 +352,7 @@ impl Default for Config {
             api_key: String::new(),
             model: crate::api::default_model().to_string(),
             max_tokens: crate::api::default_max_tokens(),
+            max_tokens_by_model: HashMap::new(),
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             verbose: false,
             auto_compact_enabled: true,
@@ -424,6 +432,12 @@ impl Config {
         let settings = crate::settings::Settings::load(&cfg.cwd);
         if let Some(model)  = settings.model        { cfg.model = crate::commands::resolve_model_alias(&model); }
         if let Some(mt)     = settings.max_tokens   { cfg.max_tokens = mt; }
+        if let Some(map)    = &settings.max_tokens_by_model {
+            for (k, v) in map {
+                let canonical = crate::commands::resolve_model_alias(k);
+                cfg.max_tokens_by_model.insert(canonical, *v);
+            }
+        }
         if let Some(ac)     = settings.auto_compact { cfg.auto_compact_enabled = ac; }
         if let Some(v)      = settings.verbose      { cfg.verbose = v; }
         if let Some(host)   = settings.ollama_host  { cfg.ollama_host = host; }
@@ -587,6 +601,21 @@ impl Config {
         }
 
         Ok(cfg)
+    }
+
+    /// Return the effective max_tokens for a given model, preferring an
+    /// explicit per-model override from `max_tokens_by_model` and falling
+    /// back to the global `max_tokens`. Lookup is tried first on the raw
+    /// model string, then on its alias-resolved form.
+    pub fn max_tokens_for(&self, model: &str) -> u32 {
+        if let Some(v) = self.max_tokens_by_model.get(model) {
+            return *v;
+        }
+        let canonical = crate::commands::resolve_model_alias(model);
+        if let Some(v) = self.max_tokens_by_model.get(&canonical) {
+            return *v;
+        }
+        self.max_tokens
     }
 
     /// Parse `<!-- phase-routing: research=haiku, edit=opus -->` directives from

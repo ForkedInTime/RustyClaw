@@ -140,7 +140,7 @@ impl SdkSession {
 
             let request = MessagesRequest {
                 model: self.config.model.clone(),
-                max_tokens: self.config.max_tokens,
+                max_tokens: self.config.max_tokens_for(&self.config.model),
                 system: SystemContent::Plain(effective_system),
                 messages: self.messages.clone(),
                 tools: tool_defs,
