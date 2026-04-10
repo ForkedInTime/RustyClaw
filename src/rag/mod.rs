@@ -89,7 +89,47 @@ impl RagDb {
             CREATE TABLE IF NOT EXISTS rag_meta (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
-            );"
+            );
+
+            -- ── Memory tables ──────────────────────────────────────────────────
+            CREATE TABLE IF NOT EXISTS memory (
+                id          INTEGER PRIMARY KEY,
+                key         TEXT NOT NULL UNIQUE,
+                value       TEXT NOT NULL,
+                category    TEXT NOT NULL DEFAULT 'context',
+                source      TEXT NOT NULL DEFAULT 'user',
+                created_at  INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at  INTEGER NOT NULL DEFAULT (unixepoch())
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_memory_category ON memory(category);
+            CREATE INDEX IF NOT EXISTS idx_memory_updated  ON memory(updated_at DESC);
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+                key,
+                value,
+                content=memory,
+                content_rowid=id,
+                tokenize='porter unicode61'
+            );
+
+            -- Triggers to keep memory_fts in sync with the memory table
+            CREATE TRIGGER IF NOT EXISTS memory_ai AFTER INSERT ON memory BEGIN
+                INSERT INTO memory_fts(rowid, key, value)
+                VALUES (new.id, new.key, new.value);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS memory_ad AFTER DELETE ON memory BEGIN
+                INSERT INTO memory_fts(memory_fts, rowid, key, value)
+                VALUES ('delete', old.id, old.key, old.value);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS memory_au AFTER UPDATE ON memory BEGIN
+                INSERT INTO memory_fts(memory_fts, rowid, key, value)
+                VALUES ('delete', old.id, old.key, old.value);
+                INSERT INTO memory_fts(rowid, key, value)
+                VALUES (new.id, new.key, new.value);
+            END;"
         )?;
 
         debug!("RAG database opened at {}", db_path.display());

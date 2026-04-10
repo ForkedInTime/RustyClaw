@@ -15,6 +15,7 @@ pub mod hooks;
 pub mod mcp;
 pub mod permissions;
 pub mod query_engine;
+pub mod memory;
 pub mod rag;
 pub mod router;
 pub mod sandbox;
