@@ -227,6 +227,19 @@ pub struct Settings {
     /// Auto-capture notable decisions/preferences from assistant responses into persistent memory.
     #[serde(rename = "memoryAutoCapture")]
     pub memory_auto_capture: Option<bool>,
+
+    /// Phase-declarative model routing — route research/plan/edit/review to different models.
+    #[serde(rename = "phaseRouter")]
+    pub phase_router: Option<PhaseRouterSettings>,
+}
+
+/// Settings for phase-declarative model routing.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PhaseRouterSettings {
+    /// Whether phase routing is active (default: false).
+    pub enabled: Option<bool>,
+    /// Map of phase name → model ID. Keys: "research", "plan", "edit", "review", "default".
+    pub phases: Option<std::collections::HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -339,6 +352,7 @@ impl Settings {
             router_super_high_model: other.router_super_high_model.or(self.router_super_high_model),
             autonomy:             other.autonomy.or(self.autonomy),
             memory_auto_capture:  other.memory_auto_capture.or(self.memory_auto_capture),
+            phase_router:         other.phase_router.or(self.phase_router),
             permissions: PermissionsConfig {
                 // Union both lists — project additions stack on top of global
                 allow: {
