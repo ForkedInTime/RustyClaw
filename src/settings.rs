@@ -242,7 +242,9 @@ pub struct Settings {
     pub phase_router: Option<PhaseRouterSettings>,
 
     /// Auto-fix loop: run lint + tests after Write/Edit and re-prompt on failure.
-    #[serde(rename = "autoRollback")]
+    /// The JSON key `autoFixLoop` is preferred; `autoRollback` remains as a
+    /// silent alias so existing user configs keep working.
+    #[serde(rename = "autoFixLoop", alias = "autoRollback")]
     pub auto_fix: Option<AutoFixSettings>,
 }
 
@@ -420,5 +422,59 @@ impl Settings {
         if project.exists()  { paths.push(project.display().to_string()); }
         if mcp_json.exists() { paths.push(mcp_json.display().to_string()); }
         paths
+    }
+}
+
+#[cfg(test)]
+mod auto_fix_key_tests {
+    use super::*;
+
+    #[test]
+    fn parses_new_autofixloop_key() {
+        let json = r#"{
+            "autoFixLoop": {
+                "enabled": true,
+                "trigger": "always",
+                "lintCommand": "cargo clippy",
+                "testCommand": "cargo test",
+                "maxRetries": 5,
+                "timeoutSecs": 30
+            }
+        }"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        let af = s.auto_fix.expect("auto_fix should deserialise");
+        assert_eq!(af.enabled, Some(true));
+        assert_eq!(af.trigger.as_deref(), Some("always"));
+        assert_eq!(af.lint_command.as_deref(), Some("cargo clippy"));
+        assert_eq!(af.max_retries, Some(5));
+    }
+
+    #[test]
+    fn parses_legacy_autorollback_key() {
+        let json = r#"{
+            "autoRollback": {
+                "enabled": true,
+                "testCommand": "pytest"
+            }
+        }"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        let af = s.auto_fix.expect("legacy autoRollback should deserialise into auto_fix");
+        assert_eq!(af.test_command.as_deref(), Some("pytest"));
+    }
+
+    #[test]
+    fn serialises_with_new_key() {
+        let mut s = Settings::default();
+        s.auto_fix = Some(AutoFixSettings {
+            enabled: Some(true),
+            trigger: None,
+            lint_command: None,
+            test_command: Some("cargo test".to_string()),
+            max_retries: Some(3),
+            timeout_secs: None,
+        });
+        let out = serde_json::to_string(&s).unwrap();
+        assert!(out.contains("autoFixLoop"), "serialised form should use the new key: {out}");
+        assert!(!out.contains("autoRollback"), "serialised form should not use the legacy key: {out}");
     }
 }
