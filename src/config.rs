@@ -343,7 +343,7 @@ pub struct Config {
     /// Auto-rollback on test regression: run tests after Write/Edit and
     /// `git checkout --` the modified files if tests fail.
     #[serde(skip)]
-    pub auto_rollback: crate::rollback::RollbackConfig,
+    pub auto_rollback: crate::autofix::RollbackConfig,
 }
 
 impl Default for Config {
@@ -418,7 +418,7 @@ impl Default for Config {
             autonomy: "auto-edit".to_string(),
             memory_auto_capture: false,
             phase_router: crate::router::PhaseRouterConfig::default(),
-            auto_rollback: crate::rollback::RollbackConfig::default(),
+            auto_rollback: crate::autofix::RollbackConfig::default(),
         }
     }
 }
@@ -508,9 +508,9 @@ impl Config {
             if let Some(e) = ar.enabled { cfg.auto_rollback.enabled = e; }
             if let Some(t) = &ar.trigger {
                 cfg.auto_rollback.trigger = match t.to_ascii_lowercase().as_str() {
-                    "always" => crate::rollback::RollbackTrigger::Always,
-                    "off"    => crate::rollback::RollbackTrigger::Off,
-                    _        => crate::rollback::RollbackTrigger::Autonomous,
+                    "always" => crate::autofix::RollbackTrigger::Always,
+                    "off"    => crate::autofix::RollbackTrigger::Off,
+                    _        => crate::autofix::RollbackTrigger::Autonomous,
                 };
             }
             if ar.test_command.is_some() {
