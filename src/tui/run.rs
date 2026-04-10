@@ -3806,6 +3806,13 @@ async fn run_api_task(
                 ctx.read_cache = Some(read_cache.clone());
                 let mut results: Vec<ContentBlock> = Vec::new();
 
+                // Auto-rollback: accumulate file paths touched by Write/Edit/MultiEdit
+                // in this assistant turn. After the loop we run the detected test
+                // command (e.g. `cargo test`) and `git checkout --` these paths if
+                // tests fail. We only run tests once per turn, even if many edits
+                // happened.
+                let mut rollback_touched: Vec<std::path::PathBuf> = Vec::new();
+
                 // Drain any pending plan_mode changes before processing tools
                 while let Ok(enabled) = plan_rx.try_recv() {
                     effective_plan_mode = enabled;
@@ -3971,11 +3978,94 @@ async fn run_api_task(
                             text: result_text,
                         });
 
+                        // Track files touched by successful Write/Edit/MultiEdit
+                        // calls for the auto-rollback post-loop check.
+                        if !output.is_error
+                            && matches!(name.as_str(), "Write" | "Edit" | "MultiEdit")
+                            && let Some(fp) =
+                                input.get("file_path").and_then(|v| v.as_str())
+                        {
+                            let path = std::path::PathBuf::from(fp);
+                            if !rollback_touched.contains(&path) {
+                                rollback_touched.push(path);
+                            }
+                        }
+
                         results.push(ContentBlock::ToolResult {
                             tool_use_id: id.clone(),
                             content: output.content,
                             is_error: if output.is_error { Some(true) } else { None },
                         });
+                    }
+                }
+
+                // ── Auto-rollback check ──────────────────────────────────────
+                // Run the detected test command once per turn after all tool
+                // calls complete. On failure, revert touched files via
+                // `git checkout --` and emit a system message. We do NOT
+                // inject a synthetic ToolResult into `results` because doing
+                // so without a matching ToolUse would violate the Anthropic
+                // API contract; the user sees the failure and can re-prompt.
+                // (max_retries is reserved for a future multi-turn loop.)
+                if !rollback_touched.is_empty()
+                    && crate::rollback::should_trigger(
+                        &config.auto_rollback,
+                        &config.autonomy,
+                    )
+                {
+                    let test_cmd = crate::rollback::detect_test_command(
+                        &config.cwd,
+                        &config.auto_rollback.test_command,
+                    );
+                    if let Some(cmd) = test_cmd {
+                        let _ = tx.send(AppEvent::SystemMessage(
+                            format!("[auto-rollback] running tests: {cmd}"),
+                        ));
+                        match crate::rollback::run_tests(&config.cwd, &cmd) {
+                            crate::rollback::TestResult::Pass => {
+                                let _ = tx.send(AppEvent::SystemMessage(
+                                    "[auto-rollback] tests pass, continuing".into(),
+                                ));
+                            }
+                            crate::rollback::TestResult::Fail { stderr } => {
+                                let trimmed: String =
+                                    stderr.chars().take(2000).collect();
+                                match crate::rollback::git_restore_files(
+                                    &config.cwd,
+                                    &rollback_touched,
+                                ) {
+                                    Ok(()) => {
+                                        let _ = tx.send(AppEvent::SystemMessage(
+                                            format!(
+                                                "[auto-rollback] tests failed, {} file(s) reverted:\n{}",
+                                                rollback_touched.len(),
+                                                trimmed,
+                                            ),
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        let _ = tx.send(AppEvent::SystemMessage(
+                                            format!(
+                                                "[auto-rollback] tests failed but restore errored: {e}\n{trimmed}"
+                                            ),
+                                        ));
+                                    }
+                                }
+                            }
+                            crate::rollback::TestResult::Timeout => {
+                                let _ = tx.send(AppEvent::SystemMessage(
+                                    "[auto-rollback] test run timed out after 60s, skipping".into(),
+                                ));
+                            }
+                            crate::rollback::TestResult::NoTestRunner => {
+                                // Silent skip — expected without a test runner.
+                            }
+                            crate::rollback::TestResult::Skipped { reason } => {
+                                let _ = tx.send(AppEvent::SystemMessage(
+                                    format!("[auto-rollback] skipped: {reason}"),
+                                ));
+                            }
+                        }
                     }
                 }
 

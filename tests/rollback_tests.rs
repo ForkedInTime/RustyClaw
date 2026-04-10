@@ -138,3 +138,35 @@ fn test_default_config() {
     assert_eq!(cfg.max_retries, 3);
     assert!(cfg.test_command.is_none());
 }
+
+// ── settings parsing ──────────────────────────────────────────────────────────
+
+#[test]
+fn test_settings_parse_auto_rollback_full() {
+    let json = r#"{
+        "autoRollback": {
+            "enabled": true,
+            "trigger": "always",
+            "testCommand": "cargo test --all",
+            "maxRetries": 5
+        }
+    }"#;
+    let s: rustyclaw::settings::Settings = serde_json::from_str(json).unwrap();
+    let ar = s.auto_rollback.expect("autoRollback missing");
+    assert_eq!(ar.enabled, Some(true));
+    assert_eq!(ar.trigger.as_deref(), Some("always"));
+    assert_eq!(ar.test_command.as_deref(), Some("cargo test --all"));
+    assert_eq!(ar.max_retries, Some(5));
+}
+
+#[test]
+fn test_settings_parse_auto_rollback_trigger_case_insensitive() {
+    // The parser itself keeps the raw string; Config::load lowercases it.
+    // Verify by hand that the three canonical variants survive JSON parse.
+    for t in &["autonomous", "AUTONOMOUS", "Always", "off", "Off"] {
+        let json = format!(r#"{{"autoRollback": {{"trigger": "{t}"}}}}"#);
+        let s: rustyclaw::settings::Settings = serde_json::from_str(&json).unwrap();
+        let ar = s.auto_rollback.expect("autoRollback missing");
+        assert_eq!(ar.trigger.as_deref(), Some(*t));
+    }
+}
