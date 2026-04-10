@@ -355,16 +355,31 @@ enum McpSubcommand {
 }
 
 /// Safe allowlist of env vars that rustyclaw may load from .env files.
-/// Project .env files often contain DATABASE_URL, AWS keys, etc. — loading those
-/// into the Bash tool's environment can be dangerous. Only load vars that are ours.
+///
+/// Project `.env` files are **untrusted data** — a malicious repo could ship a
+/// `.env` that sets `PATH`, `LD_PRELOAD`, or `RUSTYCLAW_*_COMMAND` to pivot
+/// code execution the moment the user opens the folder. We therefore load only
+/// a narrow allowlist of our own API-key and model vars, and specifically NEVER
+/// load anything that could:
+///   - Bypass permission prompts (`CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS`)
+///   - Redirect config / settings / hook resolution (`CLAUDE_CONFIG_DIR`,
+///     `XDG_CONFIG_HOME`, `HOME`)
+///   - Alter any process-spawn path (`PATH`, `LD_PRELOAD`, `LD_LIBRARY_PATH`,
+///     `DYLD_*`, `RUSTYCLAW_*_COMMAND`, sandbox binaries, voice binaries,
+///     MCP server argv)
+///
+/// If a user legitimately needs one of the blocked vars set, they can export
+/// it in their shell — project `.env` is not the right place.
 const SAFE_ENV_KEYS: &[&str] = &[
+    // Anthropic
     "ANTHROPIC_API_KEY",
     "RUSTYCLAW_API_KEY_FILE_DESCRIPTOR",
-    "CLAUDE_CONFIG_DIR",
-    "RUSTYCLAW_VERBOSE",
-    "CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS",
     "ANTHROPIC_MODEL",
+    // Verbose logging toggle — no exec side-effects
+    "RUSTYCLAW_VERBOSE",
+    // Ollama host — read-only redirect risk, but legitimate common use case
     "OLLAMA_HOST",
+    // OpenAI-compat provider keys
     "OPENAI_API_KEY",
     "GROQ_API_KEY",
     "DEEPSEEK_API_KEY",
@@ -373,6 +388,31 @@ const SAFE_ENV_KEYS: &[&str] = &[
     "TOGETHER_API_KEY",
     "XAI_API_KEY",
     "VENICE_API_KEY",
+];
+
+/// Env vars that MUST NEVER be loaded from `.env` files because doing so
+/// would allow a malicious repo to bypass security controls or redirect
+/// process execution. This is a belt-and-braces check on top of the
+/// allowlist in [`SAFE_ENV_KEYS`].
+///
+/// Kept as a separate constant so the intent (and the threat model) stay
+/// explicit in code reviews.
+#[cfg(test)]
+const FORBIDDEN_ENV_KEYS: &[&str] = &[
+    "PATH",
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "DYLD_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CACHE_HOME",
+    "CLAUDE_CONFIG_DIR",
+    "CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS",
+    "RUSTYCLAW_SANDBOX_COMMAND",
+    "RUSTYCLAW_VOICE_COMMAND",
+    "GEMINI_CLI_IDE_SERVER_STDIO_COMMAND",
 ];
 
 /// Load KEY=VALUE pairs from a .env file into the process environment.
@@ -1126,4 +1166,115 @@ fn find_claude_desktop_config() -> Option<std::path::PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod dotenv_allowlist_tests {
+    use super::{load_dotenv, FORBIDDEN_ENV_KEYS, SAFE_ENV_KEYS};
+    use std::io::Write;
+
+    /// Every var the threat model says must be blocked must NOT appear in
+    /// the allowlist — otherwise a malicious project `.env` can pivot
+    /// permission prompts, config resolution, or process exec.
+    #[test]
+    fn forbidden_keys_are_not_in_allowlist() {
+        for k in FORBIDDEN_ENV_KEYS {
+            assert!(
+                !SAFE_ENV_KEYS.contains(k),
+                "{k} is in SAFE_ENV_KEYS but must be forbidden — see threat model in SAFE_ENV_KEYS doc"
+            );
+        }
+    }
+
+    /// A malicious .env that sets dangerous vars must not leak into the
+    /// process environment when we run `load_dotenv` against it.
+    ///
+    /// This is a live, end-to-end test of the loader against a real file.
+    /// We use `RUSTYCLAW_VERBOSE` as the "safe var loaded" probe rather than
+    /// `ANTHROPIC_API_KEY` so we don't clobber a real credential.
+    #[test]
+    fn load_dotenv_blocks_dangerous_vars() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let suffix = format!(
+            "{}_{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        );
+        let path = std::env::temp_dir().join(format!("rustyclaw-dotenv-test-{suffix}.env"));
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "PATH=/evil/bin").unwrap();
+        writeln!(f, "LD_PRELOAD=/evil/libhack.so").unwrap();
+        writeln!(f, "CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1").unwrap();
+        writeln!(f, "CLAUDE_CONFIG_DIR=/tmp/attacker/config").unwrap();
+        writeln!(f, "XDG_CONFIG_HOME=/tmp/attacker/xdg").unwrap();
+        writeln!(f, "RUSTYCLAW_SANDBOX_COMMAND=/evil/bwrap").unwrap();
+        writeln!(f, "RUSTYCLAW_VERBOSE=1").unwrap();
+        drop(f);
+
+        // Snapshot-restore anything we might touch so we don't perturb the
+        // test harness's own environment.
+        let snap_ck = std::env::var("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS").ok();
+        let snap_cd = std::env::var("CLAUDE_CONFIG_DIR").ok();
+        let snap_xdg = std::env::var("XDG_CONFIG_HOME").ok();
+        let snap_sbox = std::env::var("RUSTYCLAW_SANDBOX_COMMAND").ok();
+        let snap_verb = std::env::var("RUSTYCLAW_VERBOSE").ok();
+        let original_path = std::env::var("PATH").unwrap_or_default();
+
+        unsafe {
+            std::env::remove_var("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS");
+            std::env::remove_var("CLAUDE_CONFIG_DIR");
+            std::env::remove_var("XDG_CONFIG_HOME");
+            std::env::remove_var("RUSTYCLAW_SANDBOX_COMMAND");
+            std::env::remove_var("RUSTYCLAW_VERBOSE");
+        }
+
+        load_dotenv(&path);
+
+        // Safe var loaded.
+        assert_eq!(
+            std::env::var("RUSTYCLAW_VERBOSE").ok().as_deref(),
+            Some("1"),
+            "safe var RUSTYCLAW_VERBOSE should have been loaded"
+        );
+        // Dangerous vars NOT loaded.
+        assert!(
+            std::env::var("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS").is_err(),
+            "CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS must NEVER be loaded from .env"
+        );
+        assert!(
+            std::env::var("CLAUDE_CONFIG_DIR").is_err(),
+            "CLAUDE_CONFIG_DIR must NEVER be loaded from .env"
+        );
+        assert!(
+            std::env::var("XDG_CONFIG_HOME").is_err(),
+            "XDG_CONFIG_HOME must NEVER be loaded from .env"
+        );
+        assert!(
+            std::env::var("RUSTYCLAW_SANDBOX_COMMAND").is_err(),
+            "RUSTYCLAW_SANDBOX_COMMAND must NEVER be loaded from .env"
+        );
+        // PATH must be untouched (loader only sets keys that are NOT already set,
+        // but even if PATH were unset we still block it via the allowlist).
+        assert_eq!(
+            std::env::var("PATH").unwrap_or_default(),
+            original_path,
+            "PATH must NEVER be overwritten from .env"
+        );
+        assert!(
+            std::env::var("LD_PRELOAD").ok().as_deref() != Some("/evil/libhack.so"),
+            "LD_PRELOAD must NEVER be loaded from .env"
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_file(&path);
+        unsafe {
+            std::env::remove_var("RUSTYCLAW_VERBOSE");
+            if let Some(v) = snap_ck { std::env::set_var("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS", v); }
+            if let Some(v) = snap_cd { std::env::set_var("CLAUDE_CONFIG_DIR", v); }
+            if let Some(v) = snap_xdg { std::env::set_var("XDG_CONFIG_HOME", v); }
+            if let Some(v) = snap_sbox { std::env::set_var("RUSTYCLAW_SANDBOX_COMMAND", v); }
+            if let Some(v) = snap_verb { std::env::set_var("RUSTYCLAW_VERBOSE", v); }
+        }
+    }
 }
