@@ -7,17 +7,9 @@
 //! This module provides only the building blocks:
 //!   - `detect_test_command` — infer runner from project files
 //!   - `should_trigger`      — apply trigger-mode rules
-//!   - `git_stash_create`    — snapshot working tree without history pollution
-//!   - `git_restore_files`   — restore specific files to HEAD
 //!   - `run_tests`           — execute the configured test command
-//!
-//! Task 7 wires these into the Write/Edit tool handler; Task 8 runs
-//! end-to-end integration tests. Until Task 7 lands these symbols are unused
-//! by the binary target.
 
-#![allow(dead_code)]
-
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 // ── Config types ──────────────────────────────────────────────────────────────
@@ -124,61 +116,6 @@ pub fn should_trigger(config: &AutoFixConfig, autonomy_mode: &str) -> bool {
         AutoFixTrigger::Autonomous => {
             matches!(autonomy_mode, "auto-edit" | "full-auto")
         }
-    }
-}
-
-// ── Git primitives ────────────────────────────────────────────────────────────
-
-/// Create a git stash ref without pushing it to the stash list.
-///
-/// Runs `git stash create`, which returns a commit SHA representing the
-/// current worktree state without touching `git stash list`. Returns
-/// `Some(sha)` on success, `None` if there are no changes or a git error
-/// occurs (e.g., not a git repo).
-pub fn git_stash_create(cwd: &Path) -> Option<String> {
-    let out = Command::new("git")
-        .arg("stash")
-        .arg("create")
-        .current_dir(cwd)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .ok()?;
-
-    if !out.status.success() {
-        return None;
-    }
-    let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if sha.is_empty() {
-        None
-    } else {
-        Some(sha)
-    }
-}
-
-/// Restore specific files via `git checkout -- <files>`.
-///
-/// Returns `Ok(())` on success, `Err(stderr)` on failure. If `files` is
-/// empty, returns `Ok(())` immediately (nothing to do).
-pub fn git_restore_files(cwd: &Path, files: &[PathBuf]) -> Result<(), String> {
-    if files.is_empty() {
-        return Ok(());
-    }
-
-    let out = Command::new("git")
-        .arg("checkout")
-        .arg("--")
-        .args(files)
-        .current_dir(cwd)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| format!("failed to spawn git: {e}"))?;
-
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).to_string())
     }
 }
 
