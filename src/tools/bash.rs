@@ -5,9 +5,65 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 use tokio::time::{timeout, Duration};
 use std::process::Stdio;
+
+/// RAII guard that owns a running `tokio::process::Child` and, on drop, kills
+/// the *entire* Unix process group the child leads. This is required because:
+///
+///   1. `tokio::process::Child` does not kill on drop unless `kill_on_drop(true)`
+///      is set — and even then it only SIGKILLs the direct child (the shell).
+///   2. Any grandchildren spawned by the shell (e.g. `sleep 100 &`) would be
+///      reparented to init and continue running as orphans.
+///
+/// By putting the shell in its own process group (`setpgid(0,0)` via
+/// `process_group(0)`) and sending SIGKILL to the negated pgid on drop, we
+/// guarantee the whole subtree dies when the tool future is dropped (Esc
+/// cancellation, tokio::time::timeout, task::abort, etc.).
+struct ProcessGroupGuard {
+    child: Child,
+    /// Process group ID = child pid (we always spawn with process_group(0)).
+    /// `None` means the child was already reaped cleanly via `wait().await`,
+    /// so Drop becomes a no-op.
+    pgid: Option<i32>,
+}
+
+impl ProcessGroupGuard {
+    fn new(child: Child) -> Self {
+        // child.id() is None only if the child has already been polled to
+        // completion. Since we just spawned it, this is always Some.
+        let pgid = child.id().map(|id| id as i32);
+        Self { child, pgid }
+    }
+
+    fn child_mut(&mut self) -> &mut Child {
+        &mut self.child
+    }
+
+    /// Called after a successful `wait()` so Drop does not try to signal
+    /// an already-reaped pid.
+    fn disarm(&mut self) {
+        self.pgid = None;
+    }
+}
+
+impl Drop for ProcessGroupGuard {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(pgid) = self.pgid.take() {
+            // `kill(-pgid, SIGKILL)` → send SIGKILL to every process in the
+            // group. Using SIGKILL (not SIGTERM) because this path only runs
+            // on cancellation/timeout; graceful shutdown is not possible when
+            // the caller has already given up on the process.
+            // SAFETY: libc::kill with a negative pid sends the signal to the
+            // process group. Unsafe only because of FFI; arguments are valid.
+            unsafe {
+                libc::kill(-pgid, libc::SIGKILL);
+            }
+        }
+    }
+}
 
 const DEFAULT_TIMEOUT_MS: u64 = 120_000; // 2 minutes, same as TypeScript default
 const MAX_OUTPUT_BYTES: usize = 1_000_000; // 1MB cap
@@ -110,13 +166,26 @@ impl Tool for BashTool {
             .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_else(|_| "bash".into()));
 
         let fut = async move {
-            let mut child = Command::new(&shell)
-                .arg("-c")
+            let mut cmd = Command::new(&shell);
+            cmd.arg("-c")
                 .arg(&command)
                 .current_dir(&cwd)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
-                .spawn()?;
+                // Defense in depth: if our Drop guard somehow doesn't fire,
+                // tokio's kill_on_drop still SIGKILLs the direct shell.
+                .kill_on_drop(true);
+
+            // Put the shell in its own process group so we can SIGKILL the
+            // entire subtree on cancellation. Without this, grandchildren
+            // spawned via `sh -c '... & ...'` escape as orphans.
+            #[cfg(unix)]
+            {
+                cmd.process_group(0);
+            }
+
+            let mut guard = ProcessGroupGuard::new(cmd.spawn()?);
+            let child = guard.child_mut();
 
             let stdout = child.stdout.take()
                 .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout"))?;
@@ -181,7 +250,10 @@ impl Tool for BashTool {
                 }
             }
 
-            let status = child.wait().await?;
+            let status = guard.child_mut().wait().await?;
+            // Process exited normally — disarm the kill guard so Drop
+            // doesn't try to signal a pid that has already been reaped.
+            guard.disarm();
 
             if combined.len() >= MAX_OUTPUT_BYTES {
                 combined.push_str("\n... (output truncated)");
