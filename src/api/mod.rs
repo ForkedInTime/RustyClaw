@@ -40,6 +40,12 @@ impl ClaudeClient {
 
         let client = Client::builder()
             .default_headers(headers)
+            // 10s connect timeout — fail fast on dead upstreams instead of
+            // hanging forever on a black-holed SYN. The overall request
+            // timeout is intentionally unset: legitimate Anthropic streams
+            // can run for minutes, and reqwest's `.timeout()` covers the
+            // whole request including body streaming.
+            .connect_timeout(std::time::Duration::from_secs(10))
             .build()
             .context("Failed to build HTTP client")?;
 

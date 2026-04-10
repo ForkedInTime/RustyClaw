@@ -90,6 +90,10 @@ pub struct OllamaClient {
 impl OllamaClient {
     pub fn new(base_url: impl Into<String>) -> Result<Self> {
         let client = Client::builder()
+            // 5s connect timeout — Ollama is local so a dead daemon should
+            // be detected quickly. No overall timeout because model warmup
+            // + long generation is normal and should not be truncated.
+            .connect_timeout(std::time::Duration::from_secs(5))
             .build()
             .context("Failed to build Ollama HTTP client")?;
         Ok(Self {
