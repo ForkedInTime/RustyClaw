@@ -4068,17 +4068,17 @@ async fn run_api_task(
                         let _ = tx.send(AppEvent::SystemMessage(
                             format!("[auto-fix] running tests: {cmd}"),
                         ));
-                        match crate::autofix::run_tests(
+                        match crate::autofix::run_command(
                             &config.cwd,
                             &cmd,
                             config.auto_fix.timeout_secs,
                         ) {
-                            crate::autofix::TestResult::Pass => {
+                            crate::autofix::CommandResult::Pass => {
                                 let _ = tx.send(AppEvent::SystemMessage(
                                     "[auto-fix] tests pass".into(),
                                 ));
                             }
-                            crate::autofix::TestResult::Fail { stderr } => {
+                            crate::autofix::CommandResult::Fail { stderr } => {
                                 let trimmed: String =
                                     stderr.chars().take(2000).collect();
                                 let _ = tx.send(AppEvent::SystemMessage(
@@ -4087,7 +4087,7 @@ async fn run_api_task(
                                     ),
                                 ));
                             }
-                            crate::autofix::TestResult::Timeout => {
+                            crate::autofix::CommandResult::Timeout => {
                                 let _ = tx.send(AppEvent::SystemMessage(
                                     format!(
                                         "[auto-fix] test run timed out after {}s, skipping",
@@ -4095,10 +4095,10 @@ async fn run_api_task(
                                     ),
                                 ));
                             }
-                            crate::autofix::TestResult::NoTestRunner => {
+                            crate::autofix::CommandResult::NoTestRunner => {
                                 // Silent skip.
                             }
-                            crate::autofix::TestResult::Skipped { reason } => {
+                            crate::autofix::CommandResult::Skipped { reason } => {
                                 let _ = tx.send(AppEvent::SystemMessage(
                                     format!("[auto-fix] skipped: {reason}"),
                                 ));
