@@ -184,6 +184,188 @@ pub fn check_protected_path(path: &std::path::Path) -> Option<ToolOutput> {
     None
 }
 
+/// Which tool operation is asking the sensitive-path guard.
+/// `Read` is permissive: only private-key material is blocked so normal
+/// project work can still read `.env.example` and inspect config.
+/// `Write` is strict: blocks every class of secret to stop accidental
+/// overwrites of `.ssh/`, `.aws/credentials`, `.env`, etc.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SensitiveOp {
+    Read,
+    Write,
+}
+
+/// File names / suffixes that represent private-key material.
+/// Blocked for BOTH read and write.
+const PRIVATE_KEY_NAMES: &[&str] = &[
+    "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "identity",
+];
+const PRIVATE_KEY_SUFFIXES: &[&str] = &[
+    ".pem", ".key", ".p12", ".pfx", ".jks", ".keystore",
+];
+
+/// File names that are secret-material for write-only.
+/// These are commonly read by tooling (e.g. `.env` for config inspection)
+/// but must never be clobbered by the agent.
+const SECRET_WRITE_BLOCK_NAMES: &[&str] = &[
+    "credentials", "credentials.json",
+    ".netrc", ".pgpass",
+    "kubeconfig",
+];
+
+/// Directory components that signal a secrets tree.
+/// Any path containing one of these components is blocked on write.
+const SECRET_DIR_COMPONENTS: &[&str] = &[
+    ".ssh", ".aws", ".gnupg", ".kube",
+];
+
+/// Does `file_name` look like a dotenv variant (`.env`, `.env.local`,
+/// `.env.production`, etc.) — but NOT `.env.example` / `.env.sample`
+/// which are safe templates?
+fn is_dotenv(file_name: &str) -> bool {
+    if !file_name.starts_with(".env") {
+        return false;
+    }
+    let rest = &file_name[4..];
+    if rest.is_empty() || rest == ".local" || rest == ".production" || rest == ".development"
+        || rest == ".test" || rest == ".staging"
+    {
+        return true;
+    }
+    // Skip known-safe templates.
+    if rest == ".example" || rest == ".sample" || rest == ".template" || rest == ".dist" {
+        return false;
+    }
+    // Other `.env.*` variants — treat as sensitive by default.
+    rest.starts_with('.')
+}
+
+/// Returns Some(error ToolOutput) if the path should be blocked for `op`.
+/// Read mode blocks private keys only. Write mode additionally blocks
+/// dotenv files, credential stores, and secrets directories.
+pub fn check_sensitive_path(path: &std::path::Path, op: SensitiveOp) -> Option<ToolOutput> {
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+    // Private-key material — blocked in both modes.
+    if PRIVATE_KEY_NAMES.iter().any(|n| *n == file_name) {
+        return Some(ToolOutput::error(format!(
+            "Refusing to {} private-key file '{}'. This path is on the hard deny-list.",
+            match op { SensitiveOp::Read => "read", SensitiveOp::Write => "modify" },
+            file_name
+        )));
+    }
+    if PRIVATE_KEY_SUFFIXES.iter().any(|s| file_name.to_ascii_lowercase().ends_with(s)) {
+        return Some(ToolOutput::error(format!(
+            "Refusing to {} key-material file '{}'. This path is on the hard deny-list.",
+            match op { SensitiveOp::Read => "read", SensitiveOp::Write => "modify" },
+            file_name
+        )));
+    }
+
+    // For read operations, allow everything else (agent can legitimately
+    // inspect `.env`, `credentials`, etc. with user permission prompts).
+    if op == SensitiveOp::Read {
+        return None;
+    }
+
+    // Write-only blocks below.
+
+    // Dotenv files — never let the agent overwrite these.
+    if is_dotenv(file_name) {
+        return Some(ToolOutput::error(format!(
+            "Refusing to modify dotenv file '{}'. The agent must not overwrite environment secrets.",
+            file_name
+        )));
+    }
+
+    // Well-known credential files.
+    if SECRET_WRITE_BLOCK_NAMES.iter().any(|n| *n == file_name) {
+        return Some(ToolOutput::error(format!(
+            "Refusing to modify credential file '{}'. This path is on the hard deny-list.",
+            file_name
+        )));
+    }
+
+    // Paths inside secrets directories anywhere in the ancestor chain.
+    for comp in path.components() {
+        let s = comp.as_os_str();
+        if SECRET_DIR_COMPONENTS.iter().any(|d| s == *d) {
+            return Some(ToolOutput::error(format!(
+                "Refusing to modify files inside '{}'. This directory is on the hard deny-list.",
+                s.to_string_lossy()
+            )));
+        }
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod sensitive_path_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn p(s: &str) -> PathBuf { PathBuf::from(s) }
+
+    #[test]
+    fn write_blocks_dotenv() {
+        assert!(check_sensitive_path(&p("/proj/.env"), SensitiveOp::Write).is_some());
+        assert!(check_sensitive_path(&p("/proj/.env.local"), SensitiveOp::Write).is_some());
+        assert!(check_sensitive_path(&p("/proj/.env.production"), SensitiveOp::Write).is_some());
+    }
+
+    #[test]
+    fn write_allows_dotenv_templates() {
+        assert!(check_sensitive_path(&p("/proj/.env.example"), SensitiveOp::Write).is_none());
+        assert!(check_sensitive_path(&p("/proj/.env.sample"), SensitiveOp::Write).is_none());
+        assert!(check_sensitive_path(&p("/proj/.env.template"), SensitiveOp::Write).is_none());
+    }
+
+    #[test]
+    fn write_blocks_ssh_dir() {
+        assert!(check_sensitive_path(&p("/home/u/.ssh/authorized_keys"), SensitiveOp::Write).is_some());
+        assert!(check_sensitive_path(&p("/home/u/.ssh/config"), SensitiveOp::Write).is_some());
+    }
+
+    #[test]
+    fn write_blocks_aws_creds() {
+        assert!(check_sensitive_path(&p("/home/u/.aws/credentials"), SensitiveOp::Write).is_some());
+        assert!(check_sensitive_path(&p("/home/u/.aws/config"), SensitiveOp::Write).is_some());
+    }
+
+    #[test]
+    fn write_blocks_credential_files() {
+        assert!(check_sensitive_path(&p("/proj/credentials.json"), SensitiveOp::Write).is_some());
+        assert!(check_sensitive_path(&p("/home/u/.netrc"), SensitiveOp::Write).is_some());
+        assert!(check_sensitive_path(&p("/home/u/.pgpass"), SensitiveOp::Write).is_some());
+    }
+
+    #[test]
+    fn read_and_write_block_private_keys() {
+        for op in [SensitiveOp::Read, SensitiveOp::Write] {
+            assert!(check_sensitive_path(&p("/home/u/.ssh/id_rsa"), op).is_some());
+            assert!(check_sensitive_path(&p("/proj/server.pem"), op).is_some());
+            assert!(check_sensitive_path(&p("/proj/keystore.jks"), op).is_some());
+            assert!(check_sensitive_path(&p("/proj/tls.key"), op).is_some());
+        }
+    }
+
+    #[test]
+    fn read_allows_dotenv_and_credentials() {
+        // Read is permissive — user can still inspect secrets via prompts.
+        assert!(check_sensitive_path(&p("/proj/.env"), SensitiveOp::Read).is_none());
+        assert!(check_sensitive_path(&p("/proj/credentials.json"), SensitiveOp::Read).is_none());
+        assert!(check_sensitive_path(&p("/home/u/.aws/config"), SensitiveOp::Read).is_none());
+    }
+
+    #[test]
+    fn normal_files_pass() {
+        assert!(check_sensitive_path(&p("/proj/src/main.rs"), SensitiveOp::Read).is_none());
+        assert!(check_sensitive_path(&p("/proj/src/main.rs"), SensitiveOp::Write).is_none());
+        assert!(check_sensitive_path(&p("/proj/README.md"), SensitiveOp::Write).is_none());
+    }
+}
+
 /// The core Tool trait — mirrors the Tool interface in Tool.ts
 #[async_trait]
 pub trait Tool: Send + Sync {

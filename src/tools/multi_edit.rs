@@ -96,6 +96,23 @@ impl Tool for MultiEditTool {
             let path = resolve_path(&edit.file_path, &ctx.cwd);
             let label = format!("[{}/{}] {}", i + 1, input.edits.len(), path.display());
 
+            if let Some(err) = super::check_protected_path(&path) {
+                let msg = err.content.iter()
+                    .map(|c| { let super::ToolResultContent::Text { text } = c; text.as_str() })
+                    .collect::<Vec<_>>().join(" ");
+                results.push(format!("{label} ✗ {msg}"));
+                had_error = true;
+                continue;
+            }
+            if let Some(err) = super::check_sensitive_path(&path, super::SensitiveOp::Write) {
+                let msg = err.content.iter()
+                    .map(|c| { let super::ToolResultContent::Text { text } = c; text.as_str() })
+                    .collect::<Vec<_>>().join(" ");
+                results.push(format!("{label} ✗ {msg}"));
+                had_error = true;
+                continue;
+            }
+
             // Snapshot before first edit to this file
             snapshot_file(ctx, &path).await;
 
