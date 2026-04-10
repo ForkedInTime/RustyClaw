@@ -1,6 +1,6 @@
 //! Integration tests for auto-rollback core logic — TDD, written before implementation.
 
-use rustyclaw::rollback::{
+use rustyclaw::autofix::{
     detect_test_command, should_trigger, RollbackConfig, RollbackTrigger,
 };
 use std::fs;
@@ -128,7 +128,7 @@ fn test_default_config() {
     assert_eq!(cfg.trigger, RollbackTrigger::Autonomous);
     assert_eq!(cfg.max_retries, 3);
     assert!(cfg.test_command.is_none());
-    assert_eq!(cfg.timeout_secs, rustyclaw::rollback::DEFAULT_TEST_TIMEOUT_SECS);
+    assert_eq!(cfg.timeout_secs, rustyclaw::autofix::DEFAULT_TEST_TIMEOUT_SECS);
 }
 
 // ── settings parsing ──────────────────────────────────────────────────────────
