@@ -151,12 +151,6 @@ pub fn search_symbol(db: &RagDb, name: &str, limit: i64) -> Result<Vec<SearchRes
     Ok(out)
 }
 
-/// Make sanitize_fts_query visible for testing.
-#[cfg(test)]
-pub fn sanitize_fts_query_test(query: &str) -> String {
-    sanitize_fts_query(query)
-}
-
 /// Build a context string from search results, suitable for injection
 /// into the system prompt or a user message.
 ///
