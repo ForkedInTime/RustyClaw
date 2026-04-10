@@ -4059,12 +4059,12 @@ async fn run_api_task(
                 // API contract; the user sees the failure and can re-prompt.
                 // (max_retries is reserved for a future multi-turn loop.)
                 if !rollback_touched.is_empty()
-                    && crate::rollback::should_trigger(
+                    && crate::autofix::should_trigger(
                         &config.auto_rollback,
                         &config.autonomy,
                     )
                 {
-                    let test_cmd = crate::rollback::detect_test_command(
+                    let test_cmd = crate::autofix::detect_test_command(
                         &config.cwd,
                         &config.auto_rollback.test_command,
                     );
@@ -4072,20 +4072,20 @@ async fn run_api_task(
                         let _ = tx.send(AppEvent::SystemMessage(
                             format!("[auto-rollback] running tests: {cmd}"),
                         ));
-                        match crate::rollback::run_tests(
+                        match crate::autofix::run_tests(
                             &config.cwd,
                             &cmd,
                             config.auto_rollback.timeout_secs,
                         ) {
-                            crate::rollback::TestResult::Pass => {
+                            crate::autofix::TestResult::Pass => {
                                 let _ = tx.send(AppEvent::SystemMessage(
                                     "[auto-rollback] tests pass, continuing".into(),
                                 ));
                             }
-                            crate::rollback::TestResult::Fail { stderr } => {
+                            crate::autofix::TestResult::Fail { stderr } => {
                                 let trimmed: String =
                                     stderr.chars().take(2000).collect();
-                                match crate::rollback::git_restore_files(
+                                match crate::autofix::git_restore_files(
                                     &config.cwd,
                                     &rollback_touched,
                                 ) {
@@ -4107,15 +4107,15 @@ async fn run_api_task(
                                     }
                                 }
                             }
-                            crate::rollback::TestResult::Timeout => {
+                            crate::autofix::TestResult::Timeout => {
                                 let _ = tx.send(AppEvent::SystemMessage(
                                     "[auto-rollback] test run timed out after 60s, skipping".into(),
                                 ));
                             }
-                            crate::rollback::TestResult::NoTestRunner => {
+                            crate::autofix::TestResult::NoTestRunner => {
                                 // Silent skip — expected without a test runner.
                             }
-                            crate::rollback::TestResult::Skipped { reason } => {
+                            crate::autofix::TestResult::Skipped { reason } => {
                                 let _ = tx.send(AppEvent::SystemMessage(
                                     format!("[auto-rollback] skipped: {reason}"),
                                 ));
