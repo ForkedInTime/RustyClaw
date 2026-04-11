@@ -81,11 +81,10 @@ pub fn parse_deep_link(uri: &str) -> Option<DeepLinkParams> {
     if query.len() > MAX_QUERY_LEN {
         return None;
     }
-    if let Some(ref c) = cwd {
-        if c.len() > MAX_CWD_LEN {
+    if let Some(ref c) = cwd
+        && c.len() > MAX_CWD_LEN {
             return None;
         }
-    }
 
     Some(DeepLinkParams { query, cwd, repo })
 }

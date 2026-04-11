@@ -231,8 +231,8 @@ impl QueryEngine {
                 response.usage.output_tokens,
             );
             self.cumulative_cost_usd += turn_cost;
-            if let Some(budget) = self.config.max_budget_usd {
-                if self.cumulative_cost_usd >= budget {
+            if let Some(budget) = self.config.max_budget_usd
+                && self.cumulative_cost_usd >= budget {
                     eprintln!(
                         "{}",
                         format!(
@@ -243,7 +243,6 @@ impl QueryEngine {
                     );
                     break;
                 }
-            }
 
             // Context compaction check
             match compact_needed(response.usage.input_tokens) {
@@ -349,9 +348,9 @@ impl QueryEngine {
                 }
 
                 // Pre-tool-use hooks (emit event if requested)
-                if self.include_hook_events && self.stream_json_output {
-                    if let Some(hook_cfg) = &self.config.hooks {
-                        if !self.config.disable_all_hooks {
+                if self.include_hook_events && self.stream_json_output
+                    && let Some(hook_cfg) = &self.config.hooks
+                        && !self.config.disable_all_hooks {
                             let args = serde_json::to_string(input).unwrap_or_default();
                             let hook_result = crate::hooks::run_pre_tool_hooks(
                                 hook_cfg, name, &args, "print-mode", &self.config.cwd,
@@ -375,8 +374,6 @@ impl QueryEngine {
                                 continue;
                             }
                         }
-                    }
-                }
 
                 let tool = self.tools.iter().find(|t| t.name() == name);
 

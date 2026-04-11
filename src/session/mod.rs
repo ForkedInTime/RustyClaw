@@ -108,12 +108,11 @@ impl Session {
         }
 
         // Update preview from first user message if not yet set
-        if self.meta.preview.is_empty() {
-            if let Some(preview) = first_user_preview(new_messages) {
+        if self.meta.preview.is_empty()
+            && let Some(preview) = first_user_preview(new_messages) {
                 self.meta.preview = preview;
                 self.meta.save().await?;
             }
-        }
 
         Ok(())
     }
@@ -171,20 +170,17 @@ impl Session {
                     .and_then(|s| s.to_str())
                     .unwrap_or("")
                     .to_string();
-                if !id.is_empty() {
-                    if let Ok(mut meta) = SessionMeta::load(&id).await {
+                if !id.is_empty()
+                    && let Ok(mut meta) = SessionMeta::load(&id).await {
                         // Backfill empty preview from session messages
-                        if meta.preview.is_empty() {
-                            if let Ok(msgs) = Self::load_messages(&id).await {
-                                if let Some(preview) = first_user_preview(&msgs) {
+                        if meta.preview.is_empty()
+                            && let Ok(msgs) = Self::load_messages(&id).await
+                                && let Some(preview) = first_user_preview(&msgs) {
                                     meta.preview = preview;
                                     let _ = meta.save().await;
                                 }
-                            }
-                        }
                         sessions.push((meta.created_at, meta));
                     }
-                }
             }
         }
 

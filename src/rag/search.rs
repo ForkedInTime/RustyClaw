@@ -104,10 +104,8 @@ pub fn search(db: &RagDb, query: &str, limit: i64) -> Result<Vec<SearchResult>> 
     })?;
 
     let mut out = Vec::new();
-    for r in results {
-        if let Ok(r) = r {
-            out.push(r);
-        }
+    for r in results.flatten() {
+        out.push(r);
     }
     Ok(out)
 }
@@ -143,10 +141,8 @@ pub fn search_symbol(db: &RagDb, name: &str, limit: i64) -> Result<Vec<SearchRes
     })?;
 
     let mut out = Vec::new();
-    for r in results {
-        if let Ok(r) = r {
-            out.push(r);
-        }
+    for r in results.flatten() {
+        out.push(r);
     }
     Ok(out)
 }

@@ -236,9 +236,9 @@ async fn plugin_install_task(spec: String, tx: tokio::sync::mpsc::UnboundedSende
                 ).unwrap_or_default();
                 pkg["name"].as_str()
                     .map(|s| s.to_string())
-                    .unwrap_or_else(|| raw_spec.split('/').last().unwrap_or(&raw_spec).to_string())
+                    .unwrap_or_else(|| raw_spec.split('/').next_back().unwrap_or(&raw_spec).to_string())
             } else {
-                raw_spec.split('/').last().unwrap_or(&raw_spec).to_string()
+                raw_spec.split('/').next_back().unwrap_or(&raw_spec).to_string()
             };
 
             // Install dependencies in the cloned directory
@@ -473,9 +473,9 @@ async fn run_loop(
     let mut turn_counter: usize = 0;
 
     // Session cleanup — delete sessions older than cleanupPeriodDays
-    if let Some(days) = config.cleanup_period_days {
-        if days > 0 {
-            if let Ok(list) = crate::session::Session::list().await {
+    if let Some(days) = config.cleanup_period_days
+        && days > 0
+            && let Ok(list) = crate::session::Session::list().await {
                 let cutoff_secs = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs())
@@ -487,8 +487,6 @@ async fn run_loop(
                     }
                 }
             }
-        }
-    }
 
     // Session — create new or resume existing
     let mut session = match resume_id.clone() {
@@ -536,11 +534,10 @@ async fn run_loop(
     }
 
     // SessionStart hooks
-    if let Some(hook_cfg) = &config.hooks {
-        if !config.disable_all_hooks {
+    if let Some(hook_cfg) = &config.hooks
+        && !config.disable_all_hooks {
             hooks::run_session_start_hooks(hook_cfg, &session.id, &config.cwd).await;
         }
-    }
 
     // Prune old auto-commit shadow refs (keeps the configured number of newest sessions).
     if let Err(e) =
@@ -831,13 +828,12 @@ async fn run_loop(
                             // Record in cost tracker (per-model breakdown)
                             app.cost_tracker.record(&model_used, tokens_in, tokens_out);
                             // Budget check
-                            if app.cost_tracker.budget_warning() {
-                                if let Some(remaining) = app.cost_tracker.remaining() {
+                            if app.cost_tracker.budget_warning()
+                                && let Some(remaining) = app.cost_tracker.remaining() {
                                     app.entries.push(ChatEntry::system(
                                         format!("Budget warning: ${:.4} remaining", remaining)
                                     ));
                                 }
-                            }
                             if app.cost_tracker.over_budget() {
                                 app.entries.push(ChatEntry::system(
                                     "Budget exceeded! Use /budget to adjust or remove the limit.".to_string()
@@ -1086,11 +1082,10 @@ async fn run_loop(
                         snip_compact(&mut messages); // immediate safety snip
                         app.entries.push(ChatEntry::system("Auto-compacting (summarise)…"));
                         // PreCompact hooks
-                        if let Some(hook_cfg) = &config.hooks {
-                            if !config.disable_all_hooks {
+                        if let Some(hook_cfg) = &config.hooks
+                            && !config.disable_all_hooks {
                                 hooks::run_pre_compact_hooks(hook_cfg, &session.id, &config.cwd).await;
                             }
-                        }
                         let c2 = client.clone();
                         let msgs = messages.clone();
                         let cfg = config.clone();
@@ -1106,11 +1101,10 @@ async fn run_loop(
                                         .map(|b| if let ContentBlock::Text { text } = b { text.len() } else { 0 })
                                         .unwrap_or(0);
                                     // PostCompact hooks
-                                    if let Some(hook_cfg) = &hook_cfg_clone {
-                                        if !cfg.disable_all_hooks {
+                                    if let Some(hook_cfg) = &hook_cfg_clone
+                                        && !cfg.disable_all_hooks {
                                             hooks::run_post_compact_hooks(hook_cfg, &sid, &cwd).await;
                                         }
-                                    }
                                     let _ = tx2.send(AppEvent::Compacted { replacement: r, summary_len });
                                 }
                                 Err(e) => { let _ = tx2.send(AppEvent::Error(format!("Compact failed: {e}"))); }
@@ -1149,11 +1143,10 @@ async fn run_loop(
             }
 
             // Stop hooks — fire before exiting
-            if let Some(hook_cfg) = &config.hooks {
-                if !config.disable_all_hooks {
+            if let Some(hook_cfg) = &config.hooks
+                && !config.disable_all_hooks {
                     hooks::run_stop_hooks(hook_cfg, &session.id, &config.cwd).await;
                 }
-            }
             break;
         }
     }
@@ -1184,10 +1177,10 @@ async fn handle_key(
 
     // Overlay dismissal takes second priority (after permission dialog)
     if app.overlay.is_some() {
-        let is_interactive = app.overlay.as_ref().map_or(false, |o| o.is_interactive());
+        let is_interactive = app.overlay.as_ref().is_some_and(|o| o.is_interactive());
         match key.code {
             KeyCode::Esc | KeyCode::Char('q')
-                if app.overlay.as_ref().map_or(false, |o| o.title == "help-commands") =>
+                if app.overlay.as_ref().is_some_and(|o| o.title == "help-commands") =>
             {
                 // Back to category picker instead of closing entirely
                 let cats = crate::commands::HELP_CATEGORIES;
@@ -1374,22 +1367,19 @@ async fn handle_key(
                 }
             }
             Backspace => {
-                if let Some(ref mut q) = app.pending_user_question {
-                    if q.cursor > 0 {
+                if let Some(ref mut q) = app.pending_user_question
+                    && q.cursor > 0 {
                         q.cursor -= 1;
                         q.input.remove(q.cursor);
                     }
-                }
             }
             Left => {
-                if let Some(ref mut q) = app.pending_user_question {
-                    if q.cursor > 0 { q.cursor -= 1; }
-                }
+                if let Some(ref mut q) = app.pending_user_question
+                    && q.cursor > 0 { q.cursor -= 1; }
             }
             Right => {
-                if let Some(ref mut q) = app.pending_user_question {
-                    if q.cursor < q.input.len() { q.cursor += 1; }
-                }
+                if let Some(ref mut q) = app.pending_user_question
+                    && q.cursor < q.input.len() { q.cursor += 1; }
             }
             Esc => {
                 // Cancel the question — send empty string
@@ -1581,7 +1571,7 @@ async fn handle_key(
                     session_id: &session.id,
                     session_name: &session.meta.name,
                     claudemd: &config.claudemd,
-                    mcp_statuses: &mcp_statuses,
+                    mcp_statuses,
                     brief_mode: app.brief_mode,
                     btw_note: app.btw_note.as_deref(),
                 };
@@ -1791,11 +1781,10 @@ async fn handle_key(
                                         let real_path = std::path::PathBuf::from(
                                             format!("/{}", flat.replace('_', "/"))
                                         );
-                                        if !restored_files.contains(&flat) {
-                                            if std::fs::copy(&src, &real_path).is_ok() {
+                                        if !restored_files.contains(&flat)
+                                            && std::fs::copy(&src, &real_path).is_ok() {
                                                 restored_files.push(flat);
                                             }
-                                        }
                                     }
                                 }
                                 let _ = std::fs::remove_dir_all(&snap_dir);
@@ -2099,14 +2088,12 @@ async fn handle_key(
                     CommandAction::ListVoiceModels => {
                         let voices = crate::voice::find_all_voices();
                         if voices.is_empty() {
-                            app.overlay = Some(Overlay::new("voices", format!(
-                                "No voice models found\n\n\
+                            app.overlay = Some(Overlay::new("voices", "No voice models found\n\n\
                                  Install XTTS v2:\n\
                                    uv tool install TTS --python 3.11 \\\n\
                                      --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'\n\n\
                                  Then record a custom voice:\n\
-                                   /voice clone"
-                            )));
+                                   /voice clone".to_string()));
                         } else {
                             let current = config.tts_voice_model.clone()
                                 .unwrap_or_else(|| crate::voice::XTTS_DEFAULT_SPEAKER.to_string());
@@ -2545,8 +2532,8 @@ async fn handle_key(
                             .join(".claude")
                             .join("settings.json");
                         let mut removed = false;
-                        if let Some(content) = std::fs::read_to_string(&settings_path).ok() {
-                            if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Ok(content) = std::fs::read_to_string(&settings_path)
+                            && let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
                                 if let Some(obj) = json["mcpServers"].as_object_mut() {
                                     removed = obj.remove(&name).is_some();
                                 }
@@ -2557,21 +2544,19 @@ async fn handle_key(
                                     );
                                 }
                             }
-                        }
                         // Remove from plugins.json
                         let plugins_path = dirs::home_dir()
                             .unwrap_or_default()
                             .join(".claude")
                             .join("plugins.json");
-                        if let Some(content) = std::fs::read_to_string(&plugins_path).ok() {
-                            if let Ok(mut plugins) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Ok(content) = std::fs::read_to_string(&plugins_path)
+                            && let Ok(mut plugins) = serde_json::from_str::<serde_json::Value>(&content) {
                                 if let Some(obj) = plugins.as_object_mut() { obj.remove(&name); }
                                 let _ = std::fs::write(
                                     &plugins_path,
                                     serde_json::to_string_pretty(&plugins).unwrap_or_default(),
                                 );
                             }
-                        }
                         let msg = if removed {
                             format!("Plugin '{}' removed. Restart rustyclaw to deactivate.", name)
                         } else {
@@ -3047,11 +3032,11 @@ async fn handle_key(
                         app.entries.push(ChatEntry::system(format!("Spawning background agent: {task}")));
                     }
                     CommandAction::ListSpawns => {
-                        let text = crate::spawn::list_agents(&spawn_registry);
+                        let text = crate::spawn::list_agents(spawn_registry);
                         app.entries.push(ChatEntry::system(text));
                     }
                     CommandAction::ReviewSpawn(id) => {
-                        match crate::spawn::review_agent(&spawn_registry, &id) {
+                        match crate::spawn::review_agent(spawn_registry, &id) {
                             Ok(text) => app.entries.push(ChatEntry::system(text)),
                             Err(e) => app.entries.push(ChatEntry::error(format!("{e:#}"))),
                         }
@@ -3070,7 +3055,7 @@ async fn handle_key(
                         app.entries.push(ChatEntry::system(format!("Merging agent [{id}]...")));
                     }
                     CommandAction::KillSpawn(id) => {
-                        match crate::spawn::kill_agent(&spawn_registry, &id) {
+                        match crate::spawn::kill_agent(spawn_registry, &id) {
                             Ok(msg) => app.entries.push(ChatEntry::system(msg)),
                             Err(e) => app.entries.push(ChatEntry::error(format!("{e:#}"))),
                         }
@@ -3130,7 +3115,7 @@ async fn handle_key(
                         let label = format!("XTTS v2 default ({})", crate::voice::XTTS_DEFAULT_SPEAKER);
                         let time_hint = if server_up { "~1 second" } else if xtts_ok { "starting server ~10s, then ~1s" } else { "a few seconds" };
                         let has_clone = crate::voice::voice_clone_sample_path()
-                            .map_or(false, |p| p.exists());
+                            .is_some_and(|p| p.exists());
                         let clone_hint = if has_clone {
                             " Custom voice active for responses. /voice clone to change it."
                         } else {
@@ -3359,8 +3344,8 @@ async fn handle_key(
                     }
                     CommandAction::Unknown(name) => {
                         // Try skill expansion before giving up
-                        if let Some((skill_name, args)) = parse_skill_invocation(&input) {
-                            if let Some(skill) = skills.get(skill_name) {
+                        if let Some((skill_name, args)) = parse_skill_invocation(&input)
+                            && let Some(skill) = skills.get(skill_name) {
                                 let mut prompt = skill.expand(args);
                                 if config.disable_skill_shell_execution {
                                     prompt.push_str("\n\nNote: shell command execution (Bash tool) is disabled for skill invocations.");
@@ -3391,7 +3376,6 @@ async fn handle_key(
                                 app.api_task = Some(handle.abort_handle());
                                 return Ok(());
                             }
-                        }
                         app.entries.push(ChatEntry::system(
                             format!("Unknown command '/{name}'. Type /help for available commands.")
                         ));
@@ -3576,12 +3560,11 @@ async fn handle_key(
             let raw: String = app.input.iter().collect();
 
             // If input is non-empty and not a slash command, try history suggestion first
-            if !raw.is_empty() && !raw.starts_with('/') {
-                if app.history_suggestion().is_some() {
+            if !raw.is_empty() && !raw.starts_with('/')
+                && app.history_suggestion().is_some() {
                     app.accept_suggestion();
                     return Ok(());
                 }
-            }
 
             // "/model ollama:<prefix>" → complete from installed Ollama models
             if let Some(after) = raw.strip_prefix("/model ") {
@@ -3630,8 +3613,8 @@ async fn handle_key(
                 // we surface them as "context-mode:ctx-doctor".
                 for tool in tools.iter() {
                     let name = tool.name();
-                    if let Some(rest) = name.strip_prefix("mcp__") {
-                        if let Some(sep) = rest.find("__") {
+                    if let Some(rest) = name.strip_prefix("mcp__")
+                        && let Some(sep) = rest.find("__") {
                             let server = &rest[..sep];
                             let cmd = &rest[sep + 2..];
                             // Convert underscores back to hyphens for the slash form
@@ -3640,7 +3623,6 @@ async fn handle_key(
                                 all_completions.push(entry);
                             }
                         }
-                    }
                 }
 
                 match all_completions.len() {
@@ -3843,7 +3825,7 @@ fn attach_image(path: &str) -> AResult<ContentBlock> {
 /// Minimal base64 encoder (avoids pulling in a whole crate for a simple use case).
 fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as usize;
         let b1 = if chunk.len() > 1 { chunk[1] as usize } else { 0 };
@@ -3921,11 +3903,10 @@ async fn run_api_task(
 
         // Build tool definitions, optionally adding prompt cache marker to the last one
         let mut tool_defs: Vec<ToolDefinition> = tools.iter().map(|t| t.definition()).collect();
-        if config.prompt_cache && !tool_defs.is_empty() {
-            if let Some(last) = tool_defs.last_mut() {
+        if config.prompt_cache && !tool_defs.is_empty()
+            && let Some(last) = tool_defs.last_mut() {
                 last.cache_control = Some(crate::api::types::CacheControl::ephemeral());
             }
-        }
 
         // Build system content — wrap in blocks for prompt caching if enabled
         let system_content = if config.prompt_cache {
@@ -4081,11 +4062,10 @@ async fn run_api_task(
         // Emit thinking blocks to the TUI (if show_thinking_summaries is enabled)
         if config.show_thinking_summaries {
             for block in &response.content {
-                if let ContentBlock::Thinking { thinking, .. } = block {
-                    if !thinking.trim().is_empty() {
+                if let ContentBlock::Thinking { thinking, .. } = block
+                    && !thinking.trim().is_empty() {
                         let _ = tx.send(AppEvent::ThinkingBlock(thinking.clone()));
                     }
-                }
             }
         }
 
@@ -4206,8 +4186,8 @@ async fn run_api_task(
                         }
 
                         // Pre-tool-use hooks — can block execution
-                        if let Some(hook_cfg) = &config.hooks {
-                          if !config.disable_all_hooks {
+                        if let Some(hook_cfg) = &config.hooks
+                          && !config.disable_all_hooks {
                             let hook_result = hooks::run_pre_tool_hooks(
                                 hook_cfg, name, &args, session_id, &config.cwd,
                             ).await;
@@ -4230,7 +4210,6 @@ async fn run_api_task(
                                 let _ = tx.send(AppEvent::SystemMessage(sys_msg));
                             }
                           } // disable_all_hooks guard
-                        }
 
                         // Autonomy check: "suggest" mode forces Ask for Write/Edit
                         let autonomy_override = if config.autonomy == "suggest"
@@ -4305,13 +4284,12 @@ async fn run_api_task(
                             .collect::<Vec<_>>().join("\n");
 
                         // Post-tool-use hooks — fire and don't block
-                        if let Some(hook_cfg) = &config.hooks {
-                            if !config.disable_all_hooks {
+                        if let Some(hook_cfg) = &config.hooks
+                            && !config.disable_all_hooks {
                                 hooks::run_post_tool_hooks(
                                     hook_cfg, name, &result_text, session_id, &config.cwd,
                                 ).await;
                             }
-                        }
 
                         // Check if a plan mode change was emitted by a tool (EnterPlanMode / ExitPlanMode)
                         while let Ok(enabled) = plan_rx.try_recv() {
@@ -4511,5 +4489,5 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
 }
 
 fn is_leap(y: u64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
 }

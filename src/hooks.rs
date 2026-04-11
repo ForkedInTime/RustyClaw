@@ -308,8 +308,8 @@ async fn execute_hook(hook: &HookEntry, env: HookEnvVars<'_>) -> HookResult {
 
     // Parse JSON output from stdout if present
     let trimmed = stdout.trim();
-    if trimmed.starts_with('{') {
-        if let Ok(hook_out) = serde_json::from_str::<HookOutput>(trimmed) {
+    if trimmed.starts_with('{')
+        && let Ok(hook_out) = serde_json::from_str::<HookOutput>(trimmed) {
             let decision = match hook_out.decision.as_deref() {
                 Some("approve") => Some(HookDecision::Approve),
                 Some("block")   => Some(HookDecision::Block),
@@ -336,7 +336,6 @@ async fn execute_hook(hook: &HookEntry, env: HookEnvVars<'_>) -> HookResult {
                 additional_context: hook_out.additional_context,
             };
         }
-    }
 
     HookResult::allow()
 }

@@ -234,14 +234,12 @@ fn normalize_tool_input(val: &mut serde_json::Value) {
         }
         serde_json::Value::String(s) => {
             let trimmed = s.trim_start();
-            if trimmed.starts_with('[') || trimmed.starts_with('{') {
-                if let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(s) {
-                    if matches!(parsed, serde_json::Value::Array(_) | serde_json::Value::Object(_)) {
+            if (trimmed.starts_with('[') || trimmed.starts_with('{'))
+                && let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(s)
+                    && matches!(parsed, serde_json::Value::Array(_) | serde_json::Value::Object(_)) {
                         normalize_tool_input(&mut parsed);
                         *val = parsed;
                     }
-                }
-            }
         }
         _ => {}
     }

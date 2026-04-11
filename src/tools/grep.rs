@@ -199,13 +199,13 @@ async fn run_with_regex(input: &GrepInput, ctx: &ToolContext) -> Result<ToolOutp
         None => ctx.cwd.clone(),
     };
 
-    let glob_re = input.glob.as_ref().map(|g| {
+    let glob_re = input.glob.as_ref().and_then(|g| {
         let escaped = regex::escape(g)
             .replace(r"\*\*", ".*")
             .replace(r"\*", "[^/]*")
             .replace(r"\?", "[^/]");
         Regex::new(&format!("(?i){}$", escaped)).ok()
-    }).flatten();
+    });
 
     let mut matched_files: Vec<String> = Vec::new();
     let mut content_lines: Vec<String> = Vec::new();
@@ -230,11 +230,10 @@ async fn run_with_regex(input: &GrepInput, ctx: &ToolContext) -> Result<ToolOutp
         let path_str = path.to_string_lossy();
 
         // Apply glob filter
-        if let Some(ref gre) = glob_re {
-            if !gre.is_match(&path_str) {
+        if let Some(ref gre) = glob_re
+            && !gre.is_match(&path_str) {
                 continue;
             }
-        }
 
         let Ok(contents) = tokio::fs::read_to_string(path).await else { continue };
 

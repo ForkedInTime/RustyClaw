@@ -374,8 +374,8 @@ fn sanitize_key(key: &str) -> String {
 
 /// Jaccard overlap between `a_words` (pre-built set) and the whitespace-split
 /// words of `b`. Returns 0.0 when the union is empty.
-fn jaccard_overlap<'a>(
-    a_words: &std::collections::HashSet<&'a str>,
+fn jaccard_overlap(
+    a_words: &std::collections::HashSet<&str>,
     b: &str,
 ) -> f64 {
     let b_words: std::collections::HashSet<&str> = b.split_whitespace().collect();

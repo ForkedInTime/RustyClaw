@@ -175,15 +175,13 @@ fn extract_symbol_name(node: &tree_sitter::Node, source: &[u8]) -> String {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         let kind = child.kind();
-        if kind == "identifier"
+        if (kind == "identifier"
             || kind == "name"
             || kind == "type_identifier"
-            || kind == "property_identifier"
-        {
-            if let Ok(name) = child.utf8_text(source) {
+            || kind == "property_identifier")
+            && let Ok(name) = child.utf8_text(source) {
                 return name.to_string();
             }
-        }
         // For export statements, look deeper (one level)
         if kind == "function_declaration"
             || kind == "class_declaration"
@@ -192,11 +190,10 @@ fn extract_symbol_name(node: &tree_sitter::Node, source: &[u8]) -> String {
             let mut inner = child.walk();
             for grandchild in child.children(&mut inner) {
                 let gk = grandchild.kind();
-                if gk == "identifier" || gk == "type_identifier" {
-                    if let Ok(name) = grandchild.utf8_text(source) {
+                if (gk == "identifier" || gk == "type_identifier")
+                    && let Ok(name) = grandchild.utf8_text(source) {
                         return name.to_string();
                     }
-                }
             }
         }
     }

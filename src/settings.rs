@@ -355,17 +355,15 @@ impl Settings {
     /// Returns a Settings with only mcp_servers populated.
     fn load_mcp_json(path: &Path) -> Self {
         let mut s = Self::default();
-        if let Ok(content) = std::fs::read_to_string(path) {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(obj) = json.get("mcpServers").and_then(|v| v.as_object()) {
+        if let Ok(content) = std::fs::read_to_string(path)
+            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&content)
+                && let Some(obj) = json.get("mcpServers").and_then(|v| v.as_object()) {
                     for (name, val) in obj {
                         if let Ok(cfg) = serde_json::from_value::<McpServerConfig>(val.clone()) {
                             s.mcp_servers.insert(name.clone(), cfg);
                         }
                     }
                 }
-            }
-        }
         s
     }
 

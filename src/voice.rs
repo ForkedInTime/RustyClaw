@@ -228,12 +228,11 @@ pub fn audio_player_available() -> bool {
 pub fn find_all_voices() -> Vec<(String, String)> {
     let mut voices = Vec::new();
     // Check for voice clone sample
-    if let Some(clone_path) = voice_clone_sample_path() {
-        if clone_path.exists() {
+    if let Some(clone_path) = voice_clone_sample_path()
+        && clone_path.exists() {
             let tier = detect_clone_tier(&clone_path);
             voices.push((format!("Your voice ({tier} tier)"), clone_path.display().to_string()));
         }
-    }
     // Default XTTS v2 speaker
     if xtts_available() {
         voices.push((format!("XTTS v2 default ({XTTS_DEFAULT_SPEAKER})"), XTTS_DEFAULT_SPEAKER.to_string()));
@@ -339,7 +338,7 @@ fn xtts_server_script() -> Option<PathBuf> {
             exe_dir.join("scripts/xtts-server.py"),
         ] {
             if candidate.exists() {
-                return Some(candidate.canonicalize().ok()?);
+                return candidate.canonicalize().ok();
             }
         }
     }
@@ -572,11 +571,10 @@ pub async fn speak(
 
     // ── XTTS v2 CLI fallback (cold start each call) ───────────────────────
     if xtts_available() {
-        if let Some(clone_path) = voice_clone_sample_path() {
-            if clone_path.exists() {
+        if let Some(clone_path) = voice_clone_sample_path()
+            && clone_path.exists() {
                 return speak_cloned(text, &clone_path, stop_rx).await;
             }
-        }
         return speak_xtts_default(text, stop_rx).await;
     }
 
@@ -760,7 +758,7 @@ pub fn voice_status(enabled: bool, tts_enabled: bool) -> String {
 
     // Voice clone status
     let clone_path = voice_clone_sample_path();
-    let clone_exists = clone_path.as_ref().map_or(false, |p| p.exists());
+    let clone_exists = clone_path.as_ref().is_some_and(|p| p.exists());
 
     let clone_status = if clone_exists {
         let tier = detect_clone_tier(&clone_path.unwrap());

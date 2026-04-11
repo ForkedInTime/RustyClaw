@@ -66,12 +66,11 @@ async fn bash_tool_timeout_kills_grandchild_in_process_group() {
     // Small grace window so the shell's redirection lands before we read.
     let mut pid: Option<i32> = None;
     for _ in 0..20 {
-        if let Ok(s) = std::fs::read_to_string(&pid_file) {
-            if let Ok(p) = s.trim().parse::<i32>() {
+        if let Ok(s) = std::fs::read_to_string(&pid_file)
+            && let Ok(p) = s.trim().parse::<i32>() {
                 pid = Some(p);
                 break;
             }
-        }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     let pid = pid.expect("grandchild pid file never appeared");
@@ -116,12 +115,11 @@ async fn bash_tool_abort_kills_grandchild_in_process_group() {
     // Wait for the pid file to be written by the shell.
     let mut pid: Option<i32> = None;
     for _ in 0..40 {
-        if let Ok(s) = std::fs::read_to_string(&pid_file) {
-            if let Ok(p) = s.trim().parse::<i32>() {
+        if let Ok(s) = std::fs::read_to_string(&pid_file)
+            && let Ok(p) = s.trim().parse::<i32>() {
                 pid = Some(p);
                 break;
             }
-        }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     let pid = pid.expect("grandchild pid file never appeared");

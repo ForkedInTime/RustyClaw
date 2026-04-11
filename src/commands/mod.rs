@@ -421,11 +421,9 @@ fn cmd_banner(args: &str) -> CommandAction {
         // Show current setting
         let current = Config::get_banner_label();
         let msg = match &current {
-            None => format!(
-                "Banner label: none\n\
+            None => "Banner label: none\n\
                  Usage: /banner <text>   — show custom text (e.g. \"Penguin Corp\")\n\
-                 /banner none            — hide extra label (default)"
-            ),
+                 /banner none            — hide extra label (default)".to_string(),
             Some(v) => format!(
                 "Banner label: {v}\n\
                  Use /banner none to clear, or /banner <text> to change it."
@@ -940,7 +938,7 @@ fn cmd_doctor(ctx: &CommandContext) -> CommandAction {
             .and_then(|o| String::from_utf8(o.stdout).ok()).unwrap_or_default();
         checks.push(format!("✓ Node.js {} (plugins supported)", v.trim()));
     } else {
-        checks.push(format!("  ✗ Node.js not found — plugins need Node.js"));
+        checks.push("  ✗ Node.js not found — plugins need Node.js".to_string());
         checks.push(format!("      {}", install_one_liner(&distro, "nodejs")));
     }
 
@@ -1476,8 +1474,7 @@ fn mcp_remove_server(args: &str) -> CommandAction {
 
     let removed = val.get_mut("mcpServers")
         .and_then(|m| m.as_object_mut())
-        .map(|m| m.remove(name))
-        .flatten();
+        .and_then(|m| m.remove(name));
 
     if removed.is_none() {
         return CommandAction::Message(format!("MCP server '{}' not found in settings.json", name));
@@ -2053,11 +2050,10 @@ fn cmd_help(args: &str) -> CommandAction {
         return CommandAction::ListHelp;
     }
     // Match category by name prefix or number
-    if let Ok(n) = q.parse::<usize>() {
-        if n >= 1 && n <= HELP_CATEGORIES.len() {
+    if let Ok(n) = q.parse::<usize>()
+        && n >= 1 && n <= HELP_CATEGORIES.len() {
             return CommandAction::ShowHelpCategory(n - 1);
         }
-    }
     for (i, (name, _, _)) in HELP_CATEGORIES.iter().enumerate() {
         if name.to_lowercase().starts_with(&q) {
             return CommandAction::ShowHelpCategory(i);
@@ -2604,22 +2600,20 @@ fn cmd_stats(ctx: &CommandContext) -> CommandAction {
     let mut total_tokens_in: u64 = 0;
     let mut total_tokens_out: u64 = 0;
 
-    if sessions_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&sessions_dir) {
+    if sessions_dir.exists()
+        && let Ok(entries) = std::fs::read_dir(&sessions_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().and_then(|e| e.to_str()) == Some("meta") {
                     total_sessions += 1;
-                    if let Ok(data) = std::fs::read_to_string(&path) {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+                    if let Ok(data) = std::fs::read_to_string(&path)
+                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
                             total_tokens_in += json["tokens_in"].as_u64().unwrap_or(0);
                             total_tokens_out += json["tokens_out"].as_u64().unwrap_or(0);
                         }
-                    }
                 }
             }
         }
-    }
 
     let (price_in, price_out) = {
         let m = &ctx.config.model;
@@ -2968,7 +2962,7 @@ fn plugin_marketplace_list() -> CommandAction {
 
     if let Some(obj) = plugins.as_object() {
         let marketplace_plugins: Vec<_> = obj.iter()
-            .filter(|(_, v)| v.get("source").and_then(|s| s.as_str()).map_or(false, |s| s.contains("marketplace") || s.contains("github")))
+            .filter(|(_, v)| v.get("source").and_then(|s| s.as_str()).is_some_and(|s| s.contains("marketplace") || s.contains("github")))
             .collect();
         if marketplace_plugins.is_empty() {
             CommandAction::Message(
@@ -3090,7 +3084,7 @@ fn plugin_manage_list() -> CommandAction {
 
     let mcp_servers = val.get("mcpServers").and_then(|m| m.as_object());
 
-    if mcp_servers.map_or(true, |m| m.is_empty()) && plugins.as_object().map_or(true, |m| m.is_empty()) {
+    if mcp_servers.is_none_or(|m| m.is_empty()) && plugins.as_object().is_none_or(|m| m.is_empty()) {
         return CommandAction::Message(
             "No plugins installed.\n\
              Install one: /plugin install <package>".into()
