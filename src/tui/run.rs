@@ -919,7 +919,11 @@ async fn run_loop(
 
                             // Auto-commit: snapshot the working tree for this turn.
                             if config.auto_commit.enabled {
-                                let turn_index = (session.meta.auto_commits.len() as u32) + 1;
+                                // snapshot_turn truncates the redo stack to undo_position before
+                                // appending, so after /undo + new work, auto_commits is about to
+                                // shrink. Use the post-truncation index so the tracing log line
+                                // reflects the real new turn number.
+                                let turn_index = (session.meta.undo_position as u32) + 1;
                                 let prompt = app
                                     .entries
                                     .iter()
