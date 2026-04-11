@@ -50,7 +50,10 @@ pub enum SnapshotOutcome {
 /// Report returned by `restore_to`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RestoreReport {
-    /// Files extracted from the target tree back into the working directory.
+    /// Number of files in the target tree (i.e., the count of files that
+    /// *should* exist in cwd after the restore). NOT the count of files
+    /// that actually changed on disk — files that were already at the
+    /// target content are included in this count.
     pub files_restored: u32,
     /// Files in the working tree that do NOT exist in the target tree. They
     /// are left untouched; the caller may mention them in a system message.
@@ -293,6 +296,9 @@ fn list_tree_files(cwd: &Path, tree: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Lists files in the user's real git index via `git ls-files`. Only used
+/// as a fallback in `restore_to` when there are zero shadow commits yet
+/// (can't query a snapshot tree that doesn't exist).
 fn list_tracked_files(cwd: &Path) -> Vec<String> {
     git_cmd(cwd)
         .args(["ls-files"])
@@ -321,20 +327,8 @@ pub fn restore_to(
     // Resolve target tree.
     let tree_sha = if target_position == 0 {
         if let Some(first) = auto_commits.first() {
-            // Try first^ tree (parent of the first auto-commit = session base).
-            let out = git_cmd(cwd)
-                .args(["rev-parse", &format!("{first}^{{tree}}")])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .output();
-            let parent_tree = out
-                .ok()
-                .filter(|o| o.status.success())
-                .and_then(|o| String::from_utf8(o.stdout).ok())
-                .map(|s| s.trim().to_string())
-                .unwrap_or_default();
-            // first^{tree} is the tree of the first commit itself, not its parent.
-            // We need first's parent commit tree. Use rev-parse first^ first.
+            // Session base = tree of first's parent. If first is a root commit
+            // (no parent), fall through to HEAD tree, else canonical empty tree.
             let parent_commit = git_cmd(cwd)
                 .args(["rev-parse", &format!("{first}^")])
                 .stdout(Stdio::piped())
@@ -347,12 +341,9 @@ pub fn restore_to(
                 .unwrap_or_default();
             if !parent_commit.is_empty() {
                 tree_of_commit(cwd, &parent_commit).unwrap_or_default()
-            } else if !parent_tree.is_empty() {
-                parent_tree
             } else if let Some(head) = resolve_head(cwd) {
                 tree_of_commit(cwd, &head).unwrap_or_default()
             } else {
-                // Empty tree SHA (no commits at all).
                 "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string()
             }
         } else if let Some(head) = resolve_head(cwd) {
@@ -817,6 +808,38 @@ mod restore_tests {
         assert!(
             report.orphaned_files.iter().any(|p| p.ends_with("new.txt")),
             "expected new.txt to be flagged as orphaned: {:?}",
+            report.orphaned_files
+        );
+    }
+
+    #[test]
+    fn restore_to_session_base_with_unborn_head_first_commit() {
+        // First auto-commit is a root commit (no parent — fresh repo, unborn HEAD).
+        // Restoring to position 0 should land on the empty tree, removing the
+        // file that was added in turn 1.
+        let td = init_test_repo();
+        let cfg = AutoCommitConfig::default();
+        let mut commits = Vec::new();
+        let mut pos = 0usize;
+
+        write_file(td.path(), "only.txt", "solo\n");
+        snapshot_turn(td.path(), &cfg, "s", "first", 1, &mut commits, &mut pos).unwrap();
+        assert_eq!(commits.len(), 1);
+
+        // Verify commits[0] has no parent (root commit).
+        let out = git_cmd(td.path())
+            .args(["cat-file", "-p", &commits[0]])
+            .output()
+            .unwrap();
+        let body = String::from_utf8(out.stdout).unwrap();
+        assert!(!body.contains("\nparent "), "expected root commit, got:\n{body}");
+
+        // Restore to session base → empty tree.
+        let report = restore_to(td.path(), &commits, 0).unwrap();
+        // only.txt was in turn 1 but not in empty target tree → orphaned.
+        assert!(
+            report.orphaned_files.iter().any(|p| p.ends_with("only.txt")),
+            "expected only.txt as orphan: {:?}",
             report.orphaned_files
         );
     }
