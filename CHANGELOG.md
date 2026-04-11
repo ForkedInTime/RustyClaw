@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **SDK / Headless mode** — `--headless` flag starts an NDJSON stdio server for embedding in editors, CI/CD, scripts, and custom UIs. Full protocol reference in [`sdk/`](sdk/).
 - **Phase 1 robustness** — AGENTS.md support, XDG Base Directory compliance, context usage % in status bar, always-show-thinking, spinner style toggle, `/reload` hot-reload.
+- **Auto-fix loop** (Phase 2) — After the model edits code, RustyClaw runs
+  project-appropriate lint + test commands and, on failure, injects the
+  output back as a synthetic user turn for up to `maxRetries` rounds
+  (default 3, cap 10). Supports Rust (`cargo clippy` + `cargo test`),
+  Node (`npx eslint` + `npm test`), Python (`ruff check` + `pytest`),
+  and Go (`go vet` + `go test`). Anti-cheat clause in the feedback
+  prompt blocks `#[allow(dead_code)]`-style escapes.
+  Configure via `autoFixLoop` in `settings.json`; `autoRollback` still
+  works as an alias.
+
+### Changed
+
+- The `auto_rollback` module has been renamed to `autofix` and no longer
+  reverts files on failure. On retry-cap, the working tree is left
+  as-is; use `/undo` or `git checkout` to revert manually.
 
 ## [0.1.0] - 2026-04-07
 

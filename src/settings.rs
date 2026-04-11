@@ -241,9 +241,11 @@ pub struct Settings {
     #[serde(rename = "phaseRouter")]
     pub phase_router: Option<PhaseRouterSettings>,
 
-    /// Auto-rollback on test regression — run tests after Write/Edit and revert on failure.
-    #[serde(rename = "autoRollback")]
-    pub auto_rollback: Option<AutoRollbackSettings>,
+    /// Auto-fix loop: run lint + tests after Write/Edit and re-prompt on failure.
+    /// The JSON key `autoFixLoop` is preferred; `autoRollback` remains as a
+    /// silent alias so existing user configs keep working.
+    #[serde(rename = "autoFixLoop", alias = "autoRollback")]
+    pub auto_fix: Option<AutoFixSettings>,
 }
 
 /// Settings for phase-declarative model routing.
@@ -255,14 +257,16 @@ pub struct PhaseRouterSettings {
     pub phases: Option<std::collections::HashMap<String, String>>,
 }
 
-/// Settings for auto-rollback on test regression.
+/// Settings for the auto-fix loop (lint + tests + retry feedback).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct AutoRollbackSettings {
-    /// Enable the auto-rollback hook (default: true when feature is wired).
+pub struct AutoFixSettings {
+    /// Enable the auto-fix loop (default: true).
     pub enabled: Option<bool>,
     /// When to run: `"autonomous"` (default), `"always"`, `"off"`. Parsed case-insensitively.
     pub trigger: Option<String>,
+    /// Lint command override; `null` → auto-detect from project files.
+    pub lint_command: Option<String>,
     /// Test command override; `null` → auto-detect from project files.
     pub test_command: Option<String>,
     /// Max consecutive retries before giving up (reserved for future multi-turn loop).
@@ -387,7 +391,7 @@ impl Settings {
             autonomy:             other.autonomy.or(self.autonomy),
             memory_auto_capture:  other.memory_auto_capture.or(self.memory_auto_capture),
             phase_router:         other.phase_router.or(self.phase_router),
-            auto_rollback:        other.auto_rollback.or(self.auto_rollback),
+            auto_fix:             other.auto_fix.or(self.auto_fix),
             permissions: PermissionsConfig {
                 // Union both lists — project additions stack on top of global
                 allow: {
@@ -418,5 +422,61 @@ impl Settings {
         if project.exists()  { paths.push(project.display().to_string()); }
         if mcp_json.exists() { paths.push(mcp_json.display().to_string()); }
         paths
+    }
+}
+
+#[cfg(test)]
+mod auto_fix_key_tests {
+    use super::*;
+
+    #[test]
+    fn parses_new_autofixloop_key() {
+        let json = r#"{
+            "autoFixLoop": {
+                "enabled": true,
+                "trigger": "always",
+                "lintCommand": "cargo clippy",
+                "testCommand": "cargo test",
+                "maxRetries": 5,
+                "timeoutSecs": 30
+            }
+        }"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        let af = s.auto_fix.expect("auto_fix should deserialise");
+        assert_eq!(af.enabled, Some(true));
+        assert_eq!(af.trigger.as_deref(), Some("always"));
+        assert_eq!(af.lint_command.as_deref(), Some("cargo clippy"));
+        assert_eq!(af.max_retries, Some(5));
+    }
+
+    #[test]
+    fn parses_legacy_autorollback_key() {
+        let json = r#"{
+            "autoRollback": {
+                "enabled": true,
+                "testCommand": "pytest"
+            }
+        }"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        let af = s.auto_fix.expect("legacy autoRollback should deserialise into auto_fix");
+        assert_eq!(af.test_command.as_deref(), Some("pytest"));
+    }
+
+    #[test]
+    fn serialises_with_new_key() {
+        let s = Settings {
+            auto_fix: Some(AutoFixSettings {
+                enabled: Some(true),
+                trigger: None,
+                lint_command: None,
+                test_command: Some("cargo test".to_string()),
+                max_retries: Some(3),
+                timeout_secs: None,
+            }),
+            ..Default::default()
+        };
+        let out = serde_json::to_string(&s).unwrap();
+        assert!(out.contains("autoFixLoop"), "serialised form should use the new key: {out}");
+        assert!(!out.contains("autoRollback"), "serialised form should not use the legacy key: {out}");
     }
 }
