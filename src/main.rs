@@ -14,7 +14,7 @@ mod memory;
 mod permissions;
 mod query_engine;
 mod rag;
-mod rollback;
+mod autofix;
 mod router;
 mod sandbox;
 mod sdk;

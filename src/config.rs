@@ -340,10 +340,10 @@ pub struct Config {
     #[serde(skip)]
     pub phase_router: crate::router::PhaseRouterConfig,
 
-    /// Auto-rollback on test regression: run tests after Write/Edit and
-    /// `git checkout --` the modified files if tests fail.
+    /// Auto-fix loop: after Write/Edit, run lint + tests and re-prompt the
+    /// model with the failure output up to `max_retries` times.
     #[serde(skip)]
-    pub auto_rollback: crate::rollback::RollbackConfig,
+    pub auto_fix: crate::autofix::AutoFixConfig,
 }
 
 impl Default for Config {
@@ -418,7 +418,7 @@ impl Default for Config {
             autonomy: "auto-edit".to_string(),
             memory_auto_capture: false,
             phase_router: crate::router::PhaseRouterConfig::default(),
-            auto_rollback: crate::rollback::RollbackConfig::default(),
+            auto_fix: crate::autofix::AutoFixConfig::default(),
         }
     }
 }
@@ -503,34 +503,34 @@ impl Config {
             }
         }
 
-        // Auto-rollback settings → RollbackConfig
-        if let Some(ar) = &settings.auto_rollback {
-            if let Some(e) = ar.enabled { cfg.auto_rollback.enabled = e; }
+        // Auto-fix settings → AutoFixConfig
+        if let Some(ar) = &settings.auto_fix {
+            if let Some(e) = ar.enabled { cfg.auto_fix.enabled = e; }
             if let Some(t) = &ar.trigger {
-                cfg.auto_rollback.trigger = match t.to_ascii_lowercase().as_str() {
-                    "always" => crate::rollback::RollbackTrigger::Always,
-                    "off"    => crate::rollback::RollbackTrigger::Off,
-                    _        => crate::rollback::RollbackTrigger::Autonomous,
+                cfg.auto_fix.trigger = match t.to_ascii_lowercase().as_str() {
+                    "always" => crate::autofix::AutoFixTrigger::Always,
+                    "off"    => crate::autofix::AutoFixTrigger::Off,
+                    _        => crate::autofix::AutoFixTrigger::Autonomous,
                 };
             }
+            if ar.lint_command.is_some() {
+                cfg.auto_fix.lint_command = ar.lint_command.clone();
+            }
             if ar.test_command.is_some() {
-                cfg.auto_rollback.test_command = ar.test_command.clone();
+                cfg.auto_fix.test_command = ar.test_command.clone();
             }
             if let Some(m) = ar.max_retries {
-                cfg.auto_rollback.max_retries = m;
-                // max_retries is reserved for a future multi-turn retry loop.
-                // The current hook runs tests exactly once per turn, reverts on
-                // failure, and emits a system message. Warn the user so they
-                // don't expect retries to take effect yet.
-                if m != 3 {
+                if (1..=10).contains(&m) {
+                    cfg.auto_fix.max_retries = m;
+                } else {
                     tracing::warn!(
-                        "autoRollback.maxRetries = {m} is reserved — the current \
-                         hook runs tests exactly once per turn and does not retry. \
-                         This field will become active in a future multi-turn loop."
+                        "autoFixLoop.maxRetries = {m} is out of bounds (1..=10); \
+                         clamping to default (3)."
                     );
+                    cfg.auto_fix.max_retries = 3;
                 }
             }
-            if let Some(t) = ar.timeout_secs { cfg.auto_rollback.timeout_secs = t; }
+            if let Some(t) = ar.timeout_secs { cfg.auto_fix.timeout_secs = t; }
         }
 
         // Resolve output style: load name from settings, look up prompt
@@ -1274,5 +1274,68 @@ mod data_dir_tests {
         let legacy_sessions = legacy.join("sessions");
         let got = compute_data_dir(Some(""), legacy.clone(), |p| p == legacy_sessions);
         assert_eq!(got, legacy);
+    }
+}
+
+#[cfg(test)]
+mod auto_fix_clamp_tests {
+    use crate::autofix::{AutoFixConfig, DEFAULT_TEST_TIMEOUT_SECS};
+    use crate::settings::AutoFixSettings;
+
+    // Helper: mirror the clamp logic Config::load applies, so we can test it
+    // without spinning up a full Config::load from disk.
+    fn clamp_max_retries(n: u32) -> u32 {
+        if (1..=10).contains(&n) { n } else { 3 }
+    }
+
+    #[test]
+    fn clamps_zero_to_default() {
+        assert_eq!(clamp_max_retries(0), 3);
+    }
+
+    #[test]
+    fn clamps_too_high_to_default() {
+        assert_eq!(clamp_max_retries(50), 3);
+    }
+
+    #[test]
+    fn keeps_valid_retry_count() {
+        assert_eq!(clamp_max_retries(5), 5);
+    }
+
+    #[test]
+    fn keeps_lower_bound() {
+        assert_eq!(clamp_max_retries(1), 1);
+    }
+
+    #[test]
+    fn keeps_upper_bound() {
+        assert_eq!(clamp_max_retries(10), 10);
+    }
+
+    // Smoke test: AutoFixConfig default has a valid max_retries
+    #[test]
+    fn default_config_has_valid_max_retries() {
+        let cfg = AutoFixConfig::default();
+        assert!((1..=10).contains(&cfg.max_retries));
+        assert_eq!(cfg.timeout_secs, DEFAULT_TEST_TIMEOUT_SECS);
+    }
+
+    // Smoke test: AutoFixSettings round-trips through serde with camelCase
+    #[test]
+    fn settings_camelcase_roundtrip() {
+        let s = AutoFixSettings {
+            enabled: Some(true),
+            trigger: Some("always".to_string()),
+            lint_command: Some("cargo clippy".to_string()),
+            test_command: Some("cargo test".to_string()),
+            max_retries: Some(5),
+            timeout_secs: Some(30),
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("lintCommand"));
+        assert!(json.contains("testCommand"));
+        assert!(json.contains("maxRetries"));
+        assert!(json.contains("timeoutSecs"));
     }
 }

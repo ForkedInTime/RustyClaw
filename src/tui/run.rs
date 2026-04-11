@@ -3613,6 +3613,9 @@ async fn run_api_task(
     const LOOP_THRESHOLD: usize = 3;
 
     let mut iterations: u32 = 0;
+    // Retries consumed by the auto-fix loop within the current user turn.
+    // Reset to 0 on every user prompt; the retry helper enforces the cap.
+    let mut auto_fix_retries: u32 = 0;
     loop {
         iterations += 1;
         if iterations > turn_limit {
@@ -3851,12 +3854,12 @@ async fn run_api_task(
                 ctx.live_ollama_host = Some(config.ollama_host.clone());
                 let mut results: Vec<ContentBlock> = Vec::new();
 
-                // Auto-rollback: accumulate file paths touched by Write/Edit/MultiEdit
-                // in this assistant turn. After the loop we run the detected test
-                // command (e.g. `cargo test`) and `git checkout --` these paths if
-                // tests fail. We only run tests once per turn, even if many edits
-                // happened.
-                let mut rollback_touched: Vec<std::path::PathBuf> = Vec::new();
+                // Auto-fix loop: accumulate file paths touched by Write/Edit/MultiEdit
+                // in this assistant turn. After the tool-use loop we run the detected
+                // lint + test commands and, on failure, feed the output back to the
+                // model as a synthetic user turn via `continue`, up to
+                // `config.auto_fix.max_retries` times.
+                let mut auto_fix_touched: Vec<std::path::PathBuf> = Vec::new();
 
                 // Drain any pending plan_mode changes before processing tools
                 while let Ok(enabled) = plan_rx.try_recv() {
@@ -4030,15 +4033,15 @@ async fn run_api_task(
                         });
 
                         // Track files touched by successful Write/Edit/MultiEdit
-                        // calls for the auto-rollback post-loop check.
+                        // calls for the auto-fix post-loop check.
                         if !output.is_error
                             && matches!(name.as_str(), "Write" | "Edit" | "MultiEdit")
                             && let Some(fp) =
                                 input.get("file_path").and_then(|v| v.as_str())
                         {
                             let path = std::path::PathBuf::from(fp);
-                            if !rollback_touched.contains(&path) {
-                                rollback_touched.push(path);
+                            if !auto_fix_touched.contains(&path) {
+                                auto_fix_touched.push(path);
                             }
                         }
 
@@ -4050,76 +4053,50 @@ async fn run_api_task(
                     }
                 }
 
-                // ── Auto-rollback check ──────────────────────────────────────
-                // Run the detected test command once per turn after all tool
-                // calls complete. On failure, revert touched files via
-                // `git checkout --` and emit a system message. We do NOT
-                // inject a synthetic ToolResult into `results` because doing
-                // so without a matching ToolUse would violate the Anthropic
-                // API contract; the user sees the failure and can re-prompt.
-                // (max_retries is reserved for a future multi-turn loop.)
-                if !rollback_touched.is_empty()
-                    && crate::rollback::should_trigger(
-                        &config.auto_rollback,
-                        &config.autonomy,
-                    )
-                {
-                    let test_cmd = crate::rollback::detect_test_command(
+                // ── Auto-fix check with retry loop ───────────────────────────
+                // After all tool calls complete, run lint + tests. On failure
+                // and under cap, append a synthetic user message with the
+                // failure output and re-enter the agentic loop. On cap reached,
+                // emit a SystemMessage and end the turn preserving partial work.
+                if !auto_fix_touched.is_empty() {
+                    let action = crate::autofix::run_auto_fix_check(
                         &config.cwd,
-                        &config.auto_rollback.test_command,
+                        &config.auto_fix,
+                        &config.autonomy,
+                        auto_fix_retries,
                     );
-                    if let Some(cmd) = test_cmd {
-                        let _ = tx.send(AppEvent::SystemMessage(
-                            format!("[auto-rollback] running tests: {cmd}"),
-                        ));
-                        match crate::rollback::run_tests(
-                            &config.cwd,
-                            &cmd,
-                            config.auto_rollback.timeout_secs,
-                        ) {
-                            crate::rollback::TestResult::Pass => {
-                                let _ = tx.send(AppEvent::SystemMessage(
-                                    "[auto-rollback] tests pass, continuing".into(),
-                                ));
+                    auto_fix_touched.clear();
+
+                    match action {
+                        crate::autofix::AutoFixAction::Continue { status } => {
+                            if let Some(msg) = status {
+                                let _ = tx.send(AppEvent::SystemMessage(msg));
                             }
-                            crate::rollback::TestResult::Fail { stderr } => {
-                                let trimmed: String =
-                                    stderr.chars().take(2000).collect();
-                                match crate::rollback::git_restore_files(
-                                    &config.cwd,
-                                    &rollback_touched,
-                                ) {
-                                    Ok(()) => {
-                                        let _ = tx.send(AppEvent::SystemMessage(
-                                            format!(
-                                                "[auto-rollback] tests failed, {} file(s) reverted:\n{}",
-                                                rollback_touched.len(),
-                                                trimmed,
-                                            ),
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        let _ = tx.send(AppEvent::SystemMessage(
-                                            format!(
-                                                "[auto-rollback] tests failed but restore errored: {e}\n{trimmed}"
-                                            ),
-                                        ));
-                                    }
-                                }
-                            }
-                            crate::rollback::TestResult::Timeout => {
-                                let _ = tx.send(AppEvent::SystemMessage(
-                                    "[auto-rollback] test run timed out after 60s, skipping".into(),
-                                ));
-                            }
-                            crate::rollback::TestResult::NoTestRunner => {
-                                // Silent skip — expected without a test runner.
-                            }
-                            crate::rollback::TestResult::Skipped { reason } => {
-                                let _ = tx.send(AppEvent::SystemMessage(
-                                    format!("[auto-rollback] skipped: {reason}"),
-                                ));
-                            }
+                        }
+                        crate::autofix::AutoFixAction::Retry { feedback, status } => {
+                            let _ = tx.send(AppEvent::SystemMessage(status));
+                            // Append the synthetic user turn so the model sees
+                            // the lint/test failure on the next API round.
+                            messages.push(Message {
+                                role: Role::User,
+                                content: vec![ContentBlock::Text { text: feedback }],
+                            });
+                            auto_fix_retries += 1;
+                            // Re-enter the outer loop to call the model again
+                            // with the injected feedback in history.
+                            continue;
+                        }
+                        crate::autofix::AutoFixAction::GiveUp { status } => {
+                            let _ = tx.send(AppEvent::SystemMessage(status));
+                            let _ = tx.send(AppEvent::Done {
+                                tokens_in: response.usage.input_tokens,
+                                tokens_out: response.usage.output_tokens,
+                                cache_read: response.usage.cache_read_input_tokens,
+                                cache_write: response.usage.cache_creation_input_tokens,
+                                messages: messages.clone(),
+                                model_used: config.model.clone(),
+                            });
+                            return;
                         }
                     }
                 }
