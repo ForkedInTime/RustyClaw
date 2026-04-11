@@ -103,7 +103,7 @@ fn git_output(cmd: &mut Command) -> anyhow::Result<String> {
         anyhow::bail!("git command failed: {stderr}");
     }
     let s = String::from_utf8(out.stdout)?;
-    Ok(s.trim_end_matches('\n').to_string())
+    Ok(s.trim().to_string())
 }
 
 /// Resolve HEAD to a SHA, returning None if HEAD is unborn (no commits yet).
@@ -121,9 +121,9 @@ fn resolve_head(cwd: &Path) -> Option<String> {
     if s.is_empty() { None } else { Some(s) }
 }
 
-/// Look up the tree SHA of a given commit SHA. Returns an empty string if the
-/// lookup fails (treated as "tree-not-found" by the empty-turn check).
-fn tree_of_commit(cwd: &Path, commit: &str) -> String {
+/// Look up the tree SHA of a given commit SHA. Returns `None` if the lookup
+/// fails, so the call site can distinguish "not found" from a valid tree SHA.
+fn tree_of_commit(cwd: &Path, commit: &str) -> Option<String> {
     git_cmd(cwd)
         .args(["rev-parse", &format!("{commit}^{{tree}}")])
         .stdout(Stdio::piped())
@@ -133,7 +133,6 @@ fn tree_of_commit(cwd: &Path, commit: &str) -> String {
         .filter(|o| o.status.success())
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().to_string())
-        .unwrap_or_default()
 }
 
 /// Count the number of file entries in a tree via `git ls-tree -r --name-only <tree>`.
@@ -163,6 +162,8 @@ fn subject_from_prompt(prompt: &str) -> String {
     }
 }
 
+/// Assumes a single writer per `session_id`; concurrent snapshots with the same session id race on the shadow ref and are not supported.
+///
 /// Take a full-tree snapshot of `cwd` as a commit on the session's shadow ref.
 pub fn snapshot_turn(
     cwd: &Path,
@@ -197,12 +198,14 @@ pub fn snapshot_turn(
         resolve_head(cwd)
     };
     if let Some(p) = &parent {
-        let tree = tree_of_commit(cwd, p);
-        if !tree.is_empty() {
-            git_cmd(cwd)
+        if let Some(tree) = tree_of_commit(cwd, p) {
+            let s = git_cmd(cwd)
                 .env("GIT_INDEX_FILE", &temp_index)
                 .args(["read-tree", &tree])
                 .status()?;
+            if !s.success() {
+                anyhow::bail!("git read-tree {tree} failed");
+            }
         }
     }
 
@@ -224,8 +227,10 @@ pub fn snapshot_turn(
 
     // 5. Empty-turn optimization: compare against parent tree.
     if let Some(p) = &parent {
-        if tree_of_commit(cwd, p) == tree_sha {
-            return Ok(SnapshotOutcome::NoChanges);
+        if let Some(parent_tree) = tree_of_commit(cwd, p) {
+            if parent_tree == tree_sha {
+                return Ok(SnapshotOutcome::NoChanges);
+            }
         }
     }
 
@@ -523,6 +528,46 @@ mod snapshot_tests {
         let tree = String::from_utf8(out.stdout).unwrap();
         assert!(!tree.contains("secret.txt"), "secret.txt leaked into tree:\n{tree}");
         assert!(tree.contains("ok.txt"));
+    }
+
+    #[test]
+    fn snapshot_works_on_unborn_head() {
+        // Fresh repo — no commits, HEAD is unborn.
+        let td = init_test_repo();
+        write_file(td.path(), "a.txt", "hello\n");
+
+        let cfg = AutoCommitConfig::default();
+        let mut commits = Vec::new();
+        let mut pos = 0usize;
+        let outcome = snapshot_turn(
+            td.path(),
+            &cfg,
+            "s-new",
+            "first turn",
+            1,
+            &mut commits,
+            &mut pos,
+        )
+        .unwrap();
+
+        let sha = match outcome {
+            SnapshotOutcome::Committed { sha, files } => {
+                assert_eq!(files, 1, "only a.txt should be in the tree");
+                sha
+            }
+            other => panic!("expected Committed, got {other:?}"),
+        };
+
+        // The commit must have no parent line.
+        let out = git_cmd(td.path())
+            .args(["cat-file", "-p", &sha])
+            .output()
+            .unwrap();
+        let info = String::from_utf8(out.stdout).unwrap();
+        assert!(
+            !info.contains("parent "),
+            "unborn-HEAD commit should have no parent, got:\n{info}"
+        );
     }
 
     #[test]
