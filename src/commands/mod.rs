@@ -25,7 +25,7 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "security-review", "session", "share", "skills", "stats", "status", "statusline", "summary",
     "tasks", "teleport", "terminal-setup", "theme", "thinkback", "ultraplan", "upgrade",
     "rag", "remember", "router", "usage", "version", "vim", "voice", "autofix-pr", "issue",
-    "color", "forget", "powerup",
+    "color", "forget", "powerup", "undo", "redo", "autocommit",
 ];
 
 // ── Model catalogue ───────────────────────────────────────────────────────────
@@ -206,6 +206,14 @@ pub enum CommandAction {
     MemoryAutoToggle(bool),
     /// Show the current memory context (top 10 entries)
     MemoryInject,
+    /// `/undo [N]` — restore working tree to an earlier auto-commit.
+    /// `n == None` opens a picker; `n == Some(k)` rewinds k turns.
+    Undo { n: Option<u32> },
+    /// `/redo [N]` — restore working tree to a later auto-commit in the redo stack.
+    /// `n == None` opens a picker; `n == Some(k)` advances k turns.
+    Redo { n: Option<u32> },
+    /// `/autocommit [status]` — print auto-commit state to the chat. v1 only supports `status`.
+    AutoCommitStatus,
     /// Command not recognised — show error
     Unknown(String),
 }
@@ -271,7 +279,10 @@ pub fn dispatch(input: &str, ctx: &CommandContext) -> CommandAction {
         "review"         => cmd_review(args),
         "tasks"          => cmd_tasks(ctx),
         "copy"           => cmd_copy(ctx),
-        "rewind" | "undo" => CommandAction::Rewind(args.parse::<usize>().unwrap_or(1)),
+        "rewind"       => CommandAction::Rewind(args.parse::<usize>().unwrap_or(1)),
+        "undo"         => cmd_undo(args),
+        "redo"         => cmd_redo(args),
+        "autocommit"   => cmd_autocommit(args),
         "branch"         => cmd_branch(ctx),
         "summary"        => CommandAction::SendPrompt(
             "Please give a brief summary of our conversation so far — what we've discussed, \
@@ -1967,14 +1978,16 @@ pub const HELP_CATEGORIES: &[(&str, &str, &[HelpCommand])] = &[
         ("/advisor",      "ask Claude for strategic advice"),
     ]),
     ("Session", "Save, resume, manage sessions", &[
-        ("/session",  "interactive session picker (↑↓ Enter d)"),
-        ("/resume",   "resume a saved session"),
-        ("/rename",   "rename current session"),
-        ("/export",   "export session to markdown"),
-        ("/rewind",   "undo last n exchanges (default 1)"),
-        ("/undo",     "alias for /rewind"),
-        ("/summary",  "summarize conversation so far"),
-        ("/copy",     "copy last response to clipboard"),
+        ("/session",    "interactive session picker (↑↓ Enter d)"),
+        ("/resume",     "resume a saved session"),
+        ("/rename",     "rename current session"),
+        ("/export",     "export session to markdown"),
+        ("/rewind",     "undo last n exchanges (default 1)"),
+        ("/summary",    "summarize conversation so far"),
+        ("/copy",       "copy last response to clipboard"),
+        ("/undo",       "Rewind working tree to an earlier auto-commit turn ([N] or picker)"),
+        ("/redo",       "Advance working tree to a later auto-commit turn ([N] or picker)"),
+        ("/autocommit", "Show auto-commit status (enabled, session ID, turns recorded)"),
     ]),
     ("Code & git", "Commits, PRs, reviews, diffs", &[
         ("/diff",            "git diff"),
@@ -3198,6 +3211,21 @@ fn cmd_autofix_pr(args: &str) -> CommandAction {
          3. Note what was changed\n\
          After all fixes, run any relevant tests and commit with a summary message."
     ))
+}
+
+fn cmd_autocommit(_args: &str) -> CommandAction {
+    // v1 only supports `status`. Any arg (or none) shows status.
+    CommandAction::AutoCommitStatus
+}
+
+fn cmd_redo(args: &str) -> CommandAction {
+    let n = args.trim().parse::<u32>().ok().filter(|n| *n > 0);
+    CommandAction::Redo { n }
+}
+
+fn cmd_undo(args: &str) -> CommandAction {
+    let n = args.trim().parse::<u32>().ok().filter(|n| *n > 0);
+    CommandAction::Undo { n }
 }
 
 fn cmd_issue(args: &str) -> CommandAction {

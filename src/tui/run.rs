@@ -3063,6 +3063,12 @@ async fn handle_key(
                         });
                         app.entries.push(ChatEntry::system(format!("Discarding agent [{id}]...")));
                     }
+                    CommandAction::Undo { .. } | CommandAction::Redo { .. } | CommandAction::AutoCommitStatus => {
+                        // Task 9 wires these up. For now, inform the user.
+                        app.entries.push(ChatEntry::system(
+                            "auto-commit commands not yet wired (Task 9)".to_string()
+                        ));
+                    }
                     CommandAction::Unknown(name) => {
                         // Try skill expansion before giving up
                         if let Some((skill_name, args)) = parse_skill_invocation(&input) {
