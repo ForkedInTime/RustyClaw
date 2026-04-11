@@ -137,6 +137,12 @@ impl Session {
         self.meta.save().await
     }
 
+    /// Persist the current `SessionMeta` to disk. Used by the auto-commit loop
+    /// to checkpoint updated `auto_commits` / `undo_position` after each turn.
+    pub async fn save_meta(&self) -> anyhow::Result<()> {
+        self.meta.save().await
+    }
+
     /// Load all messages from a session file.
     pub async fn load_messages(id: &str) -> Result<Vec<Message>> {
         let path = Self::jsonl_path(id);
