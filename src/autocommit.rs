@@ -11,6 +11,7 @@
 //! with `/undo` and `/redo`.
 
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 pub const DEFAULT_KEEP_SESSIONS: u32 = 10;
 pub const DEFAULT_MESSAGE_PREFIX: &str = "rustyclaw";
@@ -84,6 +85,194 @@ pub fn is_git_repo(cwd: &Path) -> bool {
         .unwrap_or(false)
 }
 
+// ── Snapshot pipeline ─────────────────────────────────────────────────────────
+
+fn shadow_ref(session_id: &str) -> String {
+    format!("{SHADOW_REF_PREFIX}{session_id}")
+}
+
+/// Run a git command, capturing stdout; return the trimmed stdout as a String
+/// on success or an error carrying stderr on failure.
+fn git_output(cmd: &mut Command) -> anyhow::Result<String> {
+    let out = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!("git command failed: {stderr}");
+    }
+    let s = String::from_utf8(out.stdout)?;
+    Ok(s.trim_end_matches('\n').to_string())
+}
+
+/// Resolve HEAD to a SHA, returning None if HEAD is unborn (no commits yet).
+fn resolve_head(cwd: &Path) -> Option<String> {
+    let out = git_cmd(cwd)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
+}
+
+/// Look up the tree SHA of a given commit SHA. Returns an empty string if the
+/// lookup fails (treated as "tree-not-found" by the empty-turn check).
+fn tree_of_commit(cwd: &Path, commit: &str) -> String {
+    git_cmd(cwd)
+        .args(["rev-parse", &format!("{commit}^{{tree}}")])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
+}
+
+/// Count the number of file entries in a tree via `git ls-tree -r --name-only <tree>`.
+fn count_tree_files(cwd: &Path, tree: &str) -> u32 {
+    let out = git_cmd(cwd)
+        .args(["ls-tree", "-r", "--name-only", tree])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output();
+    match out {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .filter(|l| !l.is_empty())
+            .count() as u32,
+        _ => 0,
+    }
+}
+
+/// Trim a user prompt to a 60-char single-line subject fragment.
+fn subject_from_prompt(prompt: &str) -> String {
+    let first_line = prompt.lines().next().unwrap_or("").trim();
+    if first_line.chars().count() <= 60 {
+        first_line.to_string()
+    } else {
+        let truncated: String = first_line.chars().take(57).collect();
+        format!("{truncated}...")
+    }
+}
+
+/// Take a full-tree snapshot of `cwd` as a commit on the session's shadow ref.
+pub fn snapshot_turn(
+    cwd: &Path,
+    config: &AutoCommitConfig,
+    session_id: &str,
+    user_prompt: &str,
+    turn_index: u32,
+    auto_commits: &mut Vec<String>,
+    undo_position: &mut usize,
+) -> anyhow::Result<SnapshotOutcome> {
+    if !config.enabled {
+        return Ok(SnapshotOutcome::Disabled {
+            reason: "auto-commit disabled in settings".to_string(),
+        });
+    }
+    if !is_git_repo(cwd) {
+        return Ok(SnapshotOutcome::Disabled {
+            reason: "not a git repo".to_string(),
+        });
+    }
+
+    // 1. Temp index file, isolated via GIT_INDEX_FILE.
+    let td = tempfile::TempDir::new()?;
+    let temp_index = td.path().join("turn.index");
+
+    // 2. Seed the temp index from the parent's tree (if we have one) so `add -A`
+    //    only records diffs relative to the parent, which makes empty-turn
+    //    detection accurate even when the user's real index has other staging.
+    let parent = if *undo_position > 0 {
+        auto_commits.get(*undo_position - 1).cloned()
+    } else {
+        resolve_head(cwd)
+    };
+    if let Some(p) = &parent {
+        let tree = tree_of_commit(cwd, p);
+        if !tree.is_empty() {
+            git_cmd(cwd)
+                .env("GIT_INDEX_FILE", &temp_index)
+                .args(["read-tree", &tree])
+                .status()?;
+        }
+    }
+
+    // 3. Stage everything under cwd into the temp index.
+    let add_status = git_cmd(cwd)
+        .env("GIT_INDEX_FILE", &temp_index)
+        .args(["add", "-A"])
+        .status()?;
+    if !add_status.success() {
+        anyhow::bail!("git add -A failed");
+    }
+
+    // 4. Write the tree.
+    let tree_sha = git_output(
+        git_cmd(cwd)
+            .env("GIT_INDEX_FILE", &temp_index)
+            .args(["write-tree"]),
+    )?;
+
+    // 5. Empty-turn optimization: compare against parent tree.
+    if let Some(p) = &parent {
+        if tree_of_commit(cwd, p) == tree_sha {
+            return Ok(SnapshotOutcome::NoChanges);
+        }
+    }
+
+    // 6. Build the commit.
+    let subject = format!(
+        "{} turn {}: {}",
+        config.message_prefix,
+        turn_index,
+        subject_from_prompt(user_prompt),
+    );
+    let files = count_tree_files(cwd, &tree_sha);
+    let body = format!(
+        "\nRustyClaw-Session: {session_id}\nRustyClaw-Turn: {turn_index}\nRustyClaw-Files: {files}\n"
+    );
+    let full_msg = format!("{subject}\n{body}");
+
+    let mut commit_cmd = git_cmd(cwd);
+    commit_cmd
+        .env("GIT_AUTHOR_NAME", "rustyclaw")
+        .env("GIT_AUTHOR_EMAIL", "noreply@rustyclaw.local")
+        .env("GIT_COMMITTER_NAME", "rustyclaw")
+        .env("GIT_COMMITTER_EMAIL", "noreply@rustyclaw.local")
+        .args(["commit-tree", &tree_sha, "-m", &full_msg]);
+    if let Some(p) = &parent {
+        commit_cmd.args(["-p", p]);
+    }
+    let commit_sha = git_output(&mut commit_cmd)?;
+
+    // 7. Update the shadow ref.
+    let ref_name = shadow_ref(session_id);
+    let update_status = git_cmd(cwd)
+        .args(["update-ref", &ref_name, &commit_sha])
+        .status()?;
+    if !update_status.success() {
+        anyhow::bail!("git update-ref {ref_name} failed");
+    }
+
+    // 8. Discard redo tail if user was in an undone state, then append.
+    if *undo_position < auto_commits.len() {
+        auto_commits.truncate(*undo_position);
+    }
+    auto_commits.push(commit_sha.clone());
+    *undo_position = auto_commits.len();
+
+    Ok(SnapshotOutcome::Committed { sha: commit_sha, files })
+}
+
 #[cfg(test)]
 mod git_detection_tests {
     use super::*;
@@ -133,5 +322,231 @@ mod git_detection_tests {
     fn rejects_non_git_dir() {
         let td = TempDir::new().unwrap();
         assert!(!is_git_repo(td.path()));
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+    use super::git_detection_tests::init_test_repo;
+    use std::fs;
+
+    fn write_file(repo: &Path, rel: &str, body: &str) {
+        let p = repo.join(rel);
+        if let Some(parent) = p.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(p, body).unwrap();
+    }
+
+    fn initial_commit(repo: &Path) {
+        write_file(repo, "README.md", "base\n");
+        let s = git_cmd(repo).args(["add", "README.md"]).status().unwrap();
+        assert!(s.success());
+        let s = git_cmd(repo)
+            .args(["commit", "-q", "-m", "base"])
+            .status()
+            .unwrap();
+        assert!(s.success());
+    }
+
+    #[test]
+    fn snapshot_creates_commit_with_head_parent() {
+        let td = init_test_repo();
+        initial_commit(td.path());
+        write_file(td.path(), "src/lib.rs", "fn main() {}\n");
+
+        let cfg = AutoCommitConfig::default();
+        let mut commits = Vec::new();
+        let mut pos = 0usize;
+        let outcome = snapshot_turn(
+            td.path(),
+            &cfg,
+            "test-session-1",
+            "add src/lib.rs",
+            1,
+            &mut commits,
+            &mut pos,
+        )
+        .unwrap();
+
+        match outcome {
+            SnapshotOutcome::Committed { sha, files } => {
+                assert_eq!(sha.len(), 40, "sha should be full 40-char hex");
+                assert_eq!(files, 2, "README.md + src/lib.rs should both be in the tree");
+                assert_eq!(commits, vec![sha]);
+                assert_eq!(pos, 1);
+            }
+            other => panic!("expected Committed, got {other:?}"),
+        }
+
+        // Shadow ref points at the new commit.
+        let out = git_cmd(td.path())
+            .args(["rev-parse", "refs/rustyclaw/sessions/test-session-1"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let ref_sha = String::from_utf8(out.stdout).unwrap().trim().to_string();
+        assert_eq!(ref_sha, commits[0]);
+    }
+
+    #[test]
+    fn snapshot_chains_parents_across_turns() {
+        let td = init_test_repo();
+        initial_commit(td.path());
+
+        let cfg = AutoCommitConfig::default();
+        let mut commits = Vec::new();
+        let mut pos = 0usize;
+
+        write_file(td.path(), "a.txt", "1\n");
+        snapshot_turn(td.path(), &cfg, "s1", "add a", 1, &mut commits, &mut pos).unwrap();
+
+        write_file(td.path(), "b.txt", "2\n");
+        snapshot_turn(td.path(), &cfg, "s1", "add b", 2, &mut commits, &mut pos).unwrap();
+
+        write_file(td.path(), "c.txt", "3\n");
+        snapshot_turn(td.path(), &cfg, "s1", "add c", 3, &mut commits, &mut pos).unwrap();
+
+        assert_eq!(commits.len(), 3);
+        assert_eq!(pos, 3);
+        // Each commit's parent is the previous.
+        for (i, sha) in commits.iter().enumerate().skip(1) {
+            let out = git_cmd(td.path())
+                .args(["rev-parse", &format!("{sha}^")])
+                .output()
+                .unwrap();
+            let parent = String::from_utf8(out.stdout).unwrap().trim().to_string();
+            assert_eq!(parent, commits[i - 1], "chain broken at index {i}");
+        }
+    }
+
+    #[test]
+    fn snapshot_no_changes_is_noop() {
+        let td = init_test_repo();
+        initial_commit(td.path());
+        let cfg = AutoCommitConfig::default();
+        let mut commits = Vec::new();
+        let mut pos = 0usize;
+
+        let outcome = snapshot_turn(
+            td.path(),
+            &cfg,
+            "s-empty",
+            "pure read turn",
+            1,
+            &mut commits,
+            &mut pos,
+        )
+        .unwrap();
+        assert_eq!(outcome, SnapshotOutcome::NoChanges);
+        assert!(commits.is_empty());
+        assert_eq!(pos, 0);
+    }
+
+    #[test]
+    fn snapshot_disabled_when_config_disabled() {
+        let td = init_test_repo();
+        initial_commit(td.path());
+        let cfg = AutoCommitConfig {
+            enabled: false,
+            ..AutoCommitConfig::default()
+        };
+        let mut commits = Vec::new();
+        let mut pos = 0usize;
+        let outcome = snapshot_turn(
+            td.path(),
+            &cfg,
+            "s",
+            "msg",
+            1,
+            &mut commits,
+            &mut pos,
+        )
+        .unwrap();
+        match outcome {
+            SnapshotOutcome::Disabled { reason } => {
+                assert!(reason.contains("disabled"), "reason: {reason}");
+            }
+            other => panic!("expected Disabled, got {other:?}"),
+        }
+        assert!(commits.is_empty());
+    }
+
+    #[test]
+    fn snapshot_disabled_when_not_git_repo() {
+        let td = tempfile::TempDir::new().unwrap();
+        let cfg = AutoCommitConfig::default();
+        let mut commits = Vec::new();
+        let mut pos = 0usize;
+        let outcome = snapshot_turn(
+            td.path(),
+            &cfg,
+            "s",
+            "msg",
+            1,
+            &mut commits,
+            &mut pos,
+        )
+        .unwrap();
+        assert!(matches!(outcome, SnapshotOutcome::Disabled { .. }));
+    }
+
+    #[test]
+    fn snapshot_respects_gitignore() {
+        let td = init_test_repo();
+        initial_commit(td.path());
+        write_file(td.path(), ".gitignore", "secret.txt\n");
+        write_file(td.path(), "secret.txt", "password\n");
+        write_file(td.path(), "ok.txt", "safe\n");
+
+        let cfg = AutoCommitConfig::default();
+        let mut commits = Vec::new();
+        let mut pos = 0usize;
+        snapshot_turn(
+            td.path(),
+            &cfg,
+            "s",
+            "ignored",
+            1,
+            &mut commits,
+            &mut pos,
+        )
+        .unwrap();
+        assert_eq!(commits.len(), 1);
+
+        // ls-tree the commit and confirm secret.txt is NOT present.
+        let out = git_cmd(td.path())
+            .args(["ls-tree", "-r", "--name-only", &commits[0]])
+            .output()
+            .unwrap();
+        let tree = String::from_utf8(out.stdout).unwrap();
+        assert!(!tree.contains("secret.txt"), "secret.txt leaked into tree:\n{tree}");
+        assert!(tree.contains("ok.txt"));
+    }
+
+    #[test]
+    fn snapshot_discards_redo_tail_on_new_work() {
+        let td = init_test_repo();
+        initial_commit(td.path());
+        let cfg = AutoCommitConfig::default();
+        let mut commits = Vec::new();
+        let mut pos = 0usize;
+
+        write_file(td.path(), "a.txt", "1\n");
+        snapshot_turn(td.path(), &cfg, "s", "a", 1, &mut commits, &mut pos).unwrap();
+        write_file(td.path(), "b.txt", "2\n");
+        snapshot_turn(td.path(), &cfg, "s", "b", 2, &mut commits, &mut pos).unwrap();
+        write_file(td.path(), "c.txt", "3\n");
+        snapshot_turn(td.path(), &cfg, "s", "c", 3, &mut commits, &mut pos).unwrap();
+        assert_eq!(commits.len(), 3);
+        assert_eq!(pos, 3);
+
+        // Simulate /undo 2 → pos = 1, then new work — expect redo tail discarded.
+        pos = 1;
+        write_file(td.path(), "d.txt", "4\n");
+        snapshot_turn(td.path(), &cfg, "s", "d", 2, &mut commits, &mut pos).unwrap();
+        assert_eq!(commits.len(), 2, "turns 2 and 3 should be dropped, new turn 2 appended");
+        assert_eq!(pos, 2);
     }
 }
