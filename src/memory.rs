@@ -6,7 +6,6 @@
 /// the top-N items for injection into the system prompt.
 ///
 /// Database location: `<cwd>/.claude/rag.db` (shared with RAG).
-
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::fmt;
@@ -30,21 +29,21 @@ pub enum Category {
 impl Category {
     pub fn as_str(&self) -> &str {
         match self {
-            Category::Decision   => "decision",
+            Category::Decision => "decision",
             Category::Preference => "preference",
-            Category::Pattern    => "pattern",
-            Category::Context    => "context",
-            Category::Custom(s)  => s.as_str(),
+            Category::Pattern => "pattern",
+            Category::Context => "context",
+            Category::Custom(s) => s.as_str(),
         }
     }
 
     pub fn from_str(s: &str) -> Self {
         match s {
-            "decision"   => Category::Decision,
+            "decision" => Category::Decision,
             "preference" => Category::Preference,
-            "pattern"    => Category::Pattern,
-            "context"    => Category::Context,
-            other        => Category::Custom(other.to_string()),
+            "pattern" => Category::Pattern,
+            "context" => Category::Context,
+            other => Category::Custom(other.to_string()),
         }
     }
 }
@@ -61,11 +60,11 @@ impl fmt::Display for Category {
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // fields consumed by future memory-UI overlay work
 pub struct Memory {
-    pub id:         i64,
-    pub key:        String,
-    pub value:      String,
-    pub category:   Category,
-    pub source:     String,
+    pub id: i64,
+    pub key: String,
+    pub value: String,
+    pub category: Category,
+    pub source: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -98,11 +97,12 @@ impl MemoryStore {
         // Check whether this key exists so we can choose INSERT vs UPDATE.
         // Using OR REPLACE would reset the id and re-fire the INSERT trigger,
         // breaking the FTS delete trigger. Manual upsert is safer.
-        let exists: bool = self.conn.query_row(
-            "SELECT COUNT(*) FROM memory WHERE key = ?1",
-            [key],
-            |r| r.get::<_, i64>(0),
-        )? > 0;
+        let exists: bool =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM memory WHERE key = ?1", [key], |r| {
+                    r.get::<_, i64>(0)
+                })?
+                > 0;
 
         if exists {
             self.conn.execute(
@@ -130,12 +130,14 @@ impl MemoryStore {
         // FTS search for the top 10 nearest candidates.
         let candidates = self.search(text, 10)?;
 
-        let text_words: std::collections::HashSet<&str> =
-            text.split_whitespace().collect();
+        let text_words: std::collections::HashSet<&str> = text.split_whitespace().collect();
 
         for candidate in &candidates {
             if jaccard_overlap(&text_words, &candidate.value) > 0.8 {
-                debug!("add_auto: skipping near-duplicate (candidate key={})", candidate.key);
+                debug!(
+                    "add_auto: skipping near-duplicate (candidate key={})",
+                    candidate.key
+                );
                 return Ok(false);
             }
         }
@@ -207,11 +209,9 @@ impl MemoryStore {
     /// Total memory count.
     #[allow(dead_code)] // exposed for tests and future /memory stats command
     pub fn count(&self) -> Result<i64> {
-        let n: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM memory",
-            [],
-            |r| r.get(0),
-        )?;
+        let n: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM memory", [], |r| r.get(0))?;
         Ok(n)
     }
 
@@ -305,16 +305,41 @@ pub fn auto_categorize(text: &str) -> Category {
     let lower = text.to_lowercase();
 
     let decision_signals = [
-        "decided", "decision", "chose", "chosen", "let's use", "we'll use",
-        "going to use", "will use", "selected", "opted", "adopted",
+        "decided",
+        "decision",
+        "chose",
+        "chosen",
+        "let's use",
+        "we'll use",
+        "going to use",
+        "will use",
+        "selected",
+        "opted",
+        "adopted",
     ];
     let preference_signals = [
-        "prefer", "prefers", "preferred", "likes", "always", "never",
-        "want", "wants", "favor", "favors",
+        "prefer",
+        "prefers",
+        "preferred",
+        "likes",
+        "always",
+        "never",
+        "want",
+        "wants",
+        "favor",
+        "favors",
     ];
     let pattern_signals = [
-        "typically", "usually", "pattern", "convention", "habit",
-        "tends to", "tends", "often", "regularly", "approach",
+        "typically",
+        "usually",
+        "pattern",
+        "convention",
+        "habit",
+        "tends to",
+        "tends",
+        "often",
+        "regularly",
+        "approach",
     ];
 
     if decision_signals.iter().any(|s| lower.contains(s)) {
@@ -333,11 +358,11 @@ pub fn auto_categorize(text: &str) -> Category {
 fn row_to_memory(row: &rusqlite::Row<'_>) -> rusqlite::Result<Memory> {
     let cat_str: String = row.get(3)?;
     Ok(Memory {
-        id:         row.get(0)?,
-        key:        row.get(1)?,
-        value:      row.get(2)?,
-        category:   Category::from_str(&cat_str),
-        source:     row.get(4)?,
+        id: row.get(0)?,
+        key: row.get(1)?,
+        value: row.get(2)?,
+        category: Category::from_str(&cat_str),
+        source: row.get(4)?,
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
     })
@@ -374,17 +399,18 @@ fn sanitize_key(key: &str) -> String {
 
 /// Jaccard overlap between `a_words` (pre-built set) and the whitespace-split
 /// words of `b`. Returns 0.0 when the union is empty.
-fn jaccard_overlap(
-    a_words: &std::collections::HashSet<&str>,
-    b: &str,
-) -> f64 {
+fn jaccard_overlap(a_words: &std::collections::HashSet<&str>, b: &str) -> f64 {
     let b_words: std::collections::HashSet<&str> = b.split_whitespace().collect();
     if b_words.is_empty() && a_words.is_empty() {
         return 0.0;
     }
     let intersection = a_words.intersection(&b_words).count();
     let union = a_words.union(&b_words).count();
-    if union == 0 { 0.0 } else { intersection as f64 / union as f64 }
+    if union == 0 {
+        0.0
+    } else {
+        intersection as f64 / union as f64
+    }
 }
 
 /// Simple FNV-1a 32-bit hash — no external deps, deterministic.

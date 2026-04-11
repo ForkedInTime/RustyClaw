@@ -73,7 +73,8 @@ pub fn parse_deep_link(uri: &str) -> Option<DeepLinkParams> {
     let query = q?;
 
     // Security: reject control characters
-    if contains_control_chars(&query) || cwd.as_deref().map(contains_control_chars).unwrap_or(false) {
+    if contains_control_chars(&query) || cwd.as_deref().map(contains_control_chars).unwrap_or(false)
+    {
         return None;
     }
 
@@ -82,15 +83,17 @@ pub fn parse_deep_link(uri: &str) -> Option<DeepLinkParams> {
         return None;
     }
     if let Some(ref c) = cwd
-        && c.len() > MAX_CWD_LEN {
-            return None;
-        }
+        && c.len() > MAX_CWD_LEN
+    {
+        return None;
+    }
 
     Some(DeepLinkParams { query, cwd, repo })
 }
 
 fn contains_control_chars(s: &str) -> bool {
-    s.chars().any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
+    s.chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
 }
 
 fn percent_decode(s: &str) -> String {
@@ -172,7 +175,11 @@ pub fn register_protocol() -> anyhow::Result<()> {
 
         // Register with xdg-mime
         let status = std::process::Command::new("xdg-mime")
-            .args(["default", &format!("{desktop_name}.desktop"), &format!("x-scheme-handler/{scheme}")])
+            .args([
+                "default",
+                &format!("{desktop_name}.desktop"),
+                &format!("x-scheme-handler/{scheme}"),
+            ])
             .status();
 
         match status {

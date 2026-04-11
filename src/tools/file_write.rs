@@ -1,6 +1,5 @@
 /// FileWriteTool — port of tools/FileWriteTool/FileWriteTool.ts
-
-use super::{async_trait, snapshot_file, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait, snapshot_file};
 use crate::tools::file_read::resolve_path;
 use anyhow::Result;
 use serde::Deserialize;
@@ -48,7 +47,9 @@ impl Tool for FileWriteTool {
         let input: FileWriteInput = serde_json::from_value(input)?;
         let path = resolve_path(&input.file_path, &ctx.cwd);
 
-        if let Some(err) = super::check_protected_path(&path) { return Ok(err); }
+        if let Some(err) = super::check_protected_path(&path) {
+            return Ok(err);
+        }
         if let Some(err) = super::check_sensitive_path(&path, super::SensitiveOp::Write) {
             return Ok(err);
         }
@@ -63,9 +64,9 @@ impl Tool for FileWriteTool {
             })?;
         }
 
-        fs::write(&path, &input.content).await.map_err(|e| {
-            anyhow::anyhow!("Failed to write {}: {}", path.display(), e)
-        })?;
+        fs::write(&path, &input.content)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", path.display(), e))?;
 
         Ok(ToolOutput::success(format!(
             "File written successfully: {}",

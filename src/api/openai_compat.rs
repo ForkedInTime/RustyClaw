@@ -19,16 +19,15 @@
 ///   GROQ_API_KEY, OPENROUTER_API_KEY, DEEPSEEK_API_KEY, etc.
 ///   OPENAI_API_KEY is the fallback for any provider without a specific key.
 ///   OPENAI_BASE_URL overrides the base URL for the generic `openai-compat:` prefix.
-
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 use tracing::{debug, warn};
 
@@ -398,9 +397,7 @@ pub(crate) fn system_to_string(system: &SystemContent) -> String {
 pub(crate) fn patch_system_no_tools(system: &str) -> String {
     let patched: String = system
         .lines()
-        .filter(|l| {
-            !l.contains("You have access to tools") && !l.contains("Use tools to actually")
-        })
+        .filter(|l| !l.contains("You have access to tools") && !l.contains("Use tools to actually"))
         .collect::<Vec<_>>()
         .join("\n");
     format!("{patched}\n- Text-only mode: answer from knowledge, no file/command access.")
@@ -448,16 +445,18 @@ pub(crate) async fn parse_oai_stream(
 
             // Text delta
             if let Some(text) = delta.content
-                && !text.is_empty() {
-                    on_text(&text);
-                    text_buf.push_str(&text);
-                }
+                && !text.is_empty()
+            {
+                on_text(&text);
+                text_buf.push_str(&text);
+            }
 
             // DeepSeek R1 / QwQ reasoning content → Thinking block
             if let Some(reasoning) = delta.reasoning_content
-                && !reasoning.is_empty() {
-                    thinking_buf.push_str(&reasoning);
-                }
+                && !reasoning.is_empty()
+            {
+                thinking_buf.push_str(&reasoning);
+            }
 
             // Tool call deltas
             if let Some(tc_deltas) = delta.tool_calls {
@@ -496,14 +495,15 @@ pub(crate) async fn parse_oai_stream(
         result.content.push(ContentBlock::Text { text: text_buf });
     }
 
-    let mut tool_entries: Vec<(usize, (String, String, String))> =
-        tool_bufs.into_iter().collect();
+    let mut tool_entries: Vec<(usize, (String, String, String))> = tool_bufs.into_iter().collect();
     tool_entries.sort_by_key(|(idx, _)| *idx);
 
     for (_, (id, name, args)) in tool_entries {
         let input =
             serde_json::from_str(&args).unwrap_or(serde_json::Value::Object(Default::default()));
-        result.content.push(ContentBlock::ToolUse { id, name, input });
+        result
+            .content
+            .push(ContentBlock::ToolUse { id, name, input });
     }
 
     // ── Map finish_reason → StopReason ───────────────────────────────────────
@@ -629,7 +629,10 @@ impl OpenAiCompatClient {
             .unwrap_or(("", &request.model));
         let model = bare_model.to_string();
         let url = format!("{}/chat/completions", self.base_url);
-        debug!("POST {url} model={model} (via {}, prefix={prefix})", self.provider_name);
+        debug!(
+            "POST {url} model={model} (via {}, prefix={prefix})",
+            self.provider_name
+        );
 
         let no_tools = self.no_tools.load(Ordering::Relaxed);
         let system_str = system_to_string(&request.system);

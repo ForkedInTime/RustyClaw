@@ -9,19 +9,18 @@
 ///   /model ollama:dolphin3
 ///   /model ollama:qwen3:14b
 ///   /model ollama:llama4
-
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use reqwest::Client;
 use serde::Deserialize;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 use tracing::debug;
 
 use crate::api::openai_compat::{
-    patch_system_no_tools, parse_oai_stream, system_to_string, translate_messages, translate_tools,
-    OaiRequest, OaiStreamOptions,
+    OaiRequest, OaiStreamOptions, parse_oai_stream, patch_system_no_tools, system_to_string,
+    translate_messages, translate_tools,
 };
 use crate::api::types::*;
 

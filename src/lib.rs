@@ -4,8 +4,9 @@
 //! binary-only env vars (`deeplink`) are excluded — they only compile as part
 //! of the `rustyclaw` binary.
 
-
 pub mod api;
+pub mod autocommit;
+pub mod autofix;
 pub mod commands;
 pub mod compact;
 pub mod config;
@@ -13,12 +14,10 @@ pub mod cost;
 pub mod distro;
 pub mod hooks;
 pub mod mcp;
+pub mod memory;
 pub mod permissions;
 pub mod query_engine;
-pub mod memory;
 pub mod rag;
-pub mod autocommit;
-pub mod autofix;
 pub mod router;
 pub mod sandbox;
 pub mod settings;

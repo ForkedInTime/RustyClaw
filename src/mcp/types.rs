@@ -1,5 +1,4 @@
 /// MCP protocol types — JSON-RPC 2.0 + Model Context Protocol.
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

@@ -1,5 +1,4 @@
 /// Anthropic API message types — mirrors @anthropic-ai/sdk types
-
 use serde::{Deserialize, Serialize};
 
 // ── Prompt caching ────────────────────────────────────────────────────────────
@@ -11,7 +10,11 @@ pub struct CacheControl {
 }
 
 impl CacheControl {
-    pub fn ephemeral() -> Self { Self { cache_type: "ephemeral".into() } }
+    pub fn ephemeral() -> Self {
+        Self {
+            cache_type: "ephemeral".into(),
+        }
+    }
 }
 
 /// A single text block in the system prompt (used for prompt caching).
@@ -33,11 +36,15 @@ pub enum SystemContent {
 }
 
 impl From<String> for SystemContent {
-    fn from(s: String) -> Self { SystemContent::Plain(s) }
+    fn from(s: String) -> Self {
+        SystemContent::Plain(s)
+    }
 }
 
 impl Default for SystemContent {
-    fn default() -> Self { SystemContent::Plain(String::new()) }
+    fn default() -> Self {
+        SystemContent::Plain(String::new())
+    }
 }
 
 // ── Extended thinking ─────────────────────────────────────────────────────────
@@ -51,7 +58,10 @@ pub struct ThinkingConfig {
 
 impl ThinkingConfig {
     pub fn enabled(budget_tokens: u32) -> Self {
-        Self { think_type: "enabled".into(), budget_tokens }
+        Self {
+            think_type: "enabled".into(),
+            budget_tokens,
+        }
     }
 }
 
@@ -60,13 +70,8 @@ impl ThinkingConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ImageSource {
-    Base64 {
-        media_type: String,
-        data: String,
-    },
-    Url {
-        url: String,
-    },
+    Base64 { media_type: String, data: String },
+    Url { url: String },
 }
 
 /// A message in the conversation

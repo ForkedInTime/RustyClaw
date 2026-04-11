@@ -26,7 +26,10 @@ pub struct PolicyEngine {
 
 impl PolicyEngine {
     pub fn new(policy: Policy, interactive_approval: bool) -> Self {
-        Self { policy, interactive_approval }
+        Self {
+            policy,
+            interactive_approval,
+        }
     }
 
     /// Evaluate a tool name against the policy.

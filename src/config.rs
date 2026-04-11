@@ -1,5 +1,4 @@
 /// Config / settings — port of utils/config.ts and setup.ts
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -36,11 +35,13 @@ impl OutputStyleDef {
             (String::new(), content.trim().to_string())
         };
 
-        let name = frontmatter.lines()
+        let name = frontmatter
+            .lines()
             .find(|l| l.starts_with("name:"))
             .map(|l| l["name:".len()..].trim().to_string())
             .unwrap_or_else(|| stem.clone());
-        let description = frontmatter.lines()
+        let description = frontmatter
+            .lines()
             .find(|l| l.starts_with("description:"))
             .map(|l| l["description:".len()..].trim().to_string())
             .unwrap_or_else(|| format!("Custom {} output style", stem));
@@ -436,26 +437,42 @@ impl Config {
         // ── Settings files: global (~/.claude/settings.json) → project (./.claude/settings.json)
         // Project wins; env vars applied after (higher priority than settings files).
         let settings = crate::settings::Settings::load(&cfg.cwd);
-        if let Some(model)  = settings.model        { cfg.model = crate::commands::resolve_model_alias(&model); }
-        if let Some(mt)     = settings.max_tokens   { cfg.max_tokens = mt; }
-        if let Some(map)    = &settings.max_tokens_by_model {
+        if let Some(model) = settings.model {
+            cfg.model = crate::commands::resolve_model_alias(&model);
+        }
+        if let Some(mt) = settings.max_tokens {
+            cfg.max_tokens = mt;
+        }
+        if let Some(map) = &settings.max_tokens_by_model {
             for (k, v) in map {
                 let canonical = crate::commands::resolve_model_alias(k);
                 cfg.max_tokens_by_model.insert(canonical, *v);
             }
         }
-        if let Some(ac)     = settings.auto_compact { cfg.auto_compact_enabled = ac; }
-        if let Some(v)      = settings.verbose      { cfg.verbose = v; }
-        if let Some(host)   = settings.ollama_host  { cfg.ollama_host = host; }
-        if let Some(tbt)    = settings.thinking_budget_tokens { cfg.thinking_budget_tokens = Some(tbt); }
+        if let Some(ac) = settings.auto_compact {
+            cfg.auto_compact_enabled = ac;
+        }
+        if let Some(v) = settings.verbose {
+            cfg.verbose = v;
+        }
+        if let Some(host) = settings.ollama_host {
+            cfg.ollama_host = host;
+        }
+        if let Some(tbt) = settings.thinking_budget_tokens {
+            cfg.thinking_budget_tokens = Some(tbt);
+        }
         cfg.show_thinking_summaries = settings.show_thinking_summaries.unwrap_or(false);
-        if let Some(pc)     = settings.prompt_cache { cfg.prompt_cache = pc; }
-        cfg.hooks             = settings.hooks;
+        if let Some(pc) = settings.prompt_cache {
+            cfg.prompt_cache = pc;
+        }
+        cfg.hooks = settings.hooks;
         cfg.permissions_allow = settings.permissions.allow;
-        cfg.permissions_deny  = settings.permissions.deny;
-        if let Some(effort) = settings.effort { cfg.effort = Some(effort); }
-        cfg.env               = settings.env;
-        cfg.api_key_helper    = settings.api_key_helper;
+        cfg.permissions_deny = settings.permissions.deny;
+        if let Some(effort) = settings.effort {
+            cfg.effort = Some(effort);
+        }
+        cfg.env = settings.env;
+        cfg.api_key_helper = settings.api_key_helper;
         cfg.disable_all_hooks = settings.disable_all_hooks.unwrap_or(false);
         // v2.1.91: reject cleanupPeriodDays: 0 — it's ambiguous (off? or delete
         // everything immediately?). Warn and treat as unset.
@@ -469,15 +486,21 @@ impl Config {
             }
             other => other,
         };
-        cfg.default_shell     = settings.default_shell;
+        cfg.default_shell = settings.default_shell;
         cfg.include_co_authored_by = settings.include_co_authored_by.unwrap_or(true);
         cfg.theme = settings.theme;
         cfg.sandbox_enabled = settings.sandbox_enabled.unwrap_or(false);
-        if let Some(mode) = settings.sandbox_mode { cfg.sandbox_mode = mode; }
+        if let Some(mode) = settings.sandbox_mode {
+            cfg.sandbox_mode = mode;
+        }
         cfg.voice_enabled = settings.voice_enabled.unwrap_or(false);
-        if let Some(url) = settings.voice_api_url { cfg.voice_api_url = Some(url); }
+        if let Some(url) = settings.voice_api_url {
+            cfg.voice_api_url = Some(url);
+        }
         cfg.tts_enabled = settings.tts_enabled.unwrap_or(false);
-        if let Some(m) = settings.tts_voice_model { cfg.tts_voice_model = Some(m); }
+        if let Some(m) = settings.tts_voice_model {
+            cfg.tts_voice_model = Some(m);
+        }
         cfg.notifications_enabled = settings.notifications_enabled.unwrap_or(false);
         if let Some(style) = settings.spinner_style {
             cfg.spinner_style = style;
@@ -501,22 +524,34 @@ impl Config {
         if let Some(pr) = &settings.phase_router {
             cfg.phase_router.enabled = pr.enabled.unwrap_or(false);
             if let Some(phases) = &pr.phases {
-                if let Some(m) = phases.get("research") { cfg.phase_router.research_model = crate::commands::resolve_model_alias(m); }
-                if let Some(m) = phases.get("plan")     { cfg.phase_router.plan_model     = crate::commands::resolve_model_alias(m); }
-                if let Some(m) = phases.get("edit")     { cfg.phase_router.edit_model     = crate::commands::resolve_model_alias(m); }
-                if let Some(m) = phases.get("review")   { cfg.phase_router.review_model   = crate::commands::resolve_model_alias(m); }
-                if let Some(m) = phases.get("default")  { cfg.phase_router.default_model  = crate::commands::resolve_model_alias(m); }
+                if let Some(m) = phases.get("research") {
+                    cfg.phase_router.research_model = crate::commands::resolve_model_alias(m);
+                }
+                if let Some(m) = phases.get("plan") {
+                    cfg.phase_router.plan_model = crate::commands::resolve_model_alias(m);
+                }
+                if let Some(m) = phases.get("edit") {
+                    cfg.phase_router.edit_model = crate::commands::resolve_model_alias(m);
+                }
+                if let Some(m) = phases.get("review") {
+                    cfg.phase_router.review_model = crate::commands::resolve_model_alias(m);
+                }
+                if let Some(m) = phases.get("default") {
+                    cfg.phase_router.default_model = crate::commands::resolve_model_alias(m);
+                }
             }
         }
 
         // Auto-fix settings → AutoFixConfig
         if let Some(ar) = &settings.auto_fix {
-            if let Some(e) = ar.enabled { cfg.auto_fix.enabled = e; }
+            if let Some(e) = ar.enabled {
+                cfg.auto_fix.enabled = e;
+            }
             if let Some(t) = &ar.trigger {
                 cfg.auto_fix.trigger = match t.to_ascii_lowercase().as_str() {
                     "always" => crate::autofix::AutoFixTrigger::Always,
-                    "off"    => crate::autofix::AutoFixTrigger::Off,
-                    _        => crate::autofix::AutoFixTrigger::Autonomous,
+                    "off" => crate::autofix::AutoFixTrigger::Off,
+                    _ => crate::autofix::AutoFixTrigger::Autonomous,
                 };
             }
             if ar.lint_command.is_some() {
@@ -536,7 +571,9 @@ impl Config {
                     cfg.auto_fix.max_retries = 3;
                 }
             }
-            if let Some(t) = ar.timeout_secs { cfg.auto_fix.timeout_secs = t; }
+            if let Some(t) = ar.timeout_secs {
+                cfg.auto_fix.timeout_secs = t;
+            }
         }
 
         // Auto-commit settings → AutoCommitConfig
@@ -563,13 +600,17 @@ impl Config {
 
         // Resolve output style: load name from settings, look up prompt
         if let Some(ref style_name) = settings.output_style
-            && style_name != "default" {
-                let styles = Self::load_output_styles(&cfg.cwd);
-                if let Some(def) = styles.iter().find(|s| s.name.eq_ignore_ascii_case(style_name)) {
-                    cfg.output_style = Some(def.name.clone());
-                    cfg.output_style_prompt = Some(def.prompt.clone());
-                }
+            && style_name != "default"
+        {
+            let styles = Self::load_output_styles(&cfg.cwd);
+            if let Some(def) = styles
+                .iter()
+                .find(|s| s.name.eq_ignore_ascii_case(style_name))
+            {
+                cfg.output_style = Some(def.name.clone());
+                cfg.output_style_prompt = Some(def.prompt.clone());
             }
+        }
 
         // ── CLAUDE.md + AGENTS.md files (global + project hierarchy) — skipped in bare mode
         if !cfg.bare_mode {
@@ -589,40 +630,42 @@ impl Config {
         // ── ANTHROPIC_API_KEY_FILE_DESCRIPTOR: read API key from an open fd
         if cfg.api_key.is_empty()
             && let Ok(fd_str) = std::env::var("RUSTYCLAW_API_KEY_FILE_DESCRIPTOR")
-                && let Ok(fd) = fd_str.parse::<i32>() {
-                    use std::os::unix::io::FromRawFd;
-                    use std::io::Read;
-                    let mut f = unsafe { std::fs::File::from_raw_fd(fd) };
-                    let mut buf = String::new();
-                    if f.read_to_string(&mut buf).is_ok() {
-                        cfg.api_key = buf.trim().to_string();
-                    }
-                    std::mem::forget(f); // don't close the fd
-                }
+            && let Ok(fd) = fd_str.parse::<i32>()
+        {
+            use std::io::Read;
+            use std::os::unix::io::FromRawFd;
+            let mut f = unsafe { std::fs::File::from_raw_fd(fd) };
+            let mut buf = String::new();
+            if f.read_to_string(&mut buf).is_ok() {
+                cfg.api_key = buf.trim().to_string();
+            }
+            std::mem::forget(f); // don't close the fd
+        }
 
         // ── apiKeyHelper: run a shell command to get the API key
         if cfg.api_key.is_empty()
-            && let Some(ref helper_cmd) = cfg.api_key_helper.clone() {
-                match std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(helper_cmd)
-                    .output()
-                {
-                    Ok(out) if out.status.success() => {
-                        let key = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                        if !key.is_empty() {
-                            cfg.api_key = key;
-                        }
-                    }
-                    Ok(out) => {
-                        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-                        eprintln!("Warning: apiKeyHelper failed: {stderr}");
-                    }
-                    Err(e) => {
-                        eprintln!("Warning: apiKeyHelper could not run: {e}");
+            && let Some(ref helper_cmd) = cfg.api_key_helper.clone()
+        {
+            match std::process::Command::new("sh")
+                .arg("-c")
+                .arg(helper_cmd)
+                .output()
+            {
+                Ok(out) if out.status.success() => {
+                    let key = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    if !key.is_empty() {
+                        cfg.api_key = key;
                     }
                 }
+                Ok(out) => {
+                    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                    eprintln!("Warning: apiKeyHelper failed: {stderr}");
+                }
+                Err(e) => {
+                    eprintln!("Warning: apiKeyHelper could not run: {e}");
+                }
             }
+        }
 
         // ── Optional env var overrides (env wins over settings files)
         if let Ok(model) = std::env::var("ANTHROPIC_MODEL") {
@@ -679,11 +722,11 @@ impl Config {
                             let model = crate::commands::resolve_model_alias(v.trim());
                             match k.trim() {
                                 "research" => phase_cfg.research_model = model,
-                                "plan"     => phase_cfg.plan_model     = model,
-                                "edit"     => phase_cfg.edit_model     = model,
-                                "review"   => phase_cfg.review_model   = model,
-                                "default"  => phase_cfg.default_model  = model,
-                                _          => {}
+                                "plan" => phase_cfg.plan_model = model,
+                                "edit" => phase_cfg.edit_model = model,
+                                "review" => phase_cfg.review_model = model,
+                                "default" => phase_cfg.default_model = model,
+                                _ => {}
                             }
                         }
                     }
@@ -706,7 +749,9 @@ impl Config {
         let mut include = |path: &PathBuf| {
             // Use the canonical path for dedup; fall back to the raw path if canonicalize fails
             let key = path.canonicalize().unwrap_or_else(|_| path.clone());
-            if !seen.insert(key) { return; }
+            if !seen.insert(key) {
+                return;
+            }
             if let Ok(content) = std::fs::read_to_string(path) {
                 let trimmed = content.trim();
                 if !trimmed.is_empty() {
@@ -729,8 +774,12 @@ impl Config {
             if candidate.exists() {
                 ancestry.push(candidate);
             }
-            if dir == home { break; }
-            if !dir.pop() { break; }
+            if dir == home {
+                break;
+            }
+            if !dir.pop() {
+                break;
+            }
         }
         // ancestry is innermost-first; reverse to get outermost-first
         ancestry.reverse();
@@ -749,7 +798,9 @@ impl Config {
 
         let mut include = |path: &PathBuf| {
             let key = path.canonicalize().unwrap_or_else(|_| path.clone());
-            if !seen.insert(key) { return; }
+            if !seen.insert(key) {
+                return;
+            }
             if let Ok(content) = std::fs::read_to_string(path) {
                 let trimmed = content.trim();
                 if !trimmed.is_empty() {
@@ -771,8 +822,12 @@ impl Config {
             if candidate.exists() {
                 ancestry.push(candidate);
             }
-            if dir == home { break; }
-            if !dir.pop() { break; }
+            if dir == home {
+                break;
+            }
+            if !dir.pop() {
+                break;
+            }
         }
         ancestry.reverse();
         for path in ancestry {
@@ -788,7 +843,11 @@ impl Config {
         let text = std::fs::read_to_string(&path).ok()?;
         let json: serde_json::Value = serde_json::from_str(&text).ok()?;
         let val = json.get("bannerOrgDisplay")?.as_str()?;
-        if val.is_empty() || val == "none" { None } else { Some(val.to_string()) }
+        if val.is_empty() || val == "none" {
+            None
+        } else {
+            Some(val.to_string())
+        }
     }
 
     /// Write bannerOrgDisplay to ~/.claude/config.json (preserves other fields)
@@ -818,7 +877,9 @@ impl Config {
         if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
             let xdg_path = PathBuf::from(&xdg).join("rustyclaw");
             // Use XDG path if it already exists, or if ~/.claude does NOT exist
-            let legacy = dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".claude");
+            let legacy = dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".claude");
             if xdg_path.exists() || !legacy.exists() {
                 return xdg_path;
             }
@@ -879,11 +940,12 @@ impl Config {
             for entry in entries.flatten() {
                 let p = entry.path();
                 if p.extension().and_then(|e| e.to_str()) == Some("md")
-                    && let Some(def) = OutputStyleDef::from_markdown_file(&p) {
-                        // project styles override user styles with the same name
-                        styles.retain(|s| !s.name.eq_ignore_ascii_case(&def.name));
-                        styles.push(def);
-                    }
+                    && let Some(def) = OutputStyleDef::from_markdown_file(&p)
+                {
+                    // project styles override user styles with the same name
+                    styles.retain(|s| !s.name.eq_ignore_ascii_case(&def.name));
+                    styles.push(def);
+                }
             }
         }
 
@@ -893,10 +955,11 @@ impl Config {
             for entry in entries.flatten() {
                 let p = entry.path();
                 if p.extension().and_then(|e| e.to_str()) == Some("md")
-                    && let Some(def) = OutputStyleDef::from_markdown_file(&p) {
-                        styles.retain(|s| !s.name.eq_ignore_ascii_case(&def.name));
-                        styles.push(def);
-                    }
+                    && let Some(def) = OutputStyleDef::from_markdown_file(&p)
+                {
+                    styles.retain(|s| !s.name.eq_ignore_ascii_case(&def.name));
+                    styles.push(def);
+                }
             }
         }
 
@@ -936,7 +999,8 @@ impl Config {
 
         // Non-Anthropic models (Ollama, OpenAI-compat providers) get a custom system
         // prompt — broad, direct, no artificial restrictions, no Claude-specific framing.
-        let is_external = crate::api::is_ollama_model(model) || crate::api::is_openai_compat_model(model);
+        let is_external =
+            crate::api::is_ollama_model(model) || crate::api::is_openai_compat_model(model);
         if is_external {
             let provider_label = if crate::api::is_ollama_model(model) {
                 format!("Ollama ({})", crate::api::strip_ollama_prefix(model))
@@ -976,7 +1040,10 @@ impl Config {
             let base = if self.claudemd.is_empty() {
                 external_prompt
             } else {
-                format!("{external_prompt}\n\n<claude_md>\n{}</claude_md>", self.claudemd)
+                format!(
+                    "{external_prompt}\n\n<claude_md>\n{}</claude_md>",
+                    self.claudemd
+                )
             };
             return if self.agentsmd.is_empty() {
                 base
@@ -1125,7 +1192,10 @@ Use the `gh` CLI for all GitHub-related tasks. When creating a PR:
 
         // Append co-authored-by preference before any overrides
         let base = if self.include_co_authored_by {
-            format!("{base}\n\n# Co-Authored-By\nWhen creating git commits or pull requests, always add a Co-Authored-By trailer:\n   Co-Authored-By: {model} <noreply@anthropic.com>", model = model)
+            format!(
+                "{base}\n\n# Co-Authored-By\nWhen creating git commits or pull requests, always add a Co-Authored-By trailer:\n   Co-Authored-By: {model} <noreply@anthropic.com>",
+                model = model
+            )
         } else {
             base
         };
@@ -1183,9 +1253,10 @@ Use the `gh` CLI for all GitHub-related tasks. When creating a PR:
 
         // append_system_prompt is added after everything else
         if let Some(ref append) = self.append_system_prompt
-            && !append.is_empty() {
-                return format!("{base}\n\n{append}");
-            }
+            && !append.is_empty()
+        {
+            return format!("{base}\n\n{append}");
+        }
 
         base
     }
@@ -1272,11 +1343,9 @@ mod data_dir_tests {
         let legacy_sessions = legacy.join("sessions");
         let xdg_path = PathBuf::from("/home/u/.local/share/rustyclaw");
 
-        let got = compute_data_dir(
-            Some("/home/u/.local/share"),
-            legacy.clone(),
-            |p: &Path| p == legacy_sessions || p == xdg_path,
-        );
+        let got = compute_data_dir(Some("/home/u/.local/share"), legacy.clone(), |p: &Path| {
+            p == legacy_sessions || p == xdg_path
+        });
         assert_eq!(
             got, xdg_path,
             "XDG path should win when it already exists (prior use)"
@@ -1363,14 +1432,16 @@ mod auto_fix_clamp_tests {
 
 #[cfg(test)]
 mod auto_commit_clamp_tests {
-    use crate::settings::{AutoCommitConfig, DEFAULT_KEEP_SESSIONS, DEFAULT_MESSAGE_PREFIX};
     use crate::settings::AutoCommitSettings;
+    use crate::settings::{AutoCommitConfig, DEFAULT_KEEP_SESSIONS, DEFAULT_MESSAGE_PREFIX};
 
     /// Mirrors the clamp logic in `Config::load` so we can unit-test it without
     /// touching disk. If this logic changes, `Config::load` must change in lockstep.
     fn apply(settings: &AutoCommitSettings) -> AutoCommitConfig {
         let mut cfg = AutoCommitConfig::default();
-        if let Some(e) = settings.enabled { cfg.enabled = e; }
+        if let Some(e) = settings.enabled {
+            cfg.enabled = e;
+        }
         if let Some(k) = settings.keep_sessions {
             if k <= 1000 {
                 cfg.keep_sessions = k;

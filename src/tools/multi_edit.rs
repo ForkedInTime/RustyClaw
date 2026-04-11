@@ -6,8 +6,7 @@
 ///
 /// Using MultiEdit instead of multiple Edit calls lets Claude batch related
 /// changes atomically and reduces round-trips.
-
-use super::{async_trait, snapshot_file, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait, snapshot_file};
 use crate::tools::file_read::resolve_path;
 use anyhow::Result;
 use serde::Deserialize;
@@ -97,17 +96,29 @@ impl Tool for MultiEditTool {
             let label = format!("[{}/{}] {}", i + 1, input.edits.len(), path.display());
 
             if let Some(err) = super::check_protected_path(&path) {
-                let msg = err.content.iter()
-                    .map(|c| { let super::ToolResultContent::Text { text } = c; text.as_str() })
-                    .collect::<Vec<_>>().join(" ");
+                let msg = err
+                    .content
+                    .iter()
+                    .map(|c| {
+                        let super::ToolResultContent::Text { text } = c;
+                        text.as_str()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 results.push(format!("{label} ✗ {msg}"));
                 had_error = true;
                 continue;
             }
             if let Some(err) = super::check_sensitive_path(&path, super::SensitiveOp::Write) {
-                let msg = err.content.iter()
-                    .map(|c| { let super::ToolResultContent::Text { text } = c; text.as_str() })
-                    .collect::<Vec<_>>().join(" ");
+                let msg = err
+                    .content
+                    .iter()
+                    .map(|c| {
+                        let super::ToolResultContent::Text { text } = c;
+                        text.as_str()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 results.push(format!("{label} ✗ {msg}"));
                 had_error = true;
                 continue;

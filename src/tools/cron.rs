@@ -1,9 +1,8 @@
 /// Cron tools — port of cron.ts
 /// CronCreate, CronDelete, CronList: schedule recurring prompts via cron expressions.
 /// Jobs stored in ~/.claude/cron_jobs.json
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
-use anyhow::{anyhow, Result};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::PathBuf;
@@ -34,7 +33,9 @@ fn jobs_path() -> PathBuf {
 
 pub fn load_jobs() -> Vec<CronJob> {
     let path = jobs_path();
-    if !path.exists() { return Vec::new(); }
+    if !path.exists() {
+        return Vec::new();
+    }
     std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
@@ -73,13 +74,18 @@ pub fn validate_cron(expr: &str) -> Result<()> {
 }
 
 fn validate_cron_field(field: &str, min: u32, max: u32) -> Result<()> {
-    if field == "*" { return Ok(()); }
+    if field == "*" {
+        return Ok(());
+    }
 
     // Handle */step
     if let Some(step_str) = field.strip_prefix("*/") {
-        let step: u32 = step_str.parse()
+        let step: u32 = step_str
+            .parse()
             .map_err(|_| anyhow!("invalid step value"))?;
-        if step == 0 { return Err(anyhow!("step cannot be zero")); }
+        if step == 0 {
+            return Err(anyhow!("step cannot be zero"));
+        }
         return Ok(());
     }
 
@@ -87,16 +93,21 @@ fn validate_cron_field(field: &str, min: u32, max: u32) -> Result<()> {
     for part in field.split(',') {
         if part.contains('-') {
             let mut parts = part.splitn(2, '-');
-            let lo: u32 = parts.next().unwrap().parse()
+            let lo: u32 = parts
+                .next()
+                .unwrap()
+                .parse()
                 .map_err(|_| anyhow!("invalid range start"))?;
-            let hi: u32 = parts.next().unwrap_or("0").parse()
+            let hi: u32 = parts
+                .next()
+                .unwrap_or("0")
+                .parse()
                 .map_err(|_| anyhow!("invalid range end"))?;
             if lo < min || hi > max || lo > hi {
                 return Err(anyhow!("range {lo}-{hi} out of bounds [{min}-{max}]"));
             }
         } else {
-            let v: u32 = part.parse()
-                .map_err(|_| anyhow!("expected a number"))?;
+            let v: u32 = part.parse().map_err(|_| anyhow!("expected a number"))?;
             if v < min || v > max {
                 return Err(anyhow!("value {v} out of bounds [{min}-{max}]"));
             }
@@ -121,7 +132,9 @@ struct CreateInput {
 
 #[async_trait]
 impl Tool for CronCreateTool {
-    fn name(&self) -> &str { "CronCreate" }
+    fn name(&self) -> &str {
+        "CronCreate"
+    }
 
     fn description(&self) -> &str {
         "Create a cron job that fires a prompt on a schedule. \
@@ -197,7 +210,9 @@ struct DeleteInput {
 
 #[async_trait]
 impl Tool for CronDeleteTool {
-    fn name(&self) -> &str { "CronDelete" }
+    fn name(&self) -> &str {
+        "CronDelete"
+    }
 
     fn description(&self) -> &str {
         "Delete a cron job by its id. Use CronList to see existing job ids."
@@ -221,11 +236,17 @@ impl Tool for CronDeleteTool {
         jobs.retain(|j| j.id != input.id);
 
         if jobs.len() == before {
-            return Ok(ToolOutput::error(format!("No cron job found with id: {}", input.id)));
+            return Ok(ToolOutput::error(format!(
+                "No cron job found with id: {}",
+                input.id
+            )));
         }
 
         save_jobs(&jobs)?;
-        Ok(ToolOutput::success(format!("Cron job {} deleted.", input.id)))
+        Ok(ToolOutput::success(format!(
+            "Cron job {} deleted.",
+            input.id
+        )))
     }
 }
 
@@ -237,7 +258,9 @@ pub struct CronListTool {
 
 #[async_trait]
 impl Tool for CronListTool {
-    fn name(&self) -> &str { "CronList" }
+    fn name(&self) -> &str {
+        "CronList"
+    }
 
     fn description(&self) -> &str {
         "List all scheduled cron jobs with their ids, schedules, and prompts."
@@ -254,20 +277,23 @@ impl Tool for CronListTool {
             return Ok(ToolOutput::success("No cron jobs scheduled."));
         }
 
-        let lines: Vec<String> = jobs.iter().map(|j| {
-            let status = if j.enabled { "enabled" } else { "disabled" };
-            let desc = if j.description.is_empty() {
-                String::new()
-            } else {
-                format!(" — {}", j.description)
-            };
-            format!(
-                "[{status}] {id} | {schedule}{desc}\n  prompt: {prompt}",
-                id = &j.id[..8.min(j.id.len())],
-                schedule = j.schedule,
-                prompt = &j.prompt[..80.min(j.prompt.len())],
-            )
-        }).collect();
+        let lines: Vec<String> = jobs
+            .iter()
+            .map(|j| {
+                let status = if j.enabled { "enabled" } else { "disabled" };
+                let desc = if j.description.is_empty() {
+                    String::new()
+                } else {
+                    format!(" — {}", j.description)
+                };
+                format!(
+                    "[{status}] {id} | {schedule}{desc}\n  prompt: {prompt}",
+                    id = &j.id[..8.min(j.id.len())],
+                    schedule = j.schedule,
+                    prompt = &j.prompt[..80.min(j.prompt.len())],
+                )
+            })
+            .collect();
 
         Ok(ToolOutput::success(lines.join("\n\n")))
     }

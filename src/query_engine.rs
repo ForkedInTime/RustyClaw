@@ -1,9 +1,8 @@
 /// QueryEngine — port of QueryEngine.ts + query.ts
 /// The core agentic loop: send messages → receive tool calls → execute tools → repeat.
-
 use crate::api::types::*;
 use crate::api::{ApiBackend, MessagesRequest};
-use crate::compact::{compact_needed, snip_compact, summarize_compact, CompactNeeded};
+use crate::compact::{CompactNeeded, compact_needed, snip_compact, summarize_compact};
 use crate::config::Config;
 use crate::rag;
 use crate::tools::{DynTool, ToolContext};
@@ -108,7 +107,11 @@ impl QueryEngine {
         });
 
         const DEFAULT_MAX_TURNS: u32 = 50;
-        let max_turns = if self.config.max_turns > 0 { self.config.max_turns } else { DEFAULT_MAX_TURNS };
+        let max_turns = if self.config.max_turns > 0 {
+            self.config.max_turns
+        } else {
+            DEFAULT_MAX_TURNS
+        };
         let mut turn = 0u32;
 
         loop {
@@ -118,9 +121,8 @@ impl QueryEngine {
                 break;
             }
             // Build tool definitions for this turn
-            let tool_defs: Vec<ToolDefinition> = self.tools.iter()
-                .map(|t| t.definition())
-                .collect();
+            let tool_defs: Vec<ToolDefinition> =
+                self.tools.iter().map(|t| t.definition()).collect();
 
             // Augment system prompt with RAG context on the first turn
             let effective_system = if turn == 1 && !rag_context.is_empty() {
@@ -150,24 +152,31 @@ impl QueryEngine {
             // Try the call; on 529 with fallback_model, retry once with fallback
             let response = {
                 let model = request.model.clone();
-                let res = self.client.messages_stream(request.clone(), |chunk| {
-                    if self.stream_json_output {
-                        if include_partial {
-                            let event = serde_json::json!({"type":"partial_text","text": chunk});
-                            println!("{}", event);
+                let res = self
+                    .client
+                    .messages_stream(request.clone(), |chunk| {
+                        if self.stream_json_output {
+                            if include_partial {
+                                let event =
+                                    serde_json::json!({"type":"partial_text","text": chunk});
+                                println!("{}", event);
+                            }
+                            full_text.push_str(chunk);
+                        } else if self.json_output {
+                            full_text.push_str(chunk);
+                        } else {
+                            print!("{chunk}");
                         }
-                        full_text.push_str(chunk);
-                    } else if self.json_output {
-                        full_text.push_str(chunk);
-                    } else {
-                        print!("{chunk}");
-                    }
-                }).await;
+                    })
+                    .await;
                 match res {
                     Err(ref e) if is_overloaded_error(e) => {
                         if let Some(ref fb) = self.config.fallback_model.clone() {
                             if fb != &model {
-                                eprintln!("{}", format!("Model overloaded — retrying with {fb}").yellow());
+                                eprintln!(
+                                    "{}",
+                                    format!("Model overloaded — retrying with {fb}").yellow()
+                                );
                                 full_text.clear();
                                 let mut fb_req = request.clone();
                                 fb_req.model = fb.clone();
@@ -184,8 +193,12 @@ impl QueryEngine {
                                         print!("{chunk}");
                                     }
                                 }).await?
-                            } else { res? }
-                        } else { res? }
+                            } else {
+                                res?
+                            }
+                        } else {
+                            res?
+                        }
                     }
                     Err(e) => return Err(e),
                     Ok(r) => r,
@@ -232,17 +245,18 @@ impl QueryEngine {
             );
             self.cumulative_cost_usd += turn_cost;
             if let Some(budget) = self.config.max_budget_usd
-                && self.cumulative_cost_usd >= budget {
-                    eprintln!(
-                        "{}",
-                        format!(
-                            "Budget limit reached: ${:.4} / ${:.4} — stopping.",
-                            self.cumulative_cost_usd, budget
-                        )
-                        .yellow()
-                    );
-                    break;
-                }
+                && self.cumulative_cost_usd >= budget
+            {
+                eprintln!(
+                    "{}",
+                    format!(
+                        "Budget limit reached: ${:.4} / ${:.4} — stopping.",
+                        self.cumulative_cost_usd, budget
+                    )
+                    .yellow()
+                );
+                break;
+            }
 
             // Context compaction check
             match compact_needed(response.usage.input_tokens) {
@@ -261,27 +275,44 @@ impl QueryEngine {
                 }
                 CompactNeeded::Snip => {
                     if self.config.auto_compact_enabled {
-                        eprintln!("{}", "Auto-compacting: stripping old tool results (snipCompact)…".yellow());
+                        eprintln!(
+                            "{}",
+                            "Auto-compacting: stripping old tool results (snipCompact)…".yellow()
+                        );
                         snip_compact(&mut self.messages);
                     } else {
-                        eprintln!("{}", "Context near limit. Enable auto_compact or run /compact.".yellow());
+                        eprintln!(
+                            "{}",
+                            "Context near limit. Enable auto_compact or run /compact.".yellow()
+                        );
                     }
                 }
                 CompactNeeded::Summarise => {
                     if self.config.auto_compact_enabled {
-                        eprintln!("{}", "Auto-compacting: summarising conversation (summarizeCompact)…".yellow());
+                        eprintln!(
+                            "{}",
+                            "Auto-compacting: summarising conversation (summarizeCompact)…"
+                                .yellow()
+                        );
                         match summarize_compact(&self.client, &self.messages, &self.config).await {
                             Ok(replacement) => {
                                 self.messages = replacement;
                                 eprintln!("{}", "Compaction complete. Conversation history replaced with summary.".green());
                             }
                             Err(e) => {
-                                eprintln!("{}", format!("Compact failed: {e}. Falling back to snip.").red());
+                                eprintln!(
+                                    "{}",
+                                    format!("Compact failed: {e}. Falling back to snip.").red()
+                                );
                                 snip_compact(&mut self.messages);
                             }
                         }
                     } else {
-                        eprintln!("{}", "Context critically full. Enable auto_compact or run /compact now.".red());
+                        eprintln!(
+                            "{}",
+                            "Context critically full. Enable auto_compact or run /compact now."
+                                .red()
+                        );
                     }
                 }
             }
@@ -348,60 +379,77 @@ impl QueryEngine {
                 }
 
                 // Pre-tool-use hooks (emit event if requested)
-                if self.include_hook_events && self.stream_json_output
+                if self.include_hook_events
+                    && self.stream_json_output
                     && let Some(hook_cfg) = &self.config.hooks
-                        && !self.config.disable_all_hooks {
-                            let args = serde_json::to_string(input).unwrap_or_default();
-                            let hook_result = crate::hooks::run_pre_tool_hooks(
-                                hook_cfg, name, &args, "print-mode", &self.config.cwd,
-                            ).await;
-                            let event = serde_json::json!({
-                                "type": "hook_event",
-                                "hook": "preToolUse",
-                                "tool": name,
-                                "continue": hook_result.should_continue,
-                            });
-                            println!("{}", event);
-                            if !hook_result.should_continue {
-                                let msg = hook_result.stop_reason.unwrap_or_else(|| {
-                                    format!("PreToolUse hook blocked: {name}")
-                                });
-                                results.push(ContentBlock::ToolResult {
-                                    tool_use_id: id.clone(),
-                                    content: vec![ToolResultContent::text(msg)],
-                                    is_error: Some(true),
-                                });
-                                continue;
-                            }
-                        }
+                    && !self.config.disable_all_hooks
+                {
+                    let args = serde_json::to_string(input).unwrap_or_default();
+                    let hook_result = crate::hooks::run_pre_tool_hooks(
+                        hook_cfg,
+                        name,
+                        &args,
+                        "print-mode",
+                        &self.config.cwd,
+                    )
+                    .await;
+                    let event = serde_json::json!({
+                        "type": "hook_event",
+                        "hook": "preToolUse",
+                        "tool": name,
+                        "continue": hook_result.should_continue,
+                    });
+                    println!("{}", event);
+                    if !hook_result.should_continue {
+                        let msg = hook_result
+                            .stop_reason
+                            .unwrap_or_else(|| format!("PreToolUse hook blocked: {name}"));
+                        results.push(ContentBlock::ToolResult {
+                            tool_use_id: id.clone(),
+                            content: vec![ToolResultContent::text(msg)],
+                            is_error: Some(true),
+                        });
+                        continue;
+                    }
+                }
 
                 let tool = self.tools.iter().find(|t| t.name() == name);
 
                 let output = match tool {
-                    Some(t) => {
-                        match t.execute(input.clone(), &ctx).await {
-                            Ok(out) => out,
-                            Err(e) => {
-                                crate::tools::ToolOutput::error(format!("Tool error: {e}"))
-                            }
-                        }
-                    }
+                    Some(t) => match t.execute(input.clone(), &ctx).await {
+                        Ok(out) => out,
+                        Err(e) => crate::tools::ToolOutput::error(format!("Tool error: {e}")),
+                    },
                     None => crate::tools::ToolOutput::error(format!("Unknown tool: {name}")),
                 };
 
                 if output.is_error && !self.stream_json_output {
-                    eprintln!("{} {}", "Error:".red().bold(),
-                        output.content.iter()
-                            .map(|c| { let ToolResultContent::Text { text } = c; text.as_str() })
-                            .collect::<Vec<_>>().join(" ")
+                    eprintln!(
+                        "{} {}",
+                        "Error:".red().bold(),
+                        output
+                            .content
+                            .iter()
+                            .map(|c| {
+                                let ToolResultContent::Text { text } = c;
+                                text.as_str()
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" ")
                     );
                 }
 
                 // Emit tool_result event for stream-json + hook-events mode
                 if self.include_hook_events && self.stream_json_output {
-                    let result_text = output.content.iter()
-                        .map(|c| { let ToolResultContent::Text { text } = c; text.as_str() })
-                        .collect::<Vec<_>>().join("\n");
+                    let result_text = output
+                        .content
+                        .iter()
+                        .map(|c| {
+                            let ToolResultContent::Text { text } = c;
+                            text.as_str()
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
                     let event = serde_json::json!({
                         "type": "tool_result",
                         "name": name,
@@ -424,18 +472,22 @@ impl QueryEngine {
 
     /// Run a query and collect all text output as a single String.
     /// Used by AgentTool to capture sub-agent output without printing.
-    pub async fn query_and_collect(&mut self, user_input: &str) -> Result<crate::tools::ToolOutput> {
+    pub async fn query_and_collect(
+        &mut self,
+        user_input: &str,
+    ) -> Result<crate::tools::ToolOutput> {
         self.messages.push(Message {
             role: Role::User,
-            content: vec![ContentBlock::Text { text: user_input.to_string() }],
+            content: vec![ContentBlock::Text {
+                text: user_input.to_string(),
+            }],
         });
 
         let mut final_text = String::new();
 
         loop {
-            let tool_defs: Vec<ToolDefinition> = self.tools.iter()
-                .map(|t| t.definition())
-                .collect();
+            let tool_defs: Vec<ToolDefinition> =
+                self.tools.iter().map(|t| t.definition()).collect();
 
             let request = MessagesRequest {
                 model: self.config.model.clone(),
@@ -449,7 +501,8 @@ impl QueryEngine {
                 session_id: self.session_id.clone(),
             };
 
-            let response = self.client
+            let response = self
+                .client
                 .messages_stream(request, |chunk| {
                     final_text.push_str(chunk);
                 })
@@ -534,8 +587,13 @@ impl QueryEngine {
         // Filter: only keep results with a decent relevance score.
         // FTS5 rank is negative (closer to 0 = more relevant); discard weak matches.
         let top_rank = results[0].rank;
-        let threshold = if top_rank < -5.0 { top_rank * 0.3 } else { top_rank * 0.5 };
-        let filtered: Vec<_> = results.into_iter()
+        let threshold = if top_rank < -5.0 {
+            top_rank * 0.3
+        } else {
+            top_rank * 0.5
+        };
+        let filtered: Vec<_> = results
+            .into_iter()
             .filter(|r| r.rank <= threshold || r.rank <= top_rank * 0.8)
             .take(10) // cap at 10 injected chunks
             .collect();
@@ -547,7 +605,11 @@ impl QueryEngine {
         // Context budget: ~12KB for rich models, keeps well within token limits
         let context = rag::search::build_context(&filtered, 12288);
         if !context.is_empty() {
-            debug!("RAG injected {} results ({} chars)", filtered.len(), context.len());
+            debug!(
+                "RAG injected {} results ({} chars)",
+                filtered.len(),
+                context.len()
+            );
         }
         context
     }

@@ -7,27 +7,34 @@
 ///
 /// Mode selection: `/sandbox enable [strict|bwrap|firejail]`
 /// The active mode is stored in config.sandbox_mode and applied by BashTool.
-
 use std::process::Command;
 
 // ── Availability checks ───────────────────────────────────────────────────────
 
 pub fn bwrap_available() -> bool {
-    Command::new("bwrap").arg("--version").output()
+    Command::new("bwrap")
+        .arg("--version")
+        .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
 
 pub fn firejail_available() -> bool {
-    Command::new("firejail").arg("--version").output()
+    Command::new("firejail")
+        .arg("--version")
+        .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
 
 pub fn best_available_mode() -> &'static str {
-    if bwrap_available()    { "bwrap" }
-    else if firejail_available() { "firejail" }
-    else                         { "strict" }
+    if bwrap_available() {
+        "bwrap"
+    } else if firejail_available() {
+        "firejail"
+    } else {
+        "strict"
+    }
 }
 
 // ── Strict mode: pattern-based blocking ──────────────────────────────────────
@@ -37,22 +44,28 @@ pub fn best_available_mode() -> &'static str {
 pub fn strict_check(cmd: &str) -> Option<String> {
     let low = cmd.to_lowercase();
     let patterns: &[(&str, &str)] = &[
-        ("rm -rf /",        "Recursive delete of root filesystem"),
-        ("rm -rf /*",       "Recursive delete of root filesystem"),
-        ("mkfs",            "Filesystem format command"),
-        ("dd if=/dev/zero of=/dev/",  "Disk overwrite"),
+        ("rm -rf /", "Recursive delete of root filesystem"),
+        ("rm -rf /*", "Recursive delete of root filesystem"),
+        ("mkfs", "Filesystem format command"),
+        ("dd if=/dev/zero of=/dev/", "Disk overwrite"),
         ("dd if=/dev/urandom of=/dev/", "Disk overwrite"),
-        (":(){ :|:& };:",   "Fork bomb"),
-        (":(){:|:&};:",     "Fork bomb"),
-        ("> /dev/sda",      "Disk overwrite via redirect"),
-        ("chmod -R 000 /",  "Remove all permissions from root"),
-        ("chmod -R 777 /",  "Dangerous permission change on root"),
-        (":() { :|: & };",  "Fork bomb variant"),
-        ("sudo rm -rf /",   "Recursive delete of root filesystem (sudo)"),
+        (":(){ :|:& };:", "Fork bomb"),
+        (":(){:|:&};:", "Fork bomb"),
+        ("> /dev/sda", "Disk overwrite via redirect"),
+        ("chmod -R 000 /", "Remove all permissions from root"),
+        ("chmod -R 777 /", "Dangerous permission change on root"),
+        (":() { :|: & };", "Fork bomb variant"),
+        (
+            "sudo rm -rf /",
+            "Recursive delete of root filesystem (sudo)",
+        ),
     ];
     for (pattern, desc) in patterns {
         if low.contains(pattern) {
-            return Some(format!("Blocked by strict sandbox: {} (matched '{}')", desc, pattern));
+            return Some(format!(
+                "Blocked by strict sandbox: {} (matched '{}')",
+                desc, pattern
+            ));
         }
     }
     None
@@ -133,7 +146,8 @@ pub fn apply_sandbox(
             if !bwrap_available() {
                 return Err(
                     "bwrap not found. Install with: sudo apt install bubblewrap  \
-                     or switch mode: /sandbox enable strict".into()
+                     or switch mode: /sandbox enable strict"
+                        .into(),
                 );
             }
             Ok(bwrap_wrap(command, cwd, allow_network))
@@ -145,7 +159,8 @@ pub fn apply_sandbox(
             if !firejail_available() {
                 return Err(
                     "firejail not found. Install with: sudo apt install firejail  \
-                     or switch mode: /sandbox enable strict".into()
+                     or switch mode: /sandbox enable strict"
+                        .into(),
                 );
             }
             Ok(firejail_wrap(command, cwd))
@@ -156,8 +171,16 @@ pub fn apply_sandbox(
 
 /// Status display for /sandbox command
 pub fn sandbox_status(enabled: bool, mode: &str) -> String {
-    let bwrap = if bwrap_available() { "✓ available" } else { "✗ not installed" };
-    let fjail = if firejail_available() { "✓ available" } else { "✗ not installed" };
+    let bwrap = if bwrap_available() {
+        "✓ available"
+    } else {
+        "✗ not installed"
+    };
+    let fjail = if firejail_available() {
+        "✓ available"
+    } else {
+        "✗ not installed"
+    };
 
     let status = if enabled {
         format!("ENABLED  [mode: {}]", mode)

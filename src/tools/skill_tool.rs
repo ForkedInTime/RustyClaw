@@ -1,8 +1,7 @@
 /// SkillTool — port of skill.ts
 /// Looks up a skill by name from the skills registry and executes it.
 /// Skills are .md files in ~/.claude/skills/ or .claude/skills/ — each is a prompt template.
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
@@ -21,7 +20,9 @@ struct Input {
 
 #[async_trait]
 impl Tool for SkillTool {
-    fn name(&self) -> &str { "Skill" }
+    fn name(&self) -> &str {
+        "Skill"
+    }
 
     fn description(&self) -> &str {
         "Execute a skill by name. Skills are markdown prompt templates stored in \
@@ -73,7 +74,8 @@ async fn find_skill(cwd: &std::path::Path, name: &str) -> Result<String> {
     for dir in &dirs {
         let path = dir.join(format!("{name}.md"));
         if path.exists() {
-            return tokio::fs::read_to_string(&path).await
+            return tokio::fs::read_to_string(&path)
+                .await
                 .map_err(|e| anyhow::anyhow!("Cannot read skill {name}: {e}"));
         }
     }

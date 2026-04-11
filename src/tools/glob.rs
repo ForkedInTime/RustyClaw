@@ -1,10 +1,9 @@
 /// GlobTool — port of tools/GlobTool/GlobTool.ts
 /// Fast file pattern matching, results sorted by modification time.
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
-use glob::glob_with;
 use glob::MatchOptions;
+use glob::glob_with;
 use serde::Deserialize;
 use serde_json::json;
 use std::path::Path;

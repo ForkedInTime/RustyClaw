@@ -1,8 +1,7 @@
 /// AgentTool — port of tools/AgentTool/AgentTool.ts
 /// Spawns a sub-agent (nested QueryEngine) to handle a focused subtask.
 /// The sub-agent runs with its own isolated conversation history.
-
-use super::{async_trait, default_tools, DynTool, Tool, ToolContext, ToolOutput};
+use super::{DynTool, Tool, ToolContext, ToolOutput, async_trait, default_tools};
 use crate::config::Config;
 use crate::query_engine::QueryEngine;
 use anyhow::Result;
@@ -156,10 +155,20 @@ impl Tool for AgentTool {
         }
         // Apply parent allowed/disallowed tool filters too
         if !sub_config.allowed_tools.is_empty() {
-            tools.retain(|t| sub_config.allowed_tools.iter().any(|a| a.eq_ignore_ascii_case(t.name())));
+            tools.retain(|t| {
+                sub_config
+                    .allowed_tools
+                    .iter()
+                    .any(|a| a.eq_ignore_ascii_case(t.name()))
+            });
         }
         if !sub_config.disallowed_tools.is_empty() {
-            tools.retain(|t| !sub_config.disallowed_tools.iter().any(|d| d.eq_ignore_ascii_case(t.name())));
+            tools.retain(|t| {
+                !sub_config
+                    .disallowed_tools
+                    .iter()
+                    .any(|d| d.eq_ignore_ascii_case(t.name()))
+            });
         }
 
         let mut sub_engine = QueryEngine::new(sub_config, tools)?;
@@ -170,7 +179,9 @@ impl Tool for AgentTool {
 /// Build tools for a sub-agent (same as default but includes AgentTool recursively).
 fn default_tools_with_config(config: &Config) -> Vec<DynTool> {
     let mut tools = default_tools();
-    tools.push(Arc::new(AgentTool { config: config.clone() }));
+    tools.push(Arc::new(AgentTool {
+        config: config.clone(),
+    }));
     tools
 }
 

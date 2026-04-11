@@ -2,7 +2,6 @@
 ///
 /// Each server runs independently; failures are logged and skipped so a
 /// broken MCP server never prevents rustyclaw from starting.
-
 use crate::mcp::client::McpClient;
 use crate::mcp::types::{McpServerConfig, McpServerStatus};
 use crate::settings::Settings;
@@ -22,7 +21,9 @@ impl McpManager {
         let mut all: std::collections::HashMap<&String, &McpServerConfig> =
             settings.mcp_servers.iter().collect();
         // extra (CLI --mcp-config) wins over settings on name conflicts
-        for (k, v) in extra { all.insert(k, v); }
+        for (k, v) in extra {
+            all.insert(k, v);
+        }
 
         let mut clients = Vec::new();
         for (name, cfg) in &all {
@@ -49,9 +50,7 @@ impl McpManager {
             McpServerConfig::Stdio(s) => {
                 McpClient::connect_stdio(name, &s.command, &s.args, &s.env).await
             }
-            McpServerConfig::Http(h) => {
-                McpClient::connect_http(name, &h.url, &h.headers).await
-            }
+            McpServerConfig::Http(h) => McpClient::connect_http(name, &h.url, &h.headers).await,
         }
     }
 
@@ -66,5 +65,4 @@ impl McpManager {
             })
             .collect()
     }
-
 }

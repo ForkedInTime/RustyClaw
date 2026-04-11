@@ -8,7 +8,6 @@
 ///   → CLI flags
 ///
 /// All fields are Option so a missing key means "inherit from lower priority."
-
 use crate::mcp::types::McpServerConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -338,7 +337,7 @@ impl Settings {
         let project_path = cwd.join(".claude").join("settings.json");
         let mcp_json_path = cwd.join(".mcp.json");
 
-        let global  = Self::from_file(&global_path);
+        let global = Self::from_file(&global_path);
         let project = Self::from_file(&project_path);
         let merged = global.merge(project);
 
@@ -357,22 +356,25 @@ impl Settings {
         let mut s = Self::default();
         if let Ok(content) = std::fs::read_to_string(path)
             && let Ok(json) = serde_json::from_str::<serde_json::Value>(&content)
-                && let Some(obj) = json.get("mcpServers").and_then(|v| v.as_object()) {
-                    for (name, val) in obj {
-                        if let Ok(cfg) = serde_json::from_value::<McpServerConfig>(val.clone()) {
-                            s.mcp_servers.insert(name.clone(), cfg);
-                        }
-                    }
+            && let Some(obj) = json.get("mcpServers").and_then(|v| v.as_object())
+        {
+            for (name, val) in obj {
+                if let Ok(cfg) = serde_json::from_value::<McpServerConfig>(val.clone()) {
+                    s.mcp_servers.insert(name.clone(), cfg);
                 }
+            }
+        }
         s
     }
 
     /// Try to read and parse a settings file; silently return defaults on any error.
     fn from_file(path: &Path) -> Self {
-        if !path.exists() { return Self::default(); }
+        if !path.exists() {
+            return Self::default();
+        }
         match std::fs::read_to_string(path) {
             Err(_) => Self::default(),
-            Ok(s)  => serde_json::from_str(&s).unwrap_or_default(),
+            Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
         }
     }
 
@@ -387,66 +389,83 @@ impl Settings {
 
         // Env: merge both maps (project wins on same key)
         let mut env = self.env;
-        for (k, v) in other.env { env.insert(k, v); }
+        for (k, v) in other.env {
+            env.insert(k, v);
+        }
 
         Self {
-            model:                  other.model.or(self.model),
-            max_tokens:             other.max_tokens.or(self.max_tokens),
-            max_tokens_by_model:    match (self.max_tokens_by_model, other.max_tokens_by_model) {
-                (Some(mut a), Some(b)) => { for (k, v) in b { a.insert(k, v); } Some(a) }
+            model: other.model.or(self.model),
+            max_tokens: other.max_tokens.or(self.max_tokens),
+            max_tokens_by_model: match (self.max_tokens_by_model, other.max_tokens_by_model) {
+                (Some(mut a), Some(b)) => {
+                    for (k, v) in b {
+                        a.insert(k, v);
+                    }
+                    Some(a)
+                }
                 (a, b) => b.or(a),
             },
-            auto_compact:           other.auto_compact.or(self.auto_compact),
-            verbose:                other.verbose.or(self.verbose),
-            ollama_host:            other.ollama_host.or(self.ollama_host),
+            auto_compact: other.auto_compact.or(self.auto_compact),
+            verbose: other.verbose.or(self.verbose),
+            ollama_host: other.ollama_host.or(self.ollama_host),
             thinking_budget_tokens: other.thinking_budget_tokens.or(self.thinking_budget_tokens),
-            show_thinking_summaries: other.show_thinking_summaries.or(self.show_thinking_summaries),
-            prompt_cache:           other.prompt_cache.or(self.prompt_cache),
-            hooks:                  other.hooks.or(self.hooks),
-            effort:                 other.effort.or(self.effort),
+            show_thinking_summaries: other
+                .show_thinking_summaries
+                .or(self.show_thinking_summaries),
+            prompt_cache: other.prompt_cache.or(self.prompt_cache),
+            hooks: other.hooks.or(self.hooks),
+            effort: other.effort.or(self.effort),
             env,
             mcp_servers,
-            api_key_helper:         other.api_key_helper.or(self.api_key_helper),
-            disable_all_hooks:      other.disable_all_hooks.or(self.disable_all_hooks),
-            cleanup_period_days:    other.cleanup_period_days.or(self.cleanup_period_days),
-            default_shell:          other.default_shell.or(self.default_shell),
+            api_key_helper: other.api_key_helper.or(self.api_key_helper),
+            disable_all_hooks: other.disable_all_hooks.or(self.disable_all_hooks),
+            cleanup_period_days: other.cleanup_period_days.or(self.cleanup_period_days),
+            default_shell: other.default_shell.or(self.default_shell),
             include_co_authored_by: other.include_co_authored_by.or(self.include_co_authored_by),
-            output_style:           other.output_style.or(self.output_style),
-            theme:                  other.theme.or(self.theme),
-            sandbox_enabled:        other.sandbox_enabled.or(self.sandbox_enabled),
-            sandbox_mode:           other.sandbox_mode.or(self.sandbox_mode),
-            voice_enabled:          other.voice_enabled.or(self.voice_enabled),
-            voice_api_url:          other.voice_api_url.or(self.voice_api_url),
-            tts_enabled:            other.tts_enabled.or(self.tts_enabled),
-            tts_voice_model:        other.tts_voice_model.or(self.tts_voice_model),
-            notifications_enabled:  other.notifications_enabled.or(self.notifications_enabled),
-            spinner_style:          other.spinner_style.or(self.spinner_style),
-            sandbox_allow_network:  other.sandbox_allow_network.or(self.sandbox_allow_network),
-            disable_skill_shell_execution: other.disable_skill_shell_execution.or(self.disable_skill_shell_execution),
-            router_enabled:       other.router_enabled.or(self.router_enabled),
-            router_budget:        other.router_budget.or(self.router_budget),
-            router_low_model:     other.router_low_model.or(self.router_low_model),
-            router_medium_model:  other.router_medium_model.or(self.router_medium_model),
-            router_high_model:    other.router_high_model.or(self.router_high_model),
-            router_super_high_model: other.router_super_high_model.or(self.router_super_high_model),
-            autonomy:             other.autonomy.or(self.autonomy),
-            memory_auto_capture:  other.memory_auto_capture.or(self.memory_auto_capture),
-            phase_router:         other.phase_router.or(self.phase_router),
-            auto_fix:             other.auto_fix.or(self.auto_fix),
-            auto_commit:          other.auto_commit.or(self.auto_commit),
+            output_style: other.output_style.or(self.output_style),
+            theme: other.theme.or(self.theme),
+            sandbox_enabled: other.sandbox_enabled.or(self.sandbox_enabled),
+            sandbox_mode: other.sandbox_mode.or(self.sandbox_mode),
+            voice_enabled: other.voice_enabled.or(self.voice_enabled),
+            voice_api_url: other.voice_api_url.or(self.voice_api_url),
+            tts_enabled: other.tts_enabled.or(self.tts_enabled),
+            tts_voice_model: other.tts_voice_model.or(self.tts_voice_model),
+            notifications_enabled: other.notifications_enabled.or(self.notifications_enabled),
+            spinner_style: other.spinner_style.or(self.spinner_style),
+            sandbox_allow_network: other.sandbox_allow_network.or(self.sandbox_allow_network),
+            disable_skill_shell_execution: other
+                .disable_skill_shell_execution
+                .or(self.disable_skill_shell_execution),
+            router_enabled: other.router_enabled.or(self.router_enabled),
+            router_budget: other.router_budget.or(self.router_budget),
+            router_low_model: other.router_low_model.or(self.router_low_model),
+            router_medium_model: other.router_medium_model.or(self.router_medium_model),
+            router_high_model: other.router_high_model.or(self.router_high_model),
+            router_super_high_model: other
+                .router_super_high_model
+                .or(self.router_super_high_model),
+            autonomy: other.autonomy.or(self.autonomy),
+            memory_auto_capture: other.memory_auto_capture.or(self.memory_auto_capture),
+            phase_router: other.phase_router.or(self.phase_router),
+            auto_fix: other.auto_fix.or(self.auto_fix),
+            auto_commit: other.auto_commit.or(self.auto_commit),
             permissions: PermissionsConfig {
                 // Union both lists — project additions stack on top of global
                 allow: {
                     let mut v = self.permissions.allow;
                     for item in other.permissions.allow {
-                        if !v.contains(&item) { v.push(item); }
+                        if !v.contains(&item) {
+                            v.push(item);
+                        }
                     }
                     v
                 },
                 deny: {
                     let mut v = self.permissions.deny;
                     for item in other.permissions.deny {
-                        if !v.contains(&item) { v.push(item); }
+                        if !v.contains(&item) {
+                            v.push(item);
+                        }
                     }
                     v
                 },
@@ -457,12 +476,18 @@ impl Settings {
     /// Return the path(s) that were actually loaded, for diagnostics.
     pub fn loaded_paths(cwd: &Path) -> Vec<String> {
         let mut paths = Vec::new();
-        let global   = crate::config::Config::claude_dir().join("settings.json");
-        let project  = cwd.join(".claude").join("settings.json");
+        let global = crate::config::Config::claude_dir().join("settings.json");
+        let project = cwd.join(".claude").join("settings.json");
         let mcp_json = cwd.join(".mcp.json");
-        if global.exists()   { paths.push(global.display().to_string()); }
-        if project.exists()  { paths.push(project.display().to_string()); }
-        if mcp_json.exists() { paths.push(mcp_json.display().to_string()); }
+        if global.exists() {
+            paths.push(global.display().to_string());
+        }
+        if project.exists() {
+            paths.push(project.display().to_string());
+        }
+        if mcp_json.exists() {
+            paths.push(mcp_json.display().to_string());
+        }
         paths
     }
 }
@@ -500,7 +525,9 @@ mod auto_fix_key_tests {
             }
         }"#;
         let s: Settings = serde_json::from_str(json).unwrap();
-        let af = s.auto_fix.expect("legacy autoRollback should deserialise into auto_fix");
+        let af = s
+            .auto_fix
+            .expect("legacy autoRollback should deserialise into auto_fix");
         assert_eq!(af.test_command.as_deref(), Some("pytest"));
     }
 
@@ -518,8 +545,14 @@ mod auto_fix_key_tests {
             ..Default::default()
         };
         let out = serde_json::to_string(&s).unwrap();
-        assert!(out.contains("autoFixLoop"), "serialised form should use the new key: {out}");
-        assert!(!out.contains("autoRollback"), "serialised form should not use the legacy key: {out}");
+        assert!(
+            out.contains("autoFixLoop"),
+            "serialised form should use the new key: {out}"
+        );
+        assert!(
+            !out.contains("autoRollback"),
+            "serialised form should not use the legacy key: {out}"
+        );
     }
 }
 
@@ -561,6 +594,9 @@ mod auto_commit_key_tests {
         };
         let out = serde_json::to_string(&s).unwrap();
         assert!(out.contains("autoCommit"), "expected autoCommit key: {out}");
-        assert!(out.contains("keepSessions"), "expected keepSessions key: {out}");
+        assert!(
+            out.contains("keepSessions"),
+            "expected keepSessions key: {out}"
+        );
     }
 }

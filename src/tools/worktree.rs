@@ -1,7 +1,6 @@
 /// EnterWorktreeTool / ExitWorktreeTool — port of tools/EnterWorktreeTool + ExitWorktreeTool
 /// Creates and removes git worktrees for isolated development sessions.
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
@@ -39,7 +38,9 @@ struct EnterInput {
 
 #[async_trait]
 impl Tool for EnterWorktreeTool {
-    fn name(&self) -> &str { "EnterWorktree" }
+    fn name(&self) -> &str {
+        "EnterWorktree"
+    }
 
     fn description(&self) -> &str {
         "Create and enter a git worktree for isolated work. Creates a new branch \
@@ -83,12 +84,15 @@ impl Tool for EnterWorktreeTool {
         }
 
         // Build branch/worktree name
-        let slug = input.name.unwrap_or_else(|| {
-            format!("wt-{}", &Uuid::new_v4().to_string()[..8])
-        });
+        let slug = input
+            .name
+            .unwrap_or_else(|| format!("wt-{}", &Uuid::new_v4().to_string()[..8]));
 
         // Validate slug: only alphanumeric, dash, underscore, dot
-        if !slug.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.')) {
+        if !slug
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        {
             return Ok(ToolOutput::error(
                 "Worktree name may only contain letters, digits, dashes, underscores, and dots.",
             ));
@@ -109,7 +113,11 @@ impl Tool for EnterWorktreeTool {
         let worktree_path = PathBuf::from(&git_root)
             .parent()
             .unwrap_or(PathBuf::from("/tmp").as_path())
-            .join(format!("{}-{}", git_root.split('/').next_back().unwrap_or("repo"), &slug));
+            .join(format!(
+                "{}-{}",
+                git_root.split('/').next_back().unwrap_or("repo"),
+                &slug
+            ));
 
         // Create worktree + branch
         let output = Command::new("git")
@@ -137,11 +145,14 @@ impl Tool for EnterWorktreeTool {
         };
         *self.state.lock().unwrap() = Some(session);
 
-        Ok(ToolOutput::success(json!({
-            "worktreePath": worktree_path.to_string_lossy(),
-            "worktreeBranch": slug,
-            "message": format!("Entered worktree '{}' at {}", slug, worktree_path.display())
-        }).to_string()))
+        Ok(ToolOutput::success(
+            json!({
+                "worktreePath": worktree_path.to_string_lossy(),
+                "worktreeBranch": slug,
+                "message": format!("Entered worktree '{}' at {}", slug, worktree_path.display())
+            })
+            .to_string(),
+        ))
     }
 }
 
@@ -153,7 +164,9 @@ pub struct ExitWorktreeTool {
 
 #[async_trait]
 impl Tool for ExitWorktreeTool {
-    fn name(&self) -> &str { "ExitWorktree" }
+    fn name(&self) -> &str {
+        "ExitWorktree"
+    }
 
     fn description(&self) -> &str {
         "Exit the current git worktree and return to the original working directory. \

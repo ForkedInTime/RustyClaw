@@ -1,7 +1,6 @@
 /// ConfigTool — port of config.ts (slash command) exposed as a tool
 /// Reads the current configuration and returns it to Claude.
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 use serde_json::json;
 
@@ -11,7 +10,9 @@ pub struct ConfigTool {
 
 #[async_trait]
 impl Tool for ConfigTool {
-    fn name(&self) -> &str { "Config" }
+    fn name(&self) -> &str {
+        "Config"
+    }
 
     fn description(&self) -> &str {
         "Read the current assistant configuration (model, settings, enabled features). \

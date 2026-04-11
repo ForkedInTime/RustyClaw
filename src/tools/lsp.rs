@@ -2,20 +2,19 @@
 /// Communicates with language servers via JSON-RPC 2.0 over stdio using LSP protocol.
 /// Supports: goToDefinition, findReferences, hover, documentSymbol, workspaceSymbol,
 ///           goToImplementation, prepareCallHierarchy, incomingCalls, outgoingCalls
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
-use anyhow::{anyhow, Result};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
+use anyhow::{Result, anyhow};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc,
+    atomic::{AtomicU64, Ordering},
 };
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::ChildStdin;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{Mutex, oneshot};
 
 pub struct LSPTool;
 
@@ -41,7 +40,9 @@ struct Input {
 
 #[async_trait]
 impl Tool for LSPTool {
-    fn name(&self) -> &str { "LSP" }
+    fn name(&self) -> &str {
+        "LSP"
+    }
 
     fn description(&self) -> &str {
         "Query a language server for code intelligence. Operations: \
@@ -93,7 +94,7 @@ impl Tool for LSPTool {
             Some(p) => resolve_path(&ctx.cwd, p),
             None if input.operation != "workspaceSymbol" => {
                 return Ok(ToolOutput::error(
-                    "file_path is required for this operation"
+                    "file_path is required for this operation",
                 ));
             }
             None => ctx.cwd.clone(),
@@ -102,9 +103,14 @@ impl Tool for LSPTool {
         // Determine language server command from file extension
         let server_cmd = match file_path.extension().and_then(|e| e.to_str()) {
             Some("rs") => vec!["rust-analyzer".to_string()],
-            Some("py") | Some("pyi") => vec!["pyright-langserver".to_string(), "--stdio".to_string()],
+            Some("py") | Some("pyi") => {
+                vec!["pyright-langserver".to_string(), "--stdio".to_string()]
+            }
             Some("ts") | Some("tsx") | Some("js") | Some("jsx") | Some("mjs") | Some("cjs") => {
-                vec!["typescript-language-server".to_string(), "--stdio".to_string()]
+                vec![
+                    "typescript-language-server".to_string(),
+                    "--stdio".to_string(),
+                ]
             }
             Some("c") | Some("cpp") | Some("cc") | Some("h") | Some("hpp") => {
                 vec!["clangd".to_string()]
@@ -123,7 +129,8 @@ impl Tool for LSPTool {
         };
 
         // Spawn and connect to the language server
-        let mut client = match LspClient::connect(&server_cmd[0], &server_cmd[1..], &ctx.cwd).await {
+        let mut client = match LspClient::connect(&server_cmd[0], &server_cmd[1..], &ctx.cwd).await
+        {
             Ok(c) => c,
             Err(e) => {
                 return Ok(ToolOutput::error(format!(
@@ -141,19 +148,25 @@ impl Tool for LSPTool {
 
         // Open the document so the server can process it
         if file_path.exists()
-            && let Ok(content) = tokio::fs::read_to_string(&file_path).await {
-                let lang_id = lang_id_for_ext(file_path.extension().and_then(|e| e.to_str()));
-                client.notify("textDocument/didOpen", json!({
-                    "textDocument": {
-                        "uri": uri,
-                        "languageId": lang_id,
-                        "version": 1,
-                        "text": content
-                    }
-                })).await?;
-                // Small delay to let server process the document
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            }
+            && let Ok(content) = tokio::fs::read_to_string(&file_path).await
+        {
+            let lang_id = lang_id_for_ext(file_path.extension().and_then(|e| e.to_str()));
+            client
+                .notify(
+                    "textDocument/didOpen",
+                    json!({
+                        "textDocument": {
+                            "uri": uri,
+                            "languageId": lang_id,
+                            "version": 1,
+                            "text": content
+                        }
+                    }),
+                )
+                .await?;
+            // Small delay to let server process the document
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
 
         let position = json!({
             "line": input.line.unwrap_or(0),
@@ -162,69 +175,124 @@ impl Tool for LSPTool {
 
         let result = match input.operation.as_str() {
             "goToDefinition" => {
-                client.request("textDocument/definition", json!({
-                    "textDocument": { "uri": uri },
-                    "position": position
-                })).await?
+                client
+                    .request(
+                        "textDocument/definition",
+                        json!({
+                            "textDocument": { "uri": uri },
+                            "position": position
+                        }),
+                    )
+                    .await?
             }
             "findReferences" => {
-                client.request("textDocument/references", json!({
-                    "textDocument": { "uri": uri },
-                    "position": position,
-                    "context": { "includeDeclaration": true }
-                })).await?
+                client
+                    .request(
+                        "textDocument/references",
+                        json!({
+                            "textDocument": { "uri": uri },
+                            "position": position,
+                            "context": { "includeDeclaration": true }
+                        }),
+                    )
+                    .await?
             }
             "hover" => {
-                client.request("textDocument/hover", json!({
-                    "textDocument": { "uri": uri },
-                    "position": position
-                })).await?
+                client
+                    .request(
+                        "textDocument/hover",
+                        json!({
+                            "textDocument": { "uri": uri },
+                            "position": position
+                        }),
+                    )
+                    .await?
             }
             "documentSymbol" => {
-                client.request("textDocument/documentSymbol", json!({
-                    "textDocument": { "uri": uri }
-                })).await?
+                client
+                    .request(
+                        "textDocument/documentSymbol",
+                        json!({
+                            "textDocument": { "uri": uri }
+                        }),
+                    )
+                    .await?
             }
             "workspaceSymbol" => {
-                client.request("workspace/symbol", json!({
-                    "query": input.query.as_deref().unwrap_or("")
-                })).await?
+                client
+                    .request(
+                        "workspace/symbol",
+                        json!({
+                            "query": input.query.as_deref().unwrap_or("")
+                        }),
+                    )
+                    .await?
             }
             "goToImplementation" => {
-                client.request("textDocument/implementation", json!({
-                    "textDocument": { "uri": uri },
-                    "position": position
-                })).await?
+                client
+                    .request(
+                        "textDocument/implementation",
+                        json!({
+                            "textDocument": { "uri": uri },
+                            "position": position
+                        }),
+                    )
+                    .await?
             }
             "prepareCallHierarchy" => {
-                client.request("textDocument/prepareCallHierarchy", json!({
-                    "textDocument": { "uri": uri },
-                    "position": position
-                })).await?
+                client
+                    .request(
+                        "textDocument/prepareCallHierarchy",
+                        json!({
+                            "textDocument": { "uri": uri },
+                            "position": position
+                        }),
+                    )
+                    .await?
             }
             "incomingCalls" => {
                 // First prepare
-                let items = client.request("textDocument/prepareCallHierarchy", json!({
-                    "textDocument": { "uri": uri },
-                    "position": position
-                })).await?;
+                let items = client
+                    .request(
+                        "textDocument/prepareCallHierarchy",
+                        json!({
+                            "textDocument": { "uri": uri },
+                            "position": position
+                        }),
+                    )
+                    .await?;
                 if let Some(item) = items.as_array().and_then(|a| a.first()) {
-                    client.request("callHierarchy/incomingCalls", json!({
-                        "item": item
-                    })).await?
+                    client
+                        .request(
+                            "callHierarchy/incomingCalls",
+                            json!({
+                                "item": item
+                            }),
+                        )
+                        .await?
                 } else {
                     Value::Null
                 }
             }
             "outgoingCalls" => {
-                let items = client.request("textDocument/prepareCallHierarchy", json!({
-                    "textDocument": { "uri": uri },
-                    "position": position
-                })).await?;
+                let items = client
+                    .request(
+                        "textDocument/prepareCallHierarchy",
+                        json!({
+                            "textDocument": { "uri": uri },
+                            "position": position
+                        }),
+                    )
+                    .await?;
                 if let Some(item) = items.as_array().and_then(|a| a.first()) {
-                    client.request("callHierarchy/outgoingCalls", json!({
-                        "item": item
-                    })).await?
+                    client
+                        .request(
+                            "callHierarchy/outgoingCalls",
+                            json!({
+                                "item": item
+                            }),
+                        )
+                        .await?
                 } else {
                     Value::Null
                 }
@@ -258,10 +326,8 @@ impl LspClient {
             .spawn()
             .map_err(|e| anyhow!("Failed to spawn '{}': {}", command, e))?;
 
-        let stdin = child.stdin.take()
-            .ok_or_else(|| anyhow!("no stdin"))?;
-        let stdout = child.stdout.take()
-            .ok_or_else(|| anyhow!("no stdout"))?;
+        let stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
+        let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
 
         let pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -273,10 +339,14 @@ impl LspClient {
             loop {
                 // Read Content-Length header
                 let mut header = String::new();
-                if reader.read_line(&mut header).await.unwrap_or(0) == 0 { break; }
+                if reader.read_line(&mut header).await.unwrap_or(0) == 0 {
+                    break;
+                }
                 let header = header.trim().to_string();
 
-                if !header.starts_with("Content-Length:") { continue; }
+                if !header.starts_with("Content-Length:") {
+                    continue;
+                }
 
                 let content_length: usize = header
                     .trim_start_matches("Content-Length:")
@@ -288,11 +358,15 @@ impl LspClient {
                 let mut blank = String::new();
                 let _ = reader.read_line(&mut blank).await;
 
-                if content_length == 0 { continue; }
+                if content_length == 0 {
+                    continue;
+                }
 
                 // Read the body
                 let mut body = vec![0u8; content_length];
-                if reader.read_exact(&mut body).await.is_err() { break; }
+                if reader.read_exact(&mut body).await.is_err() {
+                    break;
+                }
 
                 let text = match String::from_utf8(body) {
                     Ok(t) => t,
@@ -349,16 +423,14 @@ impl LspClient {
             "id": id,
             "method": method,
             "params": params
-        })).await?;
+        }))
+        .await?;
 
         // Wait up to 15 seconds
-        tokio::time::timeout(
-            tokio::time::Duration::from_secs(15),
-            rx,
-        )
-        .await
-        .map_err(|_| anyhow!("LSP request '{}' timed out", method))?
-        .map_err(|_| anyhow!("LSP request '{}' cancelled", method))?
+        tokio::time::timeout(tokio::time::Duration::from_secs(15), rx)
+            .await
+            .map_err(|_| anyhow!("LSP request '{}' timed out", method))?
+            .map_err(|_| anyhow!("LSP request '{}' cancelled", method))?
     }
 
     async fn notify(&mut self, method: &str, params: Value) -> Result<()> {
@@ -366,30 +438,35 @@ impl LspClient {
             "jsonrpc": "2.0",
             "method": method,
             "params": params
-        })).await
+        }))
+        .await
     }
 
     async fn initialize(&mut self, root: &Path) -> Result<()> {
         let root_uri = path_to_uri(root);
-        self.request("initialize", json!({
-            "processId": std::process::id(),
-            "rootUri": root_uri,
-            "rootPath": root.to_string_lossy(),
-            "capabilities": {
-                "textDocument": {
-                    "definition": { "dynamicRegistration": false },
-                    "references": { "dynamicRegistration": false },
-                    "hover": { "dynamicRegistration": false, "contentFormat": ["plaintext"] },
-                    "documentSymbol": { "dynamicRegistration": false },
-                    "implementation": { "dynamicRegistration": false },
-                    "callHierarchy": { "dynamicRegistration": false }
+        self.request(
+            "initialize",
+            json!({
+                "processId": std::process::id(),
+                "rootUri": root_uri,
+                "rootPath": root.to_string_lossy(),
+                "capabilities": {
+                    "textDocument": {
+                        "definition": { "dynamicRegistration": false },
+                        "references": { "dynamicRegistration": false },
+                        "hover": { "dynamicRegistration": false, "contentFormat": ["plaintext"] },
+                        "documentSymbol": { "dynamicRegistration": false },
+                        "implementation": { "dynamicRegistration": false },
+                        "callHierarchy": { "dynamicRegistration": false }
+                    },
+                    "workspace": {
+                        "symbol": { "dynamicRegistration": false }
+                    }
                 },
-                "workspace": {
-                    "symbol": { "dynamicRegistration": false }
-                }
-            },
-            "initializationOptions": {}
-        })).await?;
+                "initializationOptions": {}
+            }),
+        )
+        .await?;
 
         self.notify("initialized", json!({})).await?;
         Ok(())
@@ -402,9 +479,7 @@ fn path_to_uri(path: &Path) -> String {
     let abs = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        std::env::current_dir()
-            .unwrap_or_default()
-            .join(path)
+        std::env::current_dir().unwrap_or_default().join(path)
     };
     format!("file://{}", abs.display())
 }
@@ -420,7 +495,11 @@ fn resolve_path(cwd: &Path, p: &str) -> PathBuf {
         PathBuf::from(p)
     };
 
-    if expanded.is_absolute() { expanded } else { cwd.join(expanded) }
+    if expanded.is_absolute() {
+        expanded
+    } else {
+        cwd.join(expanded)
+    }
 }
 
 fn lang_id_for_ext(ext: Option<&str>) -> &'static str {
@@ -450,13 +529,18 @@ fn format_lsp_result(operation: &str, result: &Value) -> String {
     match operation {
         "hover" => {
             // { contents: { kind, value } | string | [strings] }
-            
+
             result
                 .get("contents")
                 .and_then(|c| {
-                    if let Some(s) = c.as_str() { return Some(s.to_string()); }
+                    if let Some(s) = c.as_str() {
+                        return Some(s.to_string());
+                    }
                     if let Some(obj) = c.as_object() {
-                        return obj.get("value").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        return obj
+                            .get("value")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
                     }
                     None
                 })
@@ -464,12 +548,15 @@ fn format_lsp_result(operation: &str, result: &Value) -> String {
         }
         "documentSymbol" | "workspaceSymbol" => {
             if let Some(arr) = result.as_array() {
-                let lines: Vec<String> = arr.iter().map(|sym| {
-                    let name = sym.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                    let kind = sym.get("kind").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let kind_str = symbol_kind(kind);
-                    format!("{kind_str} {name}")
-                }).collect();
+                let lines: Vec<String> = arr
+                    .iter()
+                    .map(|sym| {
+                        let name = sym.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                        let kind = sym.get("kind").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let kind_str = symbol_kind(kind);
+                        format!("{kind_str} {name}")
+                    })
+                    .collect();
                 lines.join("\n")
             } else {
                 result.to_string()
@@ -478,9 +565,7 @@ fn format_lsp_result(operation: &str, result: &Value) -> String {
         _ => {
             // Locations array
             if let Some(arr) = result.as_array() {
-                let lines: Vec<String> = arr.iter().map(|loc| {
-                    format_location(loc)
-                }).collect();
+                let lines: Vec<String> = arr.iter().map(|loc| format_location(loc)).collect();
                 if lines.is_empty() {
                     format!("{operation}: no results")
                 } else {
@@ -495,22 +580,26 @@ fn format_lsp_result(operation: &str, result: &Value) -> String {
 }
 
 fn format_location(loc: &Value) -> String {
-    let uri = loc.get("uri")
+    let uri = loc
+        .get("uri")
         .or_else(|| loc.get("location").and_then(|l| l.get("uri")))
         .and_then(|v| v.as_str())
         .unwrap_or("?");
 
     let path = uri.trim_start_matches("file://");
 
-    let range = loc.get("range")
+    let range = loc
+        .get("range")
         .or_else(|| loc.get("location").and_then(|l| l.get("range")));
 
     if let Some(range) = range {
-        let line = range.get("start")
+        let line = range
+            .get("start")
             .and_then(|s| s.get("line"))
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
-        let character = range.get("start")
+        let character = range
+            .get("start")
             .and_then(|s| s.get("character"))
             .and_then(|v| v.as_u64())
             .unwrap_or(0);

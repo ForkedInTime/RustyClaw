@@ -5,7 +5,6 @@
 /// and stores them as searchable chunks in the RAG database.
 ///
 /// Incremental: only re-indexes files whose mtime changed since last index.
-
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
@@ -179,9 +178,10 @@ fn extract_symbol_name(node: &tree_sitter::Node, source: &[u8]) -> String {
             || kind == "name"
             || kind == "type_identifier"
             || kind == "property_identifier")
-            && let Ok(name) = child.utf8_text(source) {
-                return name.to_string();
-            }
+            && let Ok(name) = child.utf8_text(source)
+        {
+            return name.to_string();
+        }
         // For export statements, look deeper (one level)
         if kind == "function_declaration"
             || kind == "class_declaration"
@@ -191,9 +191,10 @@ fn extract_symbol_name(node: &tree_sitter::Node, source: &[u8]) -> String {
             for grandchild in child.children(&mut inner) {
                 let gk = grandchild.kind();
                 if (gk == "identifier" || gk == "type_identifier")
-                    && let Ok(name) = grandchild.utf8_text(source) {
-                        return name.to_string();
-                    }
+                    && let Ok(name) = grandchild.utf8_text(source)
+                {
+                    return name.to_string();
+                }
             }
         }
     }
@@ -319,7 +320,11 @@ fn collect_symbols(
             // Cap chunk size at 200 lines — huge functions get truncated
             let content = if end_line - start_line > 200 {
                 let lines: Vec<&str> = content.lines().take(200).collect();
-                format!("{}\n// ... ({} more lines)", lines.join("\n"), end_line - start_line - 200)
+                format!(
+                    "{}\n// ... ({} more lines)",
+                    lines.join("\n"),
+                    end_line - start_line - 200
+                )
             } else {
                 content.to_string()
             };
@@ -546,9 +551,10 @@ mod tests {
 
     #[test]
     fn test_index_rust_file() {
-        let tmp = setup_project(&[
-            ("src/lib.rs", "pub fn hello() -> &'static str { \"hello\" }\n\nstruct Config { name: String }\n"),
-        ]);
+        let tmp = setup_project(&[(
+            "src/lib.rs",
+            "pub fn hello() -> &'static str { \"hello\" }\n\nstruct Config { name: String }\n",
+        )]);
         let db = RagDb::open(tmp.path()).unwrap();
         let result = index_project(&db, tmp.path(), false).unwrap();
         assert_eq!(result.files_scanned, 1);
@@ -573,9 +579,7 @@ mod tests {
 
     #[test]
     fn test_incremental_index_skips_unchanged() {
-        let tmp = setup_project(&[
-            ("lib.rs", "fn foo() {}"),
-        ]);
+        let tmp = setup_project(&[("lib.rs", "fn foo() {}")]);
         let db = RagDb::open(tmp.path()).unwrap();
 
         let r1 = index_project(&db, tmp.path(), false).unwrap();
@@ -589,9 +593,7 @@ mod tests {
 
     #[test]
     fn test_force_reindex() {
-        let tmp = setup_project(&[
-            ("lib.rs", "fn foo() {}"),
-        ]);
+        let tmp = setup_project(&[("lib.rs", "fn foo() {}")]);
         let db = RagDb::open(tmp.path()).unwrap();
 
         index_project(&db, tmp.path(), false).unwrap();
@@ -636,8 +638,9 @@ mod tests {
 
     #[test]
     fn test_symbol_extraction_rust() {
-        let tmp = setup_project(&[
-            ("lib.rs", "\
+        let tmp = setup_project(&[(
+            "lib.rs",
+            "\
 pub fn public_func() -> i32 { 42 }
 
 struct MyStruct {
@@ -652,8 +655,8 @@ enum Color {
 impl MyStruct {
     fn method(&self) {}
 }
-"),
-        ]);
+",
+        )]);
         let db = RagDb::open(tmp.path()).unwrap();
         index_project(&db, tmp.path(), false).unwrap();
 

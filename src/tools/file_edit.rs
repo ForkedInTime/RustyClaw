@@ -1,7 +1,6 @@
 /// FileEditTool — port of tools/FileEditTool/FileEditTool.ts
 /// Performs exact string replacement in a file (old_string → new_string).
-
-use super::{async_trait, snapshot_file, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait, snapshot_file};
 use crate::tools::file_read::resolve_path;
 use anyhow::Result;
 use serde::Deserialize;
@@ -61,7 +60,9 @@ impl Tool for FileEditTool {
         let input: FileEditInput = serde_json::from_value(input)?;
         let path = resolve_path(&input.file_path, &ctx.cwd);
 
-        if let Some(err) = super::check_protected_path(&path) { return Ok(err); }
+        if let Some(err) = super::check_protected_path(&path) {
+            return Ok(err);
+        }
         if let Some(err) = super::check_sensitive_path(&path, super::SensitiveOp::Write) {
             return Ok(err);
         }
@@ -76,9 +77,9 @@ impl Tool for FileEditTool {
             )));
         }
 
-        let content = fs::read_to_string(&path).await.map_err(|e| {
-            anyhow::anyhow!("Failed to read {}: {}", path.display(), e)
-        })?;
+        let content = fs::read_to_string(&path)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))?;
 
         if input.replace_all {
             let new_content = content.replace(&input.old_string, &input.new_string);

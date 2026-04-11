@@ -3,8 +3,7 @@
 /// Claude calls this when it needs clarification or input from the user during
 /// a tool-use sequence.  The TUI shows a text-input dialog; the user's answer
 /// is returned as the tool result.
-
-use crate::tools::{async_trait, Tool, ToolContext, ToolOutput};
+use crate::tools::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 use tokio::sync::oneshot;
 
@@ -12,7 +11,9 @@ pub struct AskUserQuestionTool;
 
 #[async_trait]
 impl Tool for AskUserQuestionTool {
-    fn name(&self) -> &str { "AskUserQuestion" }
+    fn name(&self) -> &str {
+        "AskUserQuestion"
+    }
 
     fn description(&self) -> &str {
         "Ask the user a question and wait for their response. Use this when you need \
@@ -41,7 +42,7 @@ impl Tool for AskUserQuestionTool {
 
         let Some(tx) = &ctx.ask_user_tx else {
             return Ok(ToolOutput::error(
-                "AskUserQuestion is not available in this execution context."
+                "AskUserQuestion is not available in this execution context.",
             ));
         };
 

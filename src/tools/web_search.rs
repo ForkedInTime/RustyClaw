@@ -1,7 +1,6 @@
 /// WebSearchTool — port of tools/WebSearchTool/WebSearchTool.ts
 /// Uses the Anthropic web search beta API (web-search-2025-03-05).
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
@@ -95,7 +94,9 @@ impl Tool for WebSearchTool {
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Ok(ToolOutput::error(format!("Web search API error {status}: {body}")));
+            return Ok(ToolOutput::error(format!(
+                "Web search API error {status}: {body}"
+            )));
         }
 
         let resp: serde_json::Value = response.json().await?;
@@ -114,10 +115,9 @@ impl Tool for WebSearchTool {
                         // Include source URLs
                         if let Some(results) = block["results"].as_array() {
                             for r in results {
-                                if let (Some(title), Some(url)) = (
-                                    r["title"].as_str(),
-                                    r["url"].as_str(),
-                                ) {
+                                if let (Some(title), Some(url)) =
+                                    (r["title"].as_str(), r["url"].as_str())
+                                {
                                     result.push_str(&format!("\n[{title}]({url})"));
                                 }
                             }

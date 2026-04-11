@@ -1,13 +1,12 @@
 /// BashTool — port of tools/BashTool/BashTool.ts
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
+use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::time::{timeout, Duration};
-use std::process::Stdio;
+use tokio::time::{Duration, timeout};
 
 /// RAII guard that owns a running `tokio::process::Child` and, on drop, kills
 /// the *entire* Unix process group the child leads. This is required because:
@@ -84,7 +83,9 @@ fn strip_ansi(s: &str) -> String {
                     chars.next(); // consume '['
                     // consume until a letter (the command character)
                     for c in chars.by_ref() {
-                        if c.is_ascii_alphabetic() { break; }
+                        if c.is_ascii_alphabetic() {
+                            break;
+                        }
                     }
                 } else {
                     // Other ESC sequences — consume next char
@@ -162,7 +163,9 @@ impl Tool for BashTool {
         let stream_tx = ctx.stream_tx.clone();
         let cwd = ctx.cwd.clone();
         // Resolve shell: ctx.default_shell → $SHELL env var → "bash"
-        let shell = ctx.default_shell.clone()
+        let shell = ctx
+            .default_shell
+            .clone()
             .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_else(|_| "bash".into()));
 
         let fut = async move {
@@ -187,9 +190,13 @@ impl Tool for BashTool {
             let mut guard = ProcessGroupGuard::new(cmd.spawn()?);
             let child = guard.child_mut();
 
-            let stdout = child.stdout.take()
+            let stdout = child
+                .stdout
+                .take()
                 .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout"))?;
-            let stderr = child.stderr.take()
+            let stderr = child
+                .stderr
+                .take()
                 .ok_or_else(|| anyhow::anyhow!("Failed to capture stderr"))?;
 
             let mut combined = String::new();

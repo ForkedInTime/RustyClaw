@@ -1,35 +1,32 @@
 /// Main TUI loop — ratatui alternate screen, event-driven (no fixed tick).
-
 use crate::api::types::*;
 use crate::api::{ApiBackend, MessagesRequest};
-use crate::commands::{dispatch, CommandAction, CommandContext};
-use crate::compact::{compact_needed, snip_compact, summarize_compact, CompactNeeded};
+use crate::commands::{CommandAction, CommandContext, dispatch};
+use crate::compact::{CompactNeeded, compact_needed, snip_compact, summarize_compact};
 use crate::config::Config;
 use crate::hooks;
+use crate::mcp::{McpManager, mcp_dyn_tools};
 use crate::permissions::{CheckResult, PermissionDecision, PermissionState, describe_tool_call};
 use crate::session::{Session, entries_from_messages};
 use crate::skills::{load_skills, parse_skill_invocation};
-use crate::mcp::{mcp_dyn_tools, McpManager};
-use crate::tools::{all_tools_with_state_and_mcp, DynTool, ToolContext, ToolOutput};
 use crate::tools::todo::TodoState;
+use crate::tools::{DynTool, ToolContext, ToolOutput, all_tools_with_state_and_mcp};
 use crate::tui::app::{App, ChatEntry, Overlay};
 use crate::tui::events::AppEvent;
-use anyhow::Result as AResult;
 use crate::tui::render::draw;
+use anyhow::Result as AResult;
 
 use anyhow::Result;
 use crossterm::{
     event::{
-        DisableBracketedPaste, DisableMouseCapture,
-        EnableBracketedPaste, EnableMouseCapture,
-        Event, EventStream, KeyCode, KeyModifiers,
-        MouseEventKind,
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, EventStream, KeyCode, KeyModifiers, MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode},
 };
 use futures_util::StreamExt as _;
-use ratatui::{backend::CrosstermBackend, Terminal, TerminalOptions, Viewport};
+use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend};
 use std::io;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
@@ -52,8 +49,12 @@ pub async fn run_tui(config: Config, resume_id: Option<String>) -> Result<()> {
     let result = run_loop(config, resume_id).await;
     disable_raw_mode()?;
     let mut cleanup = io::stdout();
-    execute!(cleanup, DisableBracketedPaste, DisableMouseCapture,
-             crossterm::cursor::Show)?;
+    execute!(
+        cleanup,
+        DisableBracketedPaste,
+        DisableMouseCapture,
+        crossterm::cursor::Show
+    )?;
     result
 }
 
@@ -80,8 +81,8 @@ fn viewport_height(app: &App, term_cols: u16, term_rows: u16) -> u16 {
     if show_banner {
         // Must mirror the banner_h formula in render::draw() exactly.
         const LOGO_H: u16 = 6; // LOGO.len() in render.rs
-        let left_h  = LOGO_H + 7;  // welcome + blank + logo + blank + model + cwd + blank + tagline
-        let sess_h  = (app.recent_sessions.len() as u16).min(4) * 2;
+        let left_h = LOGO_H + 7; // welcome + blank + logo + blank + model + cwd + blank + tagline
+        let sess_h = (app.recent_sessions.len() as u16).min(4) * 2;
         let right_h = 6 + sess_h;
         let banner_h = left_h.max(right_h) + 2;
         (banner_h + input_h + status_h).min(term_rows)
@@ -98,7 +99,9 @@ fn make_terminal(vp_h: u16) -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
     let backend = CrosstermBackend::new(io::stdout());
     match Terminal::with_options(
         backend,
-        TerminalOptions { viewport: Viewport::Inline(vp_h) },
+        TerminalOptions {
+            viewport: Viewport::Inline(vp_h),
+        },
     ) {
         Ok(t) => Ok(t),
         Err(_) => {
@@ -106,7 +109,9 @@ fn make_terminal(vp_h: u16) -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
             let backend = CrosstermBackend::new(io::stdout());
             Ok(Terminal::with_options(
                 backend,
-                TerminalOptions { viewport: Viewport::Fullscreen },
+                TerminalOptions {
+                    viewport: Viewport::Fullscreen,
+                },
             )?)
         }
     }
@@ -127,9 +132,15 @@ async fn upgrade_check_task(tx: tokio::sync::mpsc::UnboundedSender<AppEvent>) {
         .output()
         .await
         .ok()
-        .and_then(|o| if o.status.success() {
-            String::from_utf8(o.stdout).ok().map(|s| s.trim().to_string())
-        } else { None });
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8(o.stdout)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+            } else {
+                None
+            }
+        });
 
     // Fetch latest RustyClaw release from GitHub API
     let latest = async {
@@ -139,10 +150,13 @@ async fn upgrade_check_task(tx: tokio::sync::mpsc::UnboundedSender<AppEvent>) {
             .build()?;
         let resp: serde_json::Value = client
             .get("https://api.github.com/repos/ForkedInTime/RustyClaw/releases/latest")
-            .send().await?
-            .json().await?;
+            .send()
+            .await?
+            .json()
+            .await?;
         anyhow::Ok(resp["tag_name"].as_str().unwrap_or("unknown").to_string())
-    }.await;
+    }
+    .await;
 
     let hash_str = git_hash.map(|h| format!(" ({})", h)).unwrap_or_default();
     let msg = match latest {
@@ -172,10 +186,13 @@ async fn upgrade_check_task(tx: tokio::sync::mpsc::UnboundedSender<AppEvent>) {
 fn detect_package_manager() -> (&'static str, &'static str) {
     // Returns (command, runner) — e.g. ("bun", "bunx"), ("pnpm", "pnpx"), ("npm", "npx")
     fn has(cmd: &str) -> bool {
-        std::process::Command::new(cmd).arg("--version")
+        std::process::Command::new(cmd)
+            .arg("--version")
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .status().map(|s| s.success()).unwrap_or(false)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
     }
     if has("bun") {
         ("bun", "bunx")
@@ -342,9 +359,12 @@ async fn plugin_install_task(spec: String, tx: tokio::sync::mpsc::UnboundedSende
 async fn register_mcp_server(name: &str, server_cfg: serde_json::Value) -> anyhow::Result<()> {
     let settings_path = dirs::home_dir()
         .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
-        .join(".claude").join("settings.json");
+        .join(".claude")
+        .join("settings.json");
     let mut json: serde_json::Value = if settings_path.exists() {
-        let content = tokio::fs::read_to_string(&settings_path).await.unwrap_or_default();
+        let content = tokio::fs::read_to_string(&settings_path)
+            .await
+            .unwrap_or_default();
         serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
     } else {
         serde_json::json!({})
@@ -362,9 +382,12 @@ async fn register_mcp_server(name: &str, server_cfg: serde_json::Value) -> anyho
 async fn track_plugin(name: &str, spec: &str, marketplace: bool) -> anyhow::Result<()> {
     let plugins_path = dirs::home_dir()
         .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
-        .join(".claude").join("plugins.json");
+        .join(".claude")
+        .join("plugins.json");
     let mut plugins: serde_json::Value = if plugins_path.exists() {
-        let content = tokio::fs::read_to_string(&plugins_path).await.unwrap_or_default();
+        let content = tokio::fs::read_to_string(&plugins_path)
+            .await
+            .unwrap_or_default();
         serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
     } else {
         serde_json::json!({})
@@ -377,15 +400,12 @@ async fn track_plugin(name: &str, spec: &str, marketplace: bool) -> anyhow::Resu
     Ok(())
 }
 
-async fn run_loop(
-    mut config: Config,
-    resume_id: Option<String>,
-) -> Result<()> {
+async fn run_loop(mut config: Config, resume_id: Option<String>) -> Result<()> {
     // Compute welcome-screen height and create the first terminal.
     let (init_cols, init_rows) = crossterm::terminal::size().unwrap_or((80, 24));
     let init_h = {
         const LOGO_H: u16 = 6;
-        let left_h = LOGO_H + 7;  // welcome + blank + logo + blank + model + cwd + blank + tagline
+        let left_h = LOGO_H + 7; // welcome + blank + logo + blank + model + cwd + blank + tagline
         let right_h = 6u16; // no recent sessions yet (sessions loaded below)
         (left_h.max(right_h) + 2 + 1 + 1).min(init_rows)
     };
@@ -406,7 +426,8 @@ async fn run_loop(
              Or a cloud OpenAI-compatible model: --model groq:<name>, --model openrouter:<name>, ..."
         ));
     }
-    let mut client: ApiBackend = ApiBackend::new(&config.model, &config.api_key, &config.ollama_host)?;
+    let mut client: ApiBackend =
+        ApiBackend::new(&config.model, &config.api_key, &config.ollama_host)?;
 
     // Start MCP servers (failures are logged and skipped — never fatal)
     let settings = crate::settings::Settings::load(&config.cwd);
@@ -415,7 +436,8 @@ async fn run_loop(
         McpManager::start_with_extra(
             &crate::settings::Settings::default(),
             &config.extra_mcp_servers,
-        ).await
+        )
+        .await
     } else {
         McpManager::start_with_extra(&settings, &config.extra_mcp_servers).await
     };
@@ -429,10 +451,20 @@ async fn run_loop(
 
     // Apply --allowed-tools / --disallowed-tools CLI filters
     if !config.allowed_tools.is_empty() {
-        tools.retain(|t| config.allowed_tools.iter().any(|a| a.eq_ignore_ascii_case(t.name())));
+        tools.retain(|t| {
+            config
+                .allowed_tools
+                .iter()
+                .any(|a| a.eq_ignore_ascii_case(t.name()))
+        });
     }
     if !config.disallowed_tools.is_empty() {
-        tools.retain(|t| !config.disallowed_tools.iter().any(|d| d.eq_ignore_ascii_case(t.name())));
+        tools.retain(|t| {
+            !config
+                .disallowed_tools
+                .iter()
+                .any(|d| d.eq_ignore_ascii_case(t.name()))
+        });
     }
     let perm_state = PermissionState::new(
         config.dangerously_skip_permissions,
@@ -442,10 +474,14 @@ async fn run_loop(
     let skills = load_skills().await;
 
     let mut app = App::new(&config.model, &config.cwd);
-    if let Some(ref e) = config.effort { app.effort = Some(e.clone()); }
+    if let Some(ref e) = config.effort {
+        app.effort = Some(e.clone());
+    }
     app.spinner_style = config.spinner_style.clone();
     // Apply theme from config (loaded from settings.json)
-    if let Some(ref theme) = config.theme { app.theme = theme.clone(); }
+    if let Some(ref theme) = config.theme {
+        app.theme = theme.clone();
+    }
     // Apply router settings from config (loaded from settings.json)
     if config.router_enabled {
         app.router.enabled = true;
@@ -475,18 +511,19 @@ async fn run_loop(
     // Session cleanup — delete sessions older than cleanupPeriodDays
     if let Some(days) = config.cleanup_period_days
         && days > 0
-            && let Ok(list) = crate::session::Session::list().await {
-                let cutoff_secs = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0)
-                    .saturating_sub(days as u64 * 86400);
-                for meta in &list {
-                    if meta.created_at < cutoff_secs {
-                        let _ = crate::session::Session::delete(&meta.id).await;
-                    }
-                }
+        && let Ok(list) = crate::session::Session::list().await
+    {
+        let cutoff_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+            .saturating_sub(days as u64 * 86400);
+        for meta in &list {
+            if meta.created_at < cutoff_secs {
+                let _ = crate::session::Session::delete(&meta.id).await;
             }
+        }
+    }
 
     // Session — create new or resume existing
     let mut session = match resume_id.clone() {
@@ -504,16 +541,22 @@ async fn run_loop(
                     app.show_welcome = false;
                     saved_count = loaded_messages.len();
                     messages = loaded_messages;
-                    let label = if config.fork_session { "Forked" } else { "Resumed" };
+                    let label = if config.fork_session {
+                        "Forked"
+                    } else {
+                        "Resumed"
+                    };
                     app.entries.push(ChatEntry::system(format!(
-                        "{} session '{}' ({} messages)", label, s.meta.name, saved_count
+                        "{} session '{}' ({} messages)",
+                        label, s.meta.name, saved_count
                     )));
                     app.session_name = s.meta.name.clone();
                     app.scroll_to_bottom();
                     s
                 }
                 Err(e) => {
-                    app.entries.push(ChatEntry::error(format!("Could not resume session: {e}")));
+                    app.entries
+                        .push(ChatEntry::error(format!("Could not resume session: {e}")));
                     let s = Session::new().await?;
                     app.session_name = s.meta.name.clone();
                     s
@@ -535,9 +578,10 @@ async fn run_loop(
 
     // SessionStart hooks
     if let Some(hook_cfg) = &config.hooks
-        && !config.disable_all_hooks {
-            hooks::run_session_start_hooks(hook_cfg, &session.id, &config.cwd).await;
-        }
+        && !config.disable_all_hooks
+    {
+        hooks::run_session_start_hooks(hook_cfg, &session.id, &config.cwd).await;
+    }
 
     // Prune old auto-commit shadow refs (keeps the configured number of newest sessions).
     if let Err(e) =
@@ -555,7 +599,11 @@ async fn run_loop(
             .filter(|m| &m.id != current_id)
             .take(5)
             .map(|m| {
-                let id_short = if m.id.len() >= 8 { m.id[..8].to_string() } else { m.id.clone() };
+                let id_short = if m.id.len() >= 8 {
+                    m.id[..8].to_string()
+                } else {
+                    m.id.clone()
+                };
                 (m.name, id_short, m.preview)
             })
             .collect();
@@ -577,12 +625,10 @@ async fn run_loop(
             .unwrap_or_else(|e| Err(anyhow::anyhow!("RAG index panicked: {e}")));
             match result {
                 Ok(r) if r.files_indexed > 0 => {
-                    let _ = tx2.send(crate::tui::events::AppEvent::SystemMessage(
-                        format!(
-                            "Codebase indexed — {} files, {} chunks ({:.0}ms)",
-                            r.files_indexed, r.chunks_added, r.elapsed_ms
-                        ),
-                    ));
+                    let _ = tx2.send(crate::tui::events::AppEvent::SystemMessage(format!(
+                        "Codebase indexed — {} files, {} chunks ({:.0}ms)",
+                        r.files_indexed, r.chunks_added, r.elapsed_ms
+                    )));
                 }
                 Ok(_) => {} // nothing new to index — stay silent
                 Err(e) => {
@@ -611,7 +657,9 @@ async fn run_loop(
                     .status()
                     .map(|s| s.success())
                     .unwrap_or(false)
-            } else { false };
+            } else {
+                false
+            };
 
             println!(); // blank line after package manager output
             let _ = crossterm::terminal::enable_raw_mode();
@@ -650,7 +698,8 @@ async fn run_loop(
         if let Some(id) = app.pending_delete.take() {
             match Session::delete(&id).await {
                 Ok(()) => {
-                    app.entries.push(ChatEntry::system(format!("Deleted session {}.", &id[..8])));
+                    app.entries
+                        .push(ChatEntry::system(format!("Deleted session {}.", &id[..8])));
                     // Refresh the session list overlay + welcome banner
                     if let Ok(list) = Session::list().await {
                         let mut lines = vec![
@@ -660,14 +709,29 @@ async fn run_loop(
                         let mut ids = Vec::new();
                         for (i, meta) in list.iter().enumerate() {
                             let current = if meta.id == session.id { " ◀" } else { "" };
-                            let preview = if meta.preview.is_empty() { "(empty)" } else { &meta.preview };
-                            lines.push(format!("  {}. [{}] {} — {}{}", i + 1, &meta.id[..8], meta.name, preview, current));
+                            let preview = if meta.preview.is_empty() {
+                                "(empty)"
+                            } else {
+                                &meta.preview
+                            };
+                            lines.push(format!(
+                                "  {}. [{}] {} — {}{}",
+                                i + 1,
+                                &meta.id[..8],
+                                meta.name,
+                                preview,
+                                current
+                            ));
                             ids.push(meta.id.clone());
                         }
                         lines.push(String::new());
-                        lines.push("  ↑↓ select · Enter resume · 1-9 quick pick · d delete · Esc close".into());
+                        lines.push(
+                            "  ↑↓ select · Enter resume · 1-9 quick pick · d delete · Esc close"
+                                .into(),
+                        );
                         let prev_selected = app.overlay.as_ref().map(|o| o.selected).unwrap_or(0);
-                        let mut new_overlay = Overlay::with_items("sessions", lines.join("\n"), ids.clone());
+                        let mut new_overlay =
+                            Overlay::with_items("sessions", lines.join("\n"), ids.clone());
                         new_overlay.selected = prev_selected.min(ids.len().saturating_sub(1));
                         app.overlay = Some(new_overlay);
                         // Also refresh the welcome banner's recent sessions
@@ -676,14 +740,19 @@ async fn run_loop(
                             .filter(|m| m.id != session.id)
                             .take(5)
                             .map(|m| {
-                                let id_short = if m.id.len() >= 8 { m.id[..8].to_string() } else { m.id.clone() };
+                                let id_short = if m.id.len() >= 8 {
+                                    m.id[..8].to_string()
+                                } else {
+                                    m.id.clone()
+                                };
                                 (m.name, id_short, m.preview)
                             })
                             .collect();
                     }
                 }
                 Err(e) => {
-                    app.entries.push(ChatEntry::error(format!("Failed to delete session: {e}")));
+                    app.entries
+                        .push(ChatEntry::error(format!("Failed to delete session: {e}")));
                 }
             }
         }
@@ -707,11 +776,17 @@ async fn run_loop(
                     session = new_session;
                     app.overlay = Some(Overlay::new(
                         "resume",
-                        format!("Resumed session '{}'\n{} messages loaded.", resume_name, resume_count),
+                        format!(
+                            "Resumed session '{}'\n{} messages loaded.",
+                            resume_name, resume_count
+                        ),
                     ));
                 }
                 Err(e) => {
-                    app.overlay = Some(Overlay::new("error", format!("Could not resume session: {e}")));
+                    app.overlay = Some(Overlay::new(
+                        "error",
+                        format!("Could not resume session: {e}"),
+                    ));
                 }
             }
         }
@@ -721,16 +796,17 @@ async fn run_loop(
             let msg = format!("Model changed\n\n  {} → {}", config.model, model);
             config.model = model.clone();
             app.set_model(model.clone());
-            let _ = crate::config::Config::save_user_setting(
-                "model",
-                serde_json::Value::String(model),
-            );
+            let _ =
+                crate::config::Config::save_user_setting("model", serde_json::Value::String(model));
             system_prompt.clear();
             system_prompt.push_str(&config.build_system_prompt());
             match ApiBackend::new(&config.model, &config.api_key, &config.ollama_host) {
-                Ok(new_client) => { client = new_client; }
+                Ok(new_client) => {
+                    client = new_client;
+                }
                 Err(e) => {
-                    app.entries.push(ChatEntry::error(format!("Backend error: {e}")));
+                    app.entries
+                        .push(ChatEntry::error(format!("Backend error: {e}")));
                 }
             }
             app.entries.push(ChatEntry::system(msg));
@@ -771,9 +847,9 @@ async fn run_loop(
                 "ttsVoiceModel",
                 serde_json::Value::String(model_path.clone()),
             );
-            app.entries.push(ChatEntry::system(
-                format!("Voice model set to: {display}\nPlaying preview… (Esc or Ctrl+S to stop)")
-            ));
+            app.entries.push(ChatEntry::system(format!(
+                "Voice model set to: {display}\nPlaying preview… (Esc or Ctrl+S to stop)"
+            )));
             app.scroll_to_bottom();
             // Stop any existing TTS before starting preview
             if let Some(prev) = app.tts_stop_tx.take() {
@@ -1061,9 +1137,12 @@ async fn run_loop(
                 CompactNeeded::Snip => {
                     if config.auto_compact_enabled {
                         snip_compact(&mut messages);
-                        app.entries.push(ChatEntry::system("Auto-compacted (snip): stripped old tool results."));
+                        app.entries.push(ChatEntry::system(
+                            "Auto-compacted (snip): stripped old tool results.",
+                        ));
                     } else {
-                        app.entries.push(ChatEntry::system("Context near limit. Run /compact."));
+                        app.entries
+                            .push(ChatEntry::system("Context near limit. Run /compact."));
                     }
                     last_tokens_in = 0;
                 }
@@ -1079,40 +1158,59 @@ async fn run_loop(
                             ));
                             consecutive_compact_count = 0;
                         } else {
-                        snip_compact(&mut messages); // immediate safety snip
-                        app.entries.push(ChatEntry::system("Auto-compacting (summarise)…"));
-                        // PreCompact hooks
-                        if let Some(hook_cfg) = &config.hooks
-                            && !config.disable_all_hooks {
-                                hooks::run_pre_compact_hooks(hook_cfg, &session.id, &config.cwd).await;
+                            snip_compact(&mut messages); // immediate safety snip
+                            app.entries
+                                .push(ChatEntry::system("Auto-compacting (summarise)…"));
+                            // PreCompact hooks
+                            if let Some(hook_cfg) = &config.hooks
+                                && !config.disable_all_hooks
+                            {
+                                hooks::run_pre_compact_hooks(hook_cfg, &session.id, &config.cwd)
+                                    .await;
                             }
-                        let c2 = client.clone();
-                        let msgs = messages.clone();
-                        let cfg = config.clone();
-                        let tx2 = tx.clone();
-                        let sid = session.id.clone();
-                        let cwd = config.cwd.clone();
-                        let hook_cfg_clone = config.hooks.clone();
-                        tokio::spawn(async move {
-                            match summarize_compact(&c2, &msgs, &cfg).await {
-                                Ok(r) => {
-                                    let summary_len = r.first()
-                                        .and_then(|m| m.content.first())
-                                        .map(|b| if let ContentBlock::Text { text } = b { text.len() } else { 0 })
-                                        .unwrap_or(0);
-                                    // PostCompact hooks
-                                    if let Some(hook_cfg) = &hook_cfg_clone
-                                        && !cfg.disable_all_hooks {
-                                            hooks::run_post_compact_hooks(hook_cfg, &sid, &cwd).await;
+                            let c2 = client.clone();
+                            let msgs = messages.clone();
+                            let cfg = config.clone();
+                            let tx2 = tx.clone();
+                            let sid = session.id.clone();
+                            let cwd = config.cwd.clone();
+                            let hook_cfg_clone = config.hooks.clone();
+                            tokio::spawn(async move {
+                                match summarize_compact(&c2, &msgs, &cfg).await {
+                                    Ok(r) => {
+                                        let summary_len = r
+                                            .first()
+                                            .and_then(|m| m.content.first())
+                                            .map(|b| {
+                                                if let ContentBlock::Text { text } = b {
+                                                    text.len()
+                                                } else {
+                                                    0
+                                                }
+                                            })
+                                            .unwrap_or(0);
+                                        // PostCompact hooks
+                                        if let Some(hook_cfg) = &hook_cfg_clone
+                                            && !cfg.disable_all_hooks
+                                        {
+                                            hooks::run_post_compact_hooks(hook_cfg, &sid, &cwd)
+                                                .await;
                                         }
-                                    let _ = tx2.send(AppEvent::Compacted { replacement: r, summary_len });
+                                        let _ = tx2.send(AppEvent::Compacted {
+                                            replacement: r,
+                                            summary_len,
+                                        });
+                                    }
+                                    Err(e) => {
+                                        let _ = tx2
+                                            .send(AppEvent::Error(format!("Compact failed: {e}")));
+                                    }
                                 }
-                                Err(e) => { let _ = tx2.send(AppEvent::Error(format!("Compact failed: {e}"))); }
-                            }
-                        });
+                            });
                         } // end thrash-check else
                     } else {
-                        app.entries.push(ChatEntry::system("Context critically full! Run /compact."));
+                        app.entries
+                            .push(ChatEntry::system("Context critically full! Run /compact."));
                     }
                     last_tokens_in = 0;
                 }
@@ -1132,21 +1230,20 @@ async fn run_loop(
             // We do the same for PendingUserQuestion so AskUser prompts
             // don't deadlock the shutdown path.
             if app.pending_permission.take().is_some() {
-                app.entries.push(ChatEntry::system(
-                    "Shutdown: pending tool approval denied.",
-                ));
+                app.entries
+                    .push(ChatEntry::system("Shutdown: pending tool approval denied."));
             }
             if app.pending_user_question.take().is_some() {
-                app.entries.push(ChatEntry::system(
-                    "Shutdown: pending question cancelled.",
-                ));
+                app.entries
+                    .push(ChatEntry::system("Shutdown: pending question cancelled."));
             }
 
             // Stop hooks — fire before exiting
             if let Some(hook_cfg) = &config.hooks
-                && !config.disable_all_hooks {
-                    hooks::run_stop_hooks(hook_cfg, &session.id, &config.cwd).await;
-                }
+                && !config.disable_all_hooks
+            {
+                hooks::run_stop_hooks(hook_cfg, &session.id, &config.cwd).await;
+            }
             break;
         }
     }
@@ -1180,7 +1277,10 @@ async fn handle_key(
         let is_interactive = app.overlay.as_ref().is_some_and(|o| o.is_interactive());
         match key.code {
             KeyCode::Esc | KeyCode::Char('q')
-                if app.overlay.as_ref().is_some_and(|o| o.title == "help-commands") =>
+                if app
+                    .overlay
+                    .as_ref()
+                    .is_some_and(|o| o.title == "help-commands") =>
             {
                 // Back to category picker instead of closing entirely
                 let cats = crate::commands::HELP_CATEGORIES;
@@ -1200,15 +1300,26 @@ async fn handle_key(
                 app.pending_redo_positions = None;
             }
             KeyCode::Enter if is_interactive => {
-                let title = app.overlay.as_ref().map(|o| o.title.clone()).unwrap_or_default();
+                let title = app
+                    .overlay
+                    .as_ref()
+                    .map(|o| o.title.clone())
+                    .unwrap_or_default();
                 let selected_index = app.overlay.as_ref().map(|o| o.selected).unwrap_or(0);
-                let selected_val = app.overlay.as_ref()
+                let selected_val = app
+                    .overlay
+                    .as_ref()
                     .and_then(|o| o.selectable_ids.get(o.selected).cloned());
                 app.overlay = None;
                 if title == "undo" {
                     let positions = app.pending_undo_positions.take();
-                    let target_pos = positions.as_ref().and_then(|p| p.get(selected_index)).copied();
-                    if let Some(target_pos) = target_pos.filter(|&p| p != session.meta.undo_position) {
+                    let target_pos = positions
+                        .as_ref()
+                        .and_then(|p| p.get(selected_index))
+                        .copied();
+                    if let Some(target_pos) =
+                        target_pos.filter(|&p| p != session.meta.undo_position)
+                    {
                         match rustyclaw::autocommit::restore_to(
                             &config.cwd,
                             &session.meta.auto_commits,
@@ -1230,16 +1341,20 @@ async fn handle_key(
                                 )));
                             }
                             Err(e) => {
-                                app.entries.push(ChatEntry::system(format!(
-                                    "[undo] restore failed: {e}"
-                                )));
+                                app.entries
+                                    .push(ChatEntry::system(format!("[undo] restore failed: {e}")));
                             }
                         }
                     }
                 } else if title == "redo" {
                     let positions = app.pending_redo_positions.take();
-                    let target_pos = positions.as_ref().and_then(|p| p.get(selected_index)).copied();
-                    if let Some(target_pos) = target_pos.filter(|&p| p != session.meta.undo_position) {
+                    let target_pos = positions
+                        .as_ref()
+                        .and_then(|p| p.get(selected_index))
+                        .copied();
+                    if let Some(target_pos) =
+                        target_pos.filter(|&p| p != session.meta.undo_position)
+                    {
                         match rustyclaw::autocommit::restore_to(
                             &config.cwd,
                             &session.meta.auto_commits,
@@ -1256,9 +1371,8 @@ async fn handle_key(
                                 )));
                             }
                             Err(e) => {
-                                app.entries.push(ChatEntry::system(format!(
-                                    "[redo] restore failed: {e}"
-                                )));
+                                app.entries
+                                    .push(ChatEntry::system(format!("[redo] restore failed: {e}")));
                             }
                         }
                     }
@@ -1283,8 +1397,14 @@ async fn handle_key(
             }
             KeyCode::Char(c @ '1'..='9') if is_interactive => {
                 let idx = (c as usize) - ('1' as usize);
-                let title = app.overlay.as_ref().map(|o| o.title.clone()).unwrap_or_default();
-                let selected_val = app.overlay.as_ref()
+                let title = app
+                    .overlay
+                    .as_ref()
+                    .map(|o| o.title.clone())
+                    .unwrap_or_default();
+                let selected_val = app
+                    .overlay
+                    .as_ref()
                     .and_then(|o| o.selectable_ids.get(idx).cloned());
                 app.overlay = None;
                 if let Some(val) = selected_val {
@@ -1305,28 +1425,40 @@ async fn handle_key(
             }
             KeyCode::Char('d') | KeyCode::Delete if is_interactive => {
                 // Delete the selected session
-                let selected_id = app.overlay.as_ref()
+                let selected_id = app
+                    .overlay
+                    .as_ref()
                     .and_then(|o| o.selectable_ids.get(o.selected).cloned());
                 if let Some(id) = selected_id {
                     // Don't allow deleting the current session
                     if id == session.id {
-                        app.entries.push(ChatEntry::system("Cannot delete the current session.".to_string()));
+                        app.entries.push(ChatEntry::system(
+                            "Cannot delete the current session.".to_string(),
+                        ));
                     } else {
                         app.pending_delete = Some(id);
                     }
                 }
             }
             KeyCode::Up if is_interactive => {
-                if let Some(o) = &mut app.overlay { o.select_up(); }
+                if let Some(o) = &mut app.overlay {
+                    o.select_up();
+                }
             }
             KeyCode::Down if is_interactive => {
-                if let Some(o) = &mut app.overlay { o.select_down(); }
+                if let Some(o) = &mut app.overlay {
+                    o.select_down();
+                }
             }
             KeyCode::Up | KeyCode::PageUp => {
-                if let Some(o) = &mut app.overlay { o.scroll_up(); }
+                if let Some(o) = &mut app.overlay {
+                    o.scroll_up();
+                }
             }
             KeyCode::Down | KeyCode::PageDown => {
-                if let Some(o) = &mut app.overlay { o.scroll += 5; }
+                if let Some(o) = &mut app.overlay {
+                    o.scroll += 5;
+                }
             }
             _ => {}
         }
@@ -1368,18 +1500,25 @@ async fn handle_key(
             }
             Backspace => {
                 if let Some(ref mut q) = app.pending_user_question
-                    && q.cursor > 0 {
-                        q.cursor -= 1;
-                        q.input.remove(q.cursor);
-                    }
+                    && q.cursor > 0
+                {
+                    q.cursor -= 1;
+                    q.input.remove(q.cursor);
+                }
             }
             Left => {
                 if let Some(ref mut q) = app.pending_user_question
-                    && q.cursor > 0 { q.cursor -= 1; }
+                    && q.cursor > 0
+                {
+                    q.cursor -= 1;
+                }
             }
             Right => {
                 if let Some(ref mut q) = app.pending_user_question
-                    && q.cursor < q.input.len() { q.cursor += 1; }
+                    && q.cursor < q.input.len()
+                {
+                    q.cursor += 1;
+                }
             }
             Esc => {
                 // Cancel the question — send empty string
@@ -1399,7 +1538,9 @@ async fn handle_key(
     }
 
     // Block input while loading (except Ctrl+C and Esc)
-    if app.is_loading && key.code != Char('c') && key.code != Esc { return Ok(()); }
+    if app.is_loading && key.code != Char('c') && key.code != Esc {
+        return Ok(());
+    }
 
     // ── Vim mode routing ───────────────────────────────────────────────────────
     if app.vim_enabled {
@@ -1415,7 +1556,9 @@ async fn handle_key(
     }
 
     match (key.code, key.modifiers) {
-        (Char('c'), KeyModifiers::CONTROL) => { app.should_quit = true; }
+        (Char('c'), KeyModifiers::CONTROL) => {
+            app.should_quit = true;
+        }
 
         // Ctrl+R — toggle voice recording (only when voice mode is enabled)
         (Char('r'), KeyModifiers::CONTROL) if config.voice_enabled => {
@@ -1429,34 +1572,46 @@ async fn handle_key(
 
                 if let Some(tier) = app.pending_clone_tier.take() {
                     // Voice clone mode — save the recording as voice clone sample
-                    app.entries.push(ChatEntry::system("Saving voice clone…".to_string()));
+                    app.entries
+                        .push(ChatEntry::system("Saving voice clone…".to_string()));
                     app.scroll_to_bottom();
                     let tx2 = tx.clone();
                     tokio::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
                         match crate::voice::save_voice_clone(tier).await {
-                            Ok(msg) => { let _ = tx2.send(AppEvent::SystemMessage(msg)); }
-                            Err(e) => { let _ = tx2.send(AppEvent::SystemMessage(format!("Voice clone failed: {e:#}"))); }
+                            Ok(msg) => {
+                                let _ = tx2.send(AppEvent::SystemMessage(msg));
+                            }
+                            Err(e) => {
+                                let _ = tx2.send(AppEvent::SystemMessage(format!(
+                                    "Voice clone failed: {e:#}"
+                                )));
+                            }
                         }
                     });
                 } else {
                     // Normal mode — transcribe the recording
-                    app.entries.push(ChatEntry::system("Transcribing…".to_string()));
+                    app.entries
+                        .push(ChatEntry::system("Transcribing…".to_string()));
                     app.scroll_to_bottom();
                     let tx2 = tx.clone();
                     let api_url = config.voice_api_url.clone();
                     let api_key = crate::voice::voice_api_key();
                     tokio::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-                        match crate::voice::transcribe(api_url.as_deref(), api_key.as_deref()).await {
+                        match crate::voice::transcribe(api_url.as_deref(), api_key.as_deref()).await
+                        {
                             Ok(text) if text.is_empty() => {
-                                let _ = tx2.send(AppEvent::SystemMessage("Transcription was empty.".into()));
+                                let _ = tx2.send(AppEvent::SystemMessage(
+                                    "Transcription was empty.".into(),
+                                ));
                             }
                             Ok(text) => {
                                 let _ = tx2.send(AppEvent::VoiceTranscription(text));
                             }
                             Err(e) => {
-                                let _ = tx2.send(AppEvent::Error(format!("Transcription failed: {e}")));
+                                let _ =
+                                    tx2.send(AppEvent::Error(format!("Transcription failed: {e}")));
                             }
                         }
                     });
@@ -1466,13 +1621,14 @@ async fn handle_key(
                 match crate::voice::find_recorder() {
                     None => {
                         app.entries.push(ChatEntry::system(
-                            "No recorder found. Install arecord (alsa-utils), sox, or ffmpeg.".to_string()
+                            "No recorder found. Install arecord (alsa-utils), sox, or ffmpeg."
+                                .to_string(),
                         ));
                     }
                     Some(backend) => {
                         app.voice_recording = true;
                         app.entries.push(ChatEntry::system(
-                            "Recording… press Ctrl+R again to stop.".to_string()
+                            "Recording… press Ctrl+R again to stop.".to_string(),
                         ));
                         app.scroll_to_bottom();
                         let tx2 = tx.clone();
@@ -1496,7 +1652,8 @@ async fn handle_key(
                                     }
                                 }
                                 Err(e) => {
-                                    let _ = tx2.send(AppEvent::Error(format!("Recording failed: {e}")));
+                                    let _ =
+                                        tx2.send(AppEvent::Error(format!("Recording failed: {e}")));
                                 }
                             }
                         });
@@ -1510,7 +1667,8 @@ async fn handle_key(
         (Char('s'), KeyModifiers::CONTROL) => {
             if let Some(stop_tx) = app.tts_stop_tx.take() {
                 let _ = stop_tx.send(());
-                app.entries.push(ChatEntry::system("TTS stopped.".to_string()));
+                app.entries
+                    .push(ChatEntry::system("TTS stopped.".to_string()));
                 app.scroll_to_bottom();
             }
         }
@@ -1520,7 +1678,8 @@ async fn handle_key(
             if let Some(stop_tx) = app.tts_stop_tx.take() {
                 let _ = stop_tx.send(());
             }
-            app.entries.push(ChatEntry::system("TTS stopped.".to_string()));
+            app.entries
+                .push(ChatEntry::system("TTS stopped.".to_string()));
             app.scroll_to_bottom();
         }
         (Esc, _) if app.is_loading => {
@@ -1534,7 +1693,8 @@ async fn handle_key(
             app.is_loading = false;
             app.turn_start = None; // cancelled — no completion message
             app.flush_streaming();
-            app.entries.push(ChatEntry::system("Request cancelled.".to_string()));
+            app.entries
+                .push(ChatEntry::system("Request cancelled.".to_string()));
             app.scroll_to_bottom();
         }
 
@@ -1546,7 +1706,9 @@ async fn handle_key(
         (Enter, _) => {
             let raw = app.take_input();
             let input = raw.trim().to_string();
-            if input.is_empty() { return Ok(()); }
+            if input.is_empty() {
+                return Ok(());
+            }
 
             // Stop any active TTS when the user sends a new message
             if let Some(stop_tx) = app.tts_stop_tx.take() {
@@ -1555,7 +1717,10 @@ async fn handle_key(
 
             // Slash command dispatch (disabled when --disable-slash-commands)
             if input.starts_with('/') && !config.disable_slash_commands {
-                let last_assistant = app.entries.iter().rev()
+                let last_assistant = app
+                    .entries
+                    .iter()
+                    .rev()
                     .find(|e| matches!(e.kind, crate::tui::app::EntryKind::Assistant))
                     .map(|e| e.text.as_str());
                 let ctx = CommandContext {
@@ -1592,7 +1757,11 @@ async fn handle_key(
                                 .filter(|m| m.id != session.id)
                                 .take(5)
                                 .map(|m| {
-                                    let id_short = if m.id.len() >= 8 { m.id[..8].to_string() } else { m.id.clone() };
+                                    let id_short = if m.id.len() >= 8 {
+                                        m.id[..8].to_string()
+                                    } else {
+                                        m.id.clone()
+                                    };
                                     (m.name, id_short, m.preview)
                                 })
                                 .collect();
@@ -1600,9 +1769,11 @@ async fn handle_key(
                     }
                     CommandAction::Compact => {
                         if messages.is_empty() {
-                            app.entries.push(ChatEntry::system("Nothing to compact yet."));
+                            app.entries
+                                .push(ChatEntry::system("Nothing to compact yet."));
                         } else {
-                            app.entries.push(ChatEntry::system("Compacting conversation…"));
+                            app.entries
+                                .push(ChatEntry::system("Compacting conversation…"));
                             snip_compact(messages);
                             let c2 = client.clone();
                             let msgs = messages.clone();
@@ -1611,13 +1782,26 @@ async fn handle_key(
                             tokio::spawn(async move {
                                 match summarize_compact(&c2, &msgs, &cfg).await {
                                     Ok(r) => {
-                                        let summary_len = r.first()
+                                        let summary_len = r
+                                            .first()
                                             .and_then(|m| m.content.first())
-                                            .map(|b| if let ContentBlock::Text { text } = b { text.len() } else { 0 })
+                                            .map(|b| {
+                                                if let ContentBlock::Text { text } = b {
+                                                    text.len()
+                                                } else {
+                                                    0
+                                                }
+                                            })
                                             .unwrap_or(0);
-                                        let _ = tx2.send(AppEvent::Compacted { replacement: r, summary_len });
+                                        let _ = tx2.send(AppEvent::Compacted {
+                                            replacement: r,
+                                            summary_len,
+                                        });
                                     }
-                                    Err(e) => { let _ = tx2.send(AppEvent::Error(format!("Compact failed: {e}"))); }
+                                    Err(e) => {
+                                        let _ = tx2
+                                            .send(AppEvent::Error(format!("Compact failed: {e}")));
+                                    }
                                 }
                             });
                         }
@@ -1647,16 +1831,20 @@ async fn handle_key(
                         *system_prompt = config.build_system_prompt();
                         // Re-create backend when switching between Anthropic ↔ Ollama
                         match ApiBackend::new(&config.model, &config.api_key, &config.ollama_host) {
-                            Ok(new_client) => { *client = new_client; }
+                            Ok(new_client) => {
+                                *client = new_client;
+                            }
                             Err(e) => {
-                                app.entries.push(ChatEntry::error(format!("Backend error: {e}")));
+                                app.entries
+                                    .push(ChatEntry::error(format!("Backend error: {e}")));
                             }
                         }
                         app.overlay = Some(Overlay::new("model", msg));
                     }
                     CommandAction::ListModels => {
                         // Build combined Anthropic + Ollama interactive model picker
-                        let ollama_models = crate::api::list_ollama_models(&config.ollama_host).await;
+                        let ollama_models =
+                            crate::api::list_ollama_models(&config.ollama_host).await;
                         let mut lines = Vec::new();
                         let mut ids = Vec::new();
                         let total = crate::commands::KNOWN_MODELS.len() + ollama_models.len();
@@ -1681,7 +1869,8 @@ async fn handle_key(
                             }
                         }
                         lines.push(String::new());
-                        lines.push("  ↑↓ select · Enter switch · 1-9 quick pick · Esc close".into());
+                        lines
+                            .push("  ↑↓ select · Enter switch · 1-9 quick pick · Esc close".into());
                         app.overlay = Some(Overlay::with_items("models", lines.join("\n"), ids));
                     }
                     CommandAction::ListHelp => {
@@ -1706,8 +1895,11 @@ async fn handle_key(
                                 ids.push(cmd.to_string());
                             }
                             lines.push(String::new());
-                            lines.push("  ↑↓ select · Enter run · 1-9 quick pick · Esc close".into());
-                            app.overlay = Some(Overlay::with_items("help-commands", lines.join("\n"), ids));
+                            lines.push(
+                                "  ↑↓ select · Enter run · 1-9 quick pick · Esc close".into(),
+                            );
+                            app.overlay =
+                                Some(Overlay::with_items("help-commands", lines.join("\n"), ids));
                         }
                     }
                     CommandAction::Message(text) => {
@@ -1754,7 +1946,11 @@ async fn handle_key(
                             let mut removed = 0;
                             while removed < pairs_to_remove {
                                 if let Some(pos) = app.entries.iter().rposition(|e| {
-                                    matches!(e.kind, crate::tui::app::EntryKind::User | crate::tui::app::EntryKind::Assistant)
+                                    matches!(
+                                        e.kind,
+                                        crate::tui::app::EntryKind::User
+                                            | crate::tui::app::EntryKind::Assistant
+                                    )
                                 }) {
                                     app.entries.remove(pos);
                                     removed += 1;
@@ -1765,7 +1961,9 @@ async fn handle_key(
 
                             // Restore file snapshots for rewound turns
                             let restore_start = (*turn_counter).saturating_sub(n) + 1;
-                            let snap_base = crate::config::Config::sessions_dir().join(&session.id).join("snapshots");
+                            let snap_base = crate::config::Config::sessions_dir()
+                                .join(&session.id)
+                                .join("snapshots");
                             let mut restored_files: Vec<String> = Vec::new();
                             for turn in (restore_start..=*turn_counter).rev() {
                                 let snap_dir = snap_base.join(format!("turn-{}", turn));
@@ -1774,17 +1972,20 @@ async fn handle_key(
                                         let src = entry.path();
                                         // Convert flat snapshot name back to absolute path
                                         // e.g. "home_user_project_src_main.rs" → "/home/user/project/src/main.rs"
-                                        let flat = src.file_name()
+                                        let flat = src
+                                            .file_name()
                                             .and_then(|n| n.to_str())
                                             .unwrap_or("")
                                             .to_string();
-                                        let real_path = std::path::PathBuf::from(
-                                            format!("/{}", flat.replace('_', "/"))
-                                        );
+                                        let real_path = std::path::PathBuf::from(format!(
+                                            "/{}",
+                                            flat.replace('_', "/")
+                                        ));
                                         if !restored_files.contains(&flat)
-                                            && std::fs::copy(&src, &real_path).is_ok() {
-                                                restored_files.push(flat);
-                                            }
+                                            && std::fs::copy(&src, &real_path).is_ok()
+                                        {
+                                            restored_files.push(flat);
+                                        }
                                     }
                                 }
                                 let _ = std::fs::remove_dir_all(&snap_dir);
@@ -1797,7 +1998,10 @@ async fn handle_key(
                                 format!(" {} file(s) restored.", restored_files.len())
                             };
                             app.entries.push(ChatEntry::system(format!(
-                                "Rewound {} exchange{}.{}", n, if n == 1 { "" } else { "s" }, file_note
+                                "Rewound {} exchange{}.{}",
+                                n,
+                                if n == 1 { "" } else { "s" },
+                                file_note
                             )));
                         }
                     }
@@ -1810,31 +2014,45 @@ async fn handle_key(
                             // Prefix match
                             match Session::list().await {
                                 Ok(list) => {
-                                    let matched: Vec<_> = list.iter()
-                                        .filter(|m| m.id.starts_with(&id_or_prefix) || m.name == id_or_prefix)
+                                    let matched: Vec<_> = list
+                                        .iter()
+                                        .filter(|m| {
+                                            m.id.starts_with(&id_or_prefix)
+                                                || m.name == id_or_prefix
+                                        })
                                         .collect();
                                     match matched.len() {
                                         0 => {
-                                            app.overlay = Some(Overlay::new("error", format!(
-                                                "No session matching '{id_or_prefix}'. Try /session list"
-                                            )));
+                                            app.overlay = Some(Overlay::new(
+                                                "error",
+                                                format!(
+                                                    "No session matching '{id_or_prefix}'. Try /session list"
+                                                ),
+                                            ));
                                             None
                                         }
                                         1 => Some(matched[0].id.clone()),
                                         _ => {
-                                            let ids: Vec<_> = matched.iter()
+                                            let ids: Vec<_> = matched
+                                                .iter()
                                                 .map(|m| format!("  {} — {}", &m.id[..12], m.name))
                                                 .collect();
-                                            app.overlay = Some(Overlay::new("resume", format!(
-                                                "Multiple sessions match '{id_or_prefix}':\n{}\nBe more specific.",
-                                                ids.join("\n")
-                                            )));
+                                            app.overlay = Some(Overlay::new(
+                                                "resume",
+                                                format!(
+                                                    "Multiple sessions match '{id_or_prefix}':\n{}\nBe more specific.",
+                                                    ids.join("\n")
+                                                ),
+                                            ));
                                             None
                                         }
                                     }
                                 }
                                 Err(e) => {
-                                    app.overlay = Some(Overlay::new("error", format!("Could not list sessions: {e}")));
+                                    app.overlay = Some(Overlay::new(
+                                        "error",
+                                        format!("Could not list sessions: {e}"),
+                                    ));
                                     None
                                 }
                             }
@@ -1858,44 +2076,67 @@ async fn handle_key(
                                     *session = new_session;
                                     app.overlay = Some(Overlay::new(
                                         "resume",
-                                        format!("Resumed session '{}'\n{} messages loaded.", resume_name, resume_count),
+                                        format!(
+                                            "Resumed session '{}'\n{} messages loaded.",
+                                            resume_name, resume_count
+                                        ),
                                     ));
                                 }
                                 Err(e) => {
-                                    app.overlay = Some(Overlay::new("error", format!("Could not resume session: {e}")));
+                                    app.overlay = Some(Overlay::new(
+                                        "error",
+                                        format!("Could not resume session: {e}"),
+                                    ));
                                 }
                             }
                         }
                     }
-                    CommandAction::ListSessions => {
-                        match Session::list().await {
-                            Err(e) => {
-                                app.overlay = Some(Overlay::new("sessions", format!("Error listing sessions: {e}")));
-                            }
-                            Ok(list) if list.is_empty() => {
-                                app.overlay = Some(Overlay::new("sessions", format!(
+                    CommandAction::ListSessions => match Session::list().await {
+                        Err(e) => {
+                            app.overlay = Some(Overlay::new(
+                                "sessions",
+                                format!("Error listing sessions: {e}"),
+                            ));
+                        }
+                        Ok(list) if list.is_empty() => {
+                            app.overlay = Some(Overlay::new(
+                                "sessions",
+                                format!(
                                     "Sessions\n\nNo saved sessions yet.\nCurrent: {} ({})\n\nSessions are saved automatically.",
-                                    session.meta.name, &session.id[..8]
-                                )));
-                            }
-                            Ok(list) => {
-                                let mut lines = vec![
-                                    format!("Sessions ({})\n", list.len()),
-                                    format!("Current: {} ({})\n", session.meta.name, &session.id[..8]),
-                                ];
-                                let mut ids = Vec::new();
-                                for (i, meta) in list.iter().enumerate() {
-                                    let current = if meta.id == session.id { " ◀" } else { "" };
-                                    let preview = if meta.preview.is_empty() { "(empty)" } else { &meta.preview };
-                                    lines.push(format!("  {}. [{}] {} — {}{}", i + 1, &meta.id[..8], meta.name, preview, current));
-                                    ids.push(meta.id.clone());
-                                }
-                                lines.push(String::new());
-                                lines.push("  ↑↓ select · Enter resume · d delete · 1-9 quick pick · Esc close".into());
-                                app.overlay = Some(Overlay::with_items("sessions", lines.join("\n"), ids));
-                            }
+                                    session.meta.name,
+                                    &session.id[..8]
+                                ),
+                            ));
                         }
-                    }
+                        Ok(list) => {
+                            let mut lines = vec![
+                                format!("Sessions ({})\n", list.len()),
+                                format!("Current: {} ({})\n", session.meta.name, &session.id[..8]),
+                            ];
+                            let mut ids = Vec::new();
+                            for (i, meta) in list.iter().enumerate() {
+                                let current = if meta.id == session.id { " ◀" } else { "" };
+                                let preview = if meta.preview.is_empty() {
+                                    "(empty)"
+                                } else {
+                                    &meta.preview
+                                };
+                                lines.push(format!(
+                                    "  {}. [{}] {} — {}{}",
+                                    i + 1,
+                                    &meta.id[..8],
+                                    meta.name,
+                                    preview,
+                                    current
+                                ));
+                                ids.push(meta.id.clone());
+                            }
+                            lines.push(String::new());
+                            lines.push("  ↑↓ select · Enter resume · d delete · 1-9 quick pick · Esc close".into());
+                            app.overlay =
+                                Some(Overlay::with_items("sessions", lines.join("\n"), ids));
+                        }
+                    },
                     CommandAction::ClearAllSessions => {
                         match Session::list().await {
                             Ok(list) => {
@@ -1914,36 +2155,42 @@ async fn handle_key(
                                 app.recent_sessions.clear();
                             }
                             Err(e) => {
-                                app.entries.push(ChatEntry::error(format!("Failed to list sessions: {e}")));
+                                app.entries.push(ChatEntry::error(format!(
+                                    "Failed to list sessions: {e}"
+                                )));
                             }
                         }
                     }
                     CommandAction::ExportCurrentSession => {
-                        let id   = session.id.clone();
+                        let id = session.id.clone();
                         let name = session.meta.name.clone();
                         let dest = config.cwd.join(format!("session-{}.md", &id[..8]));
                         match Session::export(&id, &dest).await {
                             Ok(path) => {
-                                app.overlay = Some(Overlay::new("export", format!(
-                                    "Session '{}' exported to\n{}", name, path.display()
-                                )));
+                                app.overlay = Some(Overlay::new(
+                                    "export",
+                                    format!("Session '{}' exported to\n{}", name, path.display()),
+                                ));
                             }
                             Err(e) => {
-                                app.overlay = Some(Overlay::new("error", format!("Export failed: {e}")));
+                                app.overlay =
+                                    Some(Overlay::new("error", format!("Export failed: {e}")));
                             }
                         }
                     }
-                    CommandAction::RenameSession(name) => {
-                        match session.rename(&name).await {
-                            Ok(()) => {
-                                app.session_name = name.clone();
-                                app.overlay = Some(Overlay::new("rename", format!("Session renamed to '{name}'")));
-                            }
-                            Err(e) => {
-                                app.overlay = Some(Overlay::new("error", format!("Rename failed: {e}")));
-                            }
+                    CommandAction::RenameSession(name) => match session.rename(&name).await {
+                        Ok(()) => {
+                            app.session_name = name.clone();
+                            app.overlay = Some(Overlay::new(
+                                "rename",
+                                format!("Session renamed to '{name}'"),
+                            ));
                         }
-                    }
+                        Err(e) => {
+                            app.overlay =
+                                Some(Overlay::new("error", format!("Rename failed: {e}")));
+                        }
+                    },
                     CommandAction::TogglePlanMode => {
                         app.plan_mode = !app.plan_mode;
                         config.plan_mode = app.plan_mode;
@@ -1959,7 +2206,9 @@ async fn handle_key(
                         app.pending_image = Some(path.clone());
                         app.overlay = Some(Overlay::new(
                             "image",
-                            format!("Image attached: {path}\nIt will be included in your next message."),
+                            format!(
+                                "Image attached: {path}\nIt will be included in your next message."
+                            ),
                         ));
                     }
                     CommandAction::ToggleBriefMode => {
@@ -1974,9 +2223,9 @@ async fn handle_key(
                     }
                     CommandAction::SetBtwNote(note) => {
                         app.btw_note = Some(note.clone());
-                        app.entries.push(ChatEntry::system(
-                            format!("btw note set — will be prepended to your next message: \"{note}\"")
-                        ));
+                        app.entries.push(ChatEntry::system(format!(
+                            "btw note set — will be prepended to your next message: \"{note}\""
+                        )));
                         app.scroll_to_bottom();
                     }
                     CommandAction::SetOutputStyle(name) => {
@@ -1989,11 +2238,14 @@ async fn handle_key(
                                 serde_json::Value::String("default".into()),
                             );
                             app.entries.push(ChatEntry::system(
-                                "Output style cleared — using default Claude responses.".to_string()
+                                "Output style cleared — using default Claude responses."
+                                    .to_string(),
                             ));
                         } else {
                             let styles = crate::config::Config::load_output_styles(&config.cwd);
-                            if let Some(def) = styles.iter().find(|s| s.name.eq_ignore_ascii_case(&name)) {
+                            if let Some(def) =
+                                styles.iter().find(|s| s.name.eq_ignore_ascii_case(&name))
+                            {
                                 config.output_style = Some(def.name.clone());
                                 config.output_style_prompt = Some(def.prompt.clone());
                                 *system_prompt = config.build_system_prompt();
@@ -2020,7 +2272,8 @@ async fn handle_key(
                             "theme",
                             serde_json::Value::String(name.clone()),
                         );
-                        app.entries.push(ChatEntry::system(format!("Theme set to '{name}'.")));
+                        app.entries
+                            .push(ChatEntry::system(format!("Theme set to '{name}'.")));
                         app.scroll_to_bottom();
                     }
                     CommandAction::SetVoiceEnabled(enabled) => {
@@ -2047,7 +2300,8 @@ async fn handle_key(
                             } else if !has_player {
                                 app.entries.push(ChatEntry::system(
                                     "Cannot enable TTS — no audio player.\n\
-                                     Install: sudo pacman -S mpv   # or alsa-utils".to_string()
+                                     Install: sudo pacman -S mpv   # or alsa-utils"
+                                        .to_string(),
                                 ));
                             } else {
                                 // Auto-start XTTS v2 server for fast synthesis
@@ -2055,7 +2309,11 @@ async fn handle_key(
                                 tokio::spawn(async move {
                                     match crate::voice::ensure_xtts_server().await {
                                         Ok(_port) => {
-                                            let gpu = if crate::voice::cuda_available() { " (GPU)" } else { " (CPU)" };
+                                            let gpu = if crate::voice::cuda_available() {
+                                                " (GPU)"
+                                            } else {
+                                                " (CPU)"
+                                            };
                                             let _ = tx2.send(AppEvent::SystemMessage(
                                                 format!("XTTS v2 server ready{gpu} — responses will be spoken.")
                                             ));
@@ -2068,14 +2326,15 @@ async fn handle_key(
                                     }
                                 });
                                 app.entries.push(ChatEntry::system(
-                                    "TTS on — starting XTTS v2 server (loading model, ~10s)...".to_string()
+                                    "TTS on — starting XTTS v2 server (loading model, ~10s)..."
+                                        .to_string(),
                                 ));
                             }
                             app.follow_bottom = true;
                         } else {
                             crate::voice::stop_xtts_server();
                             app.entries.push(ChatEntry::system(
-                                "TTS off. XTTS v2 server stopped.".to_string()
+                                "TTS off. XTTS v2 server stopped.".to_string(),
                             ));
                             app.follow_bottom = true;
                         }
@@ -2095,7 +2354,9 @@ async fn handle_key(
                                  Then record a custom voice:\n\
                                    /voice clone".to_string()));
                         } else {
-                            let current = config.tts_voice_model.clone()
+                            let current = config
+                                .tts_voice_model
+                                .clone()
                                 .unwrap_or_else(|| crate::voice::XTTS_DEFAULT_SPEAKER.to_string());
                             let mut lines = vec![format!("Voice models ({})\n", voices.len())];
                             let mut ids = Vec::new();
@@ -2105,8 +2366,12 @@ async fn handle_key(
                                 ids.push(path.clone());
                             }
                             lines.push(String::new());
-                            lines.push("  ↑↓ select · Enter preview & set · 1-9 quick pick · Esc close".into());
-                            app.overlay = Some(Overlay::with_items("voices", lines.join("\n"), ids));
+                            lines.push(
+                                "  ↑↓ select · Enter preview & set · 1-9 quick pick · Esc close"
+                                    .into(),
+                            );
+                            app.overlay =
+                                Some(Overlay::with_items("voices", lines.join("\n"), ids));
                         }
                     }
                     CommandAction::PreviewVoiceModel(path) => {
@@ -2131,31 +2396,49 @@ async fn handle_key(
                     }
                     CommandAction::ShowThinkback => {
                         let msg_count = messages.len();
-                        let user_count  = messages.iter().filter(|m| m.role == Role::User).count();
-                        let asst_count  = messages.iter().filter(|m| m.role == Role::Assistant).count();
-                        let tool_calls  = app.entries.iter()
+                        let user_count = messages.iter().filter(|m| m.role == Role::User).count();
+                        let asst_count = messages
+                            .iter()
+                            .filter(|m| m.role == Role::Assistant)
+                            .count();
+                        let tool_calls = app
+                            .entries
+                            .iter()
                             .filter(|e| matches!(e.kind, crate::tui::app::EntryKind::ToolCall))
                             .count();
-                        let total_in: u64  = app.turn_costs.iter().map(|(i, _)| i).sum();
+                        let total_in: u64 = app.turn_costs.iter().map(|(i, _)| i).sum();
                         let total_out: u64 = app.turn_costs.iter().map(|(_, o)| o).sum();
 
                         // Build ASCII bar chart (tokens_in per turn)
                         let chart = if app.turn_costs.is_empty() {
                             "  (no turns yet)".to_string()
                         } else {
-                            let max_tokens = app.turn_costs.iter()
+                            let max_tokens = app
+                                .turn_costs
+                                .iter()
                                 .map(|(i, _)| *i)
                                 .max()
                                 .unwrap_or(1)
                                 .max(1);
                             let bar_width = 20usize;
-                            app.turn_costs.iter().enumerate()
+                            app.turn_costs
+                                .iter()
+                                .enumerate()
                                 .take(12) // cap at 12 turns to fit overlay
                                 .map(|(i, (tin, tout))| {
-                                    let bars = (((*tin as f64 / max_tokens as f64) * bar_width as f64).round() as usize).max(1);
-                                    format!("  Turn {:>2}: {:░<width$} {}in {}out",
-                                        i + 1, "█".repeat(bars),
-                                        tin, tout, width = bar_width - bars)
+                                    let bars = (((*tin as f64 / max_tokens as f64)
+                                        * bar_width as f64)
+                                        .round()
+                                        as usize)
+                                        .max(1);
+                                    format!(
+                                        "  Turn {:>2}: {:░<width$} {}in {}out",
+                                        i + 1,
+                                        "█".repeat(bars),
+                                        tin,
+                                        tout,
+                                        width = bar_width - bars
+                                    )
                                 })
                                 .collect::<Vec<_>>()
                                 .join("\n")
@@ -2174,13 +2457,15 @@ async fn handle_key(
                             turn_counter,
                             &session.id[..8.min(session.id.len())],
                             app.model,
-                            total_in, total_out,
+                            total_in,
+                            total_out,
                             chart,
                         );
                         app.overlay = Some(Overlay::new("thinkback", text));
                     }
                     CommandAction::TeleportExport => {
-                        let teleport_path = crate::config::Config::claude_dir().join("teleport.json");
+                        let teleport_path =
+                            crate::config::Config::claude_dir().join("teleport.json");
                         let export_data = serde_json::json!({
                             "session_id": session.id,
                             "session_name": session.meta.name,
@@ -2191,38 +2476,52 @@ async fn handle_key(
                         match serde_json::to_string_pretty(&export_data) {
                             Ok(json_str) => match std::fs::write(&teleport_path, &json_str) {
                                 Ok(()) => {
-                                    app.overlay = Some(Overlay::new("teleport", format!(
-                                        "Teleport export saved\n\n\
+                                    app.overlay = Some(Overlay::new(
+                                        "teleport",
+                                        format!(
+                                            "Teleport export saved\n\n\
                                          File: {}\n\
                                          Messages: {}  Model: {}",
-                                        teleport_path.display(), messages.len(), config.model
-                                    )));
+                                            teleport_path.display(),
+                                            messages.len(),
+                                            config.model
+                                        ),
+                                    ));
                                 }
                                 Err(e) => {
-                                    app.overlay = Some(Overlay::new("error",
-                                        format!("Teleport export failed: {e}")));
+                                    app.overlay = Some(Overlay::new(
+                                        "error",
+                                        format!("Teleport export failed: {e}"),
+                                    ));
                                 }
-                            }
+                            },
                             Err(e) => {
-                                app.overlay = Some(Overlay::new("error",
-                                    format!("Teleport serialisation failed: {e}")));
+                                app.overlay = Some(Overlay::new(
+                                    "error",
+                                    format!("Teleport serialisation failed: {e}"),
+                                ));
                             }
                         }
                     }
                     CommandAction::TeleportImport => {
-                        let teleport_path = crate::config::Config::claude_dir().join("teleport.json");
+                        let teleport_path =
+                            crate::config::Config::claude_dir().join("teleport.json");
                         if !teleport_path.exists() {
-                            app.overlay = Some(Overlay::new("teleport",
-                                "No teleport file found.\nUse /teleport export first.".to_string()));
+                            app.overlay = Some(Overlay::new(
+                                "teleport",
+                                "No teleport file found.\nUse /teleport export first.".to_string(),
+                            ));
                         } else {
                             let result = std::fs::read_to_string(&teleport_path)
                                 .ok()
                                 .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
                                 .and_then(|data| {
                                     let msgs = serde_json::from_value::<Vec<Message>>(
-                                        data.get("messages")?.clone()
-                                    ).ok()?;
-                                    let model = data.get("model")
+                                        data.get("messages")?.clone(),
+                                    )
+                                    .ok()?;
+                                    let model = data
+                                        .get("model")
                                         .and_then(|v| v.as_str())
                                         .unwrap_or(&config.model)
                                         .to_string();
@@ -2230,8 +2529,10 @@ async fn handle_key(
                                 });
                             match result {
                                 None => {
-                                    app.overlay = Some(Overlay::new("error",
-                                        "Teleport file is invalid or has no messages.".to_string()));
+                                    app.overlay = Some(Overlay::new(
+                                        "error",
+                                        "Teleport file is invalid or has no messages.".to_string(),
+                                    ));
                                 }
                                 Some((msgs, src_model)) => {
                                     let count = msgs.len();
@@ -2243,28 +2544,39 @@ async fn handle_key(
                                     app.entries.extend(display);
                                     app.show_welcome = false;
                                     app.scroll_to_bottom();
-                                    app.overlay = Some(Overlay::new("teleport", format!(
-                                        "Teleport imported\n\n{count} messages loaded\nOriginal model: {src_model}"
-                                    )));
+                                    app.overlay = Some(Overlay::new(
+                                        "teleport",
+                                        format!(
+                                            "Teleport imported\n\n{count} messages loaded\nOriginal model: {src_model}"
+                                        ),
+                                    ));
                                 }
                             }
                         }
                     }
                     CommandAction::ShareSession => {
-                        let id   = session.id.clone();
+                        let id = session.id.clone();
                         let name = session.meta.name.clone();
-                        let safe_name = name.replace(|c: char| !c.is_alphanumeric() && c != '-', "-");
-                        let dest = config.cwd.join(format!("share-{}-{}.md", safe_name, &id[..8.min(id.len())]));
+                        let safe_name =
+                            name.replace(|c: char| !c.is_alphanumeric() && c != '-', "-");
+                        let dest = config.cwd.join(format!(
+                            "share-{}-{}.md",
+                            safe_name,
+                            &id[..8.min(id.len())]
+                        ));
                         match Session::export(&id, &dest).await {
                             Ok(path) => {
-                                app.overlay = Some(Overlay::new("share", format!(
-                                    "Session shared\n\nFile: {}\n\nShare this markdown file with your team.",
-                                    path.display()
-                                )));
+                                app.overlay = Some(Overlay::new(
+                                    "share",
+                                    format!(
+                                        "Session shared\n\nFile: {}\n\nShare this markdown file with your team.",
+                                        path.display()
+                                    ),
+                                ));
                             }
                             Err(e) => {
-                                app.overlay = Some(Overlay::new("error",
-                                    format!("Share failed: {e}")));
+                                app.overlay =
+                                    Some(Overlay::new("error", format!("Share failed: {e}")));
                             }
                         }
                     }
@@ -2274,9 +2586,9 @@ async fn handle_key(
                         tokio::spawn(async move {
                             match Session::export_to_string(&id).await {
                                 Err(e) => {
-                                    let _ = tx2.send(AppEvent::SystemMessage(
-                                        format!("Clipboard export failed: {e}")
-                                    ));
+                                    let _ = tx2.send(AppEvent::SystemMessage(format!(
+                                        "Clipboard export failed: {e}"
+                                    )));
                                 }
                                 Ok(content) => {
                                     // Try wl-copy (Wayland) then xclip (X11)
@@ -2284,7 +2596,8 @@ async fn handle_key(
                                     let msg = if copied {
                                         "Session copied to clipboard.".to_string()
                                     } else {
-                                        "Clipboard tools not found. Install wl-copy or xclip.".to_string()
+                                        "Clipboard tools not found. Install wl-copy or xclip."
+                                            .to_string()
                                     };
                                     let _ = tx2.send(AppEvent::SystemMessage(msg));
                                 }
@@ -2342,53 +2655,73 @@ async fn handle_key(
                         config.claudemd = crate::config::Config::load_claude_md(&config.cwd);
                         *system_prompt = config.build_system_prompt();
                         app.entries.push(ChatEntry::system(format!(
-                            "CLAUDE.md reloaded ({} chars).", config.claudemd.len()
+                            "CLAUDE.md reloaded ({} chars).",
+                            config.claudemd.len()
                         )));
                         app.scroll_to_bottom();
                     }
-                    CommandAction::SearchSessions(query) => {
-                        match Session::list().await {
-                            Err(e) => {
-                                app.overlay = Some(Overlay::new("search",
-                                    format!("Error listing sessions: {e}")));
-                            }
-                            Ok(list) => {
-                                let q = query.to_lowercase();
-                                let matches: Vec<_> = list.iter().filter(|m| {
+                    CommandAction::SearchSessions(query) => match Session::list().await {
+                        Err(e) => {
+                            app.overlay = Some(Overlay::new(
+                                "search",
+                                format!("Error listing sessions: {e}"),
+                            ));
+                        }
+                        Ok(list) => {
+                            let q = query.to_lowercase();
+                            let matches: Vec<_> = list
+                                .iter()
+                                .filter(|m| {
                                     m.name.to_lowercase().contains(&q)
-                                    || m.preview.to_lowercase().contains(&q)
-                                    || m.id.starts_with(&q)
-                                }).collect();
-                                if matches.is_empty() {
-                                    app.overlay = Some(Overlay::new("search", format!(
-                                        "No sessions matching '{query}'."
-                                    )));
-                                } else {
-                                    let mut lines = vec![format!("Sessions matching '{}' ({}):\n", query, matches.len())];
-                                    for m in matches.iter().take(20) {
-                                        let preview = if m.preview.is_empty() { "(empty)" } else { &m.preview };
-                                        lines.push(format!("  [{}] {} — {}", &m.id[..8], m.name, preview));
-                                    }
-                                    lines.push(String::new());
-                                    lines.push("  /resume <id-prefix>  — resume a session".into());
-                                    app.overlay = Some(Overlay::new("search", lines.join("\n")));
+                                        || m.preview.to_lowercase().contains(&q)
+                                        || m.id.starts_with(&q)
+                                })
+                                .collect();
+                            if matches.is_empty() {
+                                app.overlay = Some(Overlay::new(
+                                    "search",
+                                    format!("No sessions matching '{query}'."),
+                                ));
+                            } else {
+                                let mut lines = vec![format!(
+                                    "Sessions matching '{}' ({}):\n",
+                                    query,
+                                    matches.len()
+                                )];
+                                for m in matches.iter().take(20) {
+                                    let preview = if m.preview.is_empty() {
+                                        "(empty)"
+                                    } else {
+                                        &m.preview
+                                    };
+                                    lines.push(format!(
+                                        "  [{}] {} — {}",
+                                        &m.id[..8],
+                                        m.name,
+                                        preview
+                                    ));
                                 }
+                                lines.push(String::new());
+                                lines.push("  /resume <id-prefix>  — resume a session".into());
+                                app.overlay = Some(Overlay::new("search", lines.join("\n")));
                             }
                         }
-                    }
+                    },
                     CommandAction::PersistModel => {
                         let _ = crate::config::Config::save_user_setting(
                             "model",
                             serde_json::Value::String(config.model.clone()),
                         );
                         app.entries.push(ChatEntry::system(format!(
-                            "Model '{}' saved to settings.json.", config.model
+                            "Model '{}' saved to settings.json.",
+                            config.model
                         )));
                         app.scroll_to_bottom();
                     }
                     CommandAction::PluginInstall(spec) => {
                         app.entries.push(ChatEntry::system(format!(
-                            "Installing plugin: {} …", spec.trim_start_matches("marketplace:")
+                            "Installing plugin: {} …",
+                            spec.trim_start_matches("marketplace:")
                         )));
                         app.start_loading();
                         app.scroll_to_bottom();
@@ -2421,7 +2754,9 @@ async fn handle_key(
                             app.spinner_style = style;
                             reloaded.push("spinnerStyle");
                         }
-                        config.show_thinking_summaries = settings.show_thinking_summaries.unwrap_or(config.show_thinking_summaries);
+                        config.show_thinking_summaries = settings
+                            .show_thinking_summaries
+                            .unwrap_or(config.show_thinking_summaries);
                         if let Some(tbt) = settings.thinking_budget_tokens {
                             config.thinking_budget_tokens = Some(tbt);
                             reloaded.push("thinkingBudgetTokens");
@@ -2450,14 +2785,19 @@ async fn handle_key(
                         let msg = if reloaded.is_empty() {
                             "Settings reloaded (no changes detected). CLAUDE.md + AGENTS.md refreshed.".to_string()
                         } else {
-                            format!("Settings reloaded: {}. CLAUDE.md + AGENTS.md refreshed.", reloaded.join(", "))
+                            format!(
+                                "Settings reloaded: {}. CLAUDE.md + AGENTS.md refreshed.",
+                                reloaded.join(", ")
+                            )
                         };
                         app.entries.push(ChatEntry::system(msg));
                         app.scroll_to_bottom();
                     }
                     CommandAction::ReloadPlugins => {
                         // Re-read settings.json mcpServers section
-                        let count = crate::settings::Settings::load(&config.cwd).mcp_servers.len();
+                        let count = crate::settings::Settings::load(&config.cwd)
+                            .mcp_servers
+                            .len();
                         app.entries.push(ChatEntry::system(format!(
                             "Plugin/MCP config reloaded — {} server(s) defined in settings.json.\n\
                              \n\
@@ -2468,7 +2808,8 @@ async fn handle_key(
                         app.scroll_to_bottom();
                     }
                     CommandAction::CheckUpgrade => {
-                        app.entries.push(ChatEntry::system("Checking for updates …".to_string()));
+                        app.entries
+                            .push(ChatEntry::system("Checking for updates …".to_string()));
                         app.start_loading();
                         app.scroll_to_bottom();
                         let tx2 = tx.clone();
@@ -2476,20 +2817,30 @@ async fn handle_key(
                     }
                     CommandAction::RunInstall(cmd) => {
                         // Signal run_loop to handle this — it needs terminal/cols/rows access.
-                        app.entries.push(ChatEntry::system(format!("Running: {cmd}")));
+                        app.entries
+                            .push(ChatEntry::system(format!("Running: {cmd}")));
                         app.follow_bottom = true;
                         app.pending_install = Some(cmd);
                     }
 
                     CommandAction::OpenBrowser(url) => {
                         // Try platform-specific openers
-                        let opened = std::process::Command::new("xdg-open").arg(&url).spawn().is_ok()
+                        let opened = std::process::Command::new("xdg-open")
+                            .arg(&url)
+                            .spawn()
+                            .is_ok()
                             || std::process::Command::new("open").arg(&url).spawn().is_ok()
-                            || std::process::Command::new("cmd.exe").args(["/C", "start", &url]).spawn().is_ok();
+                            || std::process::Command::new("cmd.exe")
+                                .args(["/C", "start", &url])
+                                .spawn()
+                                .is_ok();
                         let msg = if opened {
                             format!("Opened in browser: {}", url)
                         } else {
-                            format!("Could not open browser. URL: {}\n(Install xdg-utils on Linux or copy the URL manually.)", url)
+                            format!(
+                                "Could not open browser. URL: {}\n(Install xdg-utils on Linux or copy the URL manually.)",
+                                url
+                            )
                         };
                         app.entries.push(ChatEntry::system(msg));
                         app.scroll_to_bottom();
@@ -2508,11 +2859,13 @@ async fn handle_key(
                             "No plugins installed.\n\n\
                              Install a plugin:\n\
                              /plugin marketplace add <user/repo>\n\
-                             /plugin install <npm-package>".to_string()
+                             /plugin install <npm-package>"
+                                .to_string()
                         } else {
                             let mut lines = vec![format!("Installed plugins ({})\n", obj.len())];
                             for (name, info) in &obj {
-                                let from_marketplace = info["marketplace"].as_bool().unwrap_or(false);
+                                let from_marketplace =
+                                    info["marketplace"].as_bool().unwrap_or(false);
                                 let spec = info["spec"].as_str().unwrap_or(name);
                                 if from_marketplace {
                                     lines.push(format!("  {} (from {})", name, spec));
@@ -2533,32 +2886,41 @@ async fn handle_key(
                             .join("settings.json");
                         let mut removed = false;
                         if let Ok(content) = std::fs::read_to_string(&settings_path)
-                            && let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
-                                if let Some(obj) = json["mcpServers"].as_object_mut() {
-                                    removed = obj.remove(&name).is_some();
-                                }
-                                if removed {
-                                    let _ = std::fs::write(
-                                        &settings_path,
-                                        serde_json::to_string_pretty(&json).unwrap_or_default(),
-                                    );
-                                }
+                            && let Ok(mut json) =
+                                serde_json::from_str::<serde_json::Value>(&content)
+                        {
+                            if let Some(obj) = json["mcpServers"].as_object_mut() {
+                                removed = obj.remove(&name).is_some();
                             }
+                            if removed {
+                                let _ = std::fs::write(
+                                    &settings_path,
+                                    serde_json::to_string_pretty(&json).unwrap_or_default(),
+                                );
+                            }
+                        }
                         // Remove from plugins.json
                         let plugins_path = dirs::home_dir()
                             .unwrap_or_default()
                             .join(".claude")
                             .join("plugins.json");
                         if let Ok(content) = std::fs::read_to_string(&plugins_path)
-                            && let Ok(mut plugins) = serde_json::from_str::<serde_json::Value>(&content) {
-                                if let Some(obj) = plugins.as_object_mut() { obj.remove(&name); }
-                                let _ = std::fs::write(
-                                    &plugins_path,
-                                    serde_json::to_string_pretty(&plugins).unwrap_or_default(),
-                                );
+                            && let Ok(mut plugins) =
+                                serde_json::from_str::<serde_json::Value>(&content)
+                        {
+                            if let Some(obj) = plugins.as_object_mut() {
+                                obj.remove(&name);
                             }
+                            let _ = std::fs::write(
+                                &plugins_path,
+                                serde_json::to_string_pretty(&plugins).unwrap_or_default(),
+                            );
+                        }
                         let msg = if removed {
-                            format!("Plugin '{}' removed. Restart rustyclaw to deactivate.", name)
+                            format!(
+                                "Plugin '{}' removed. Restart rustyclaw to deactivate.",
+                                name
+                            )
                         } else {
                             format!("Plugin '{}' not found in installed plugins.", name)
                         };
@@ -2607,8 +2969,13 @@ async fn handle_key(
                     }
                     CommandAction::IndexProject { force } => {
                         let cwd = config.cwd.clone();
-                        let label = if force { "Full re-index" } else { "Incremental index" };
-                        app.entries.push(ChatEntry::system(format!("{label} — indexing codebase …")));
+                        let label = if force {
+                            "Full re-index"
+                        } else {
+                            "Incremental index"
+                        };
+                        app.entries
+                            .push(ChatEntry::system(format!("{label} — indexing codebase …")));
                         app.start_loading();
                         app.scroll_to_bottom();
                         let tx2 = tx.clone();
@@ -2623,13 +2990,18 @@ async fn handle_key(
                                 Ok(r) => {
                                     let msg = format!(
                                         "Index complete — {} files scanned, {} indexed, {} skipped, {} chunks. {:.0}ms",
-                                        r.files_scanned, r.files_indexed, r.files_skipped, r.chunks_added, r.elapsed_ms
+                                        r.files_scanned,
+                                        r.files_indexed,
+                                        r.files_skipped,
+                                        r.chunks_added,
+                                        r.elapsed_ms
                                     );
-                                    let _ = tx2.send(crate::tui::events::AppEvent::SystemMessage(msg));
+                                    let _ =
+                                        tx2.send(crate::tui::events::AppEvent::SystemMessage(msg));
                                 }
                                 Err(e) => {
                                     let _ = tx2.send(crate::tui::events::AppEvent::SystemMessage(
-                                        format!("Index error: {e}")
+                                        format!("Index error: {e}"),
                                     ));
                                 }
                             }
@@ -2646,17 +3018,26 @@ async fn handle_key(
                                         ));
                                     }
                                     Ok(results) => {
-                                        let mut lines = vec![format!("RAG search: '{}' — {} results\n", query, results.len())];
+                                        let mut lines = vec![format!(
+                                            "RAG search: '{}' — {} results\n",
+                                            query,
+                                            results.len()
+                                        )];
                                         for r in &results {
                                             lines.push(format!(
                                                 "  {} {}:{}-{} ({} `{}`)",
-                                                r.file_path, r.start_line, r.end_line,
-                                                r.symbol_kind, r.symbol_name, r.language,
+                                                r.file_path,
+                                                r.start_line,
+                                                r.end_line,
+                                                r.symbol_kind,
+                                                r.symbol_name,
+                                                r.language,
                                             ));
                                         }
                                         // Show full context of first 3 results
                                         let ctx = crate::rag::search::build_context(
-                                            &results[..results.len().min(3)], 8000
+                                            &results[..results.len().min(3)],
+                                            8000,
                                         );
                                         if !ctx.is_empty() {
                                             lines.push(String::new());
@@ -2665,12 +3046,15 @@ async fn handle_key(
                                         app.entries.push(ChatEntry::system(lines.join("\n")));
                                     }
                                     Err(e) => {
-                                        app.entries.push(ChatEntry::system(format!("RAG search error: {e}")));
+                                        app.entries.push(ChatEntry::system(format!(
+                                            "RAG search error: {e}"
+                                        )));
                                     }
                                 }
                             }
                             Err(e) => {
-                                app.entries.push(ChatEntry::system(format!("RAG database error: {e}")));
+                                app.entries
+                                    .push(ChatEntry::system(format!("RAG database error: {e}")));
                             }
                         }
                         app.scroll_to_bottom();
@@ -2707,7 +3091,8 @@ async fn handle_key(
                                      Files indexed: {files}\n\
                                      Code chunks:   {chunks}\n\
                                      Database size: {size}\n\
-                                     DB path:       {}", db.db_path.display()
+                                     DB path:       {}",
+                                    db.db_path.display()
                                 );
                                 if !lang_breakdown.is_empty() {
                                     text.push_str(&format!("\n\nLanguages:\n{lang_breakdown}"));
@@ -2715,7 +3100,8 @@ async fn handle_key(
                                 app.entries.push(ChatEntry::system(text));
                             }
                             Err(e) => {
-                                app.entries.push(ChatEntry::system(format!("RAG database error: {e}")));
+                                app.entries
+                                    .push(ChatEntry::system(format!("RAG database error: {e}")));
                             }
                         }
                         app.scroll_to_bottom();
@@ -2732,12 +3118,15 @@ async fn handle_key(
                                         ));
                                     }
                                     Err(e) => {
-                                        app.entries.push(ChatEntry::system(format!("Failed to clear RAG index: {e}")));
+                                        app.entries.push(ChatEntry::system(format!(
+                                            "Failed to clear RAG index: {e}"
+                                        )));
                                     }
                                 }
                             }
                             Err(e) => {
-                                app.entries.push(ChatEntry::system(format!("RAG database error: {e}")));
+                                app.entries
+                                    .push(ChatEntry::system(format!("RAG database error: {e}")));
                             }
                         }
                         app.scroll_to_bottom();
@@ -2749,128 +3138,137 @@ async fn handle_key(
                             Ok(store) => {
                                 let cat = crate::memory::auto_categorize(&text);
                                 match store.add_auto(&text, "user") {
-                                    Ok(true) => app.entries.push(ChatEntry::system(
-                                        format!("Memory stored [{cat}]: {text}")
-                                    )),
+                                    Ok(true) => app.entries.push(ChatEntry::system(format!(
+                                        "Memory stored [{cat}]: {text}"
+                                    ))),
                                     Ok(false) => app.entries.push(ChatEntry::system(
-                                        "Memory skipped — near-duplicate already exists.".to_string()
+                                        "Memory skipped — near-duplicate already exists."
+                                            .to_string(),
                                     )),
-                                    Err(e) => app.entries.push(ChatEntry::system(
-                                        format!("Memory store error: {e}")
-                                    )),
+                                    Err(e) => app.entries.push(ChatEntry::system(format!(
+                                        "Memory store error: {e}"
+                                    ))),
                                 }
                             }
-                            Err(e) => app.entries.push(ChatEntry::system(format!("Memory store error: {e}"))),
+                            Err(e) => app
+                                .entries
+                                .push(ChatEntry::system(format!("Memory store error: {e}"))),
                         }
                         app.scroll_to_bottom();
                     }
                     CommandAction::MemoryForget(query) => {
                         let cwd = config.cwd.clone();
                         match crate::memory::MemoryStore::open(&cwd) {
-                            Ok(store) => {
-                                match store.search(&query, 20) {
-                                    Ok(matches) if matches.is_empty() => {
-                                        app.entries.push(ChatEntry::system(
-                                            format!("No memories matched '{query}'.")
-                                        ));
-                                    }
-                                    Ok(matches) => {
-                                        let count = matches.len();
-                                        let mut errs = 0usize;
-                                        for m in &matches {
-                                            if store.forget(&m.key).is_err() { errs += 1; }
-                                        }
-                                        let ok = count - errs;
-                                        app.entries.push(ChatEntry::system(
-                                            format!("Forgot {ok} memory entries matching '{query}'.")
-                                        ));
-                                    }
-                                    Err(e) => app.entries.push(ChatEntry::system(
-                                        format!("Memory search error: {e}")
-                                    )),
+                            Ok(store) => match store.search(&query, 20) {
+                                Ok(matches) if matches.is_empty() => {
+                                    app.entries.push(ChatEntry::system(format!(
+                                        "No memories matched '{query}'."
+                                    )));
                                 }
-                            }
-                            Err(e) => app.entries.push(ChatEntry::system(format!("Memory store error: {e}"))),
+                                Ok(matches) => {
+                                    let count = matches.len();
+                                    let mut errs = 0usize;
+                                    for m in &matches {
+                                        if store.forget(&m.key).is_err() {
+                                            errs += 1;
+                                        }
+                                    }
+                                    let ok = count - errs;
+                                    app.entries.push(ChatEntry::system(format!(
+                                        "Forgot {ok} memory entries matching '{query}'."
+                                    )));
+                                }
+                                Err(e) => app
+                                    .entries
+                                    .push(ChatEntry::system(format!("Memory search error: {e}"))),
+                            },
+                            Err(e) => app
+                                .entries
+                                .push(ChatEntry::system(format!("Memory store error: {e}"))),
                         }
                         app.scroll_to_bottom();
                     }
                     CommandAction::MemorySearch(query) => {
                         let cwd = config.cwd.clone();
                         match crate::memory::MemoryStore::open(&cwd) {
-                            Ok(store) => {
-                                match store.search(&query, 10) {
-                                    Ok(results) if results.is_empty() => {
-                                        app.entries.push(ChatEntry::system(
-                                            format!("No memories found for '{query}'.")
+                            Ok(store) => match store.search(&query, 10) {
+                                Ok(results) if results.is_empty() => {
+                                    app.entries.push(ChatEntry::system(format!(
+                                        "No memories found for '{query}'."
+                                    )));
+                                }
+                                Ok(results) => {
+                                    let mut lines = vec![format!(
+                                        "Memory search: '{}' — {} results\n",
+                                        query,
+                                        results.len()
+                                    )];
+                                    for r in &results {
+                                        lines.push(format!(
+                                            "  [{}] {} ({})",
+                                            r.category, r.value, r.key
                                         ));
                                     }
-                                    Ok(results) => {
-                                        let mut lines = vec![format!(
-                                            "Memory search: '{}' — {} results\n", query, results.len()
-                                        )];
-                                        for r in &results {
-                                            lines.push(format!(
-                                                "  [{}] {} ({})",
-                                                r.category, r.value, r.key
-                                            ));
-                                        }
-                                        app.entries.push(ChatEntry::system(lines.join("\n")));
-                                    }
-                                    Err(e) => app.entries.push(ChatEntry::system(
-                                        format!("Memory search error: {e}")
-                                    )),
+                                    app.entries.push(ChatEntry::system(lines.join("\n")));
                                 }
-                            }
-                            Err(e) => app.entries.push(ChatEntry::system(format!("Memory store error: {e}"))),
+                                Err(e) => app
+                                    .entries
+                                    .push(ChatEntry::system(format!("Memory search error: {e}"))),
+                            },
+                            Err(e) => app
+                                .entries
+                                .push(ChatEntry::system(format!("Memory store error: {e}"))),
                         }
                         app.scroll_to_bottom();
                     }
                     CommandAction::MemoryList => {
                         let cwd = config.cwd.clone();
                         match crate::memory::MemoryStore::open(&cwd) {
-                            Ok(store) => {
-                                match store.list(None) {
-                                    Ok(memories) if memories.is_empty() => {
-                                        app.entries.push(ChatEntry::system(
-                                            "No memories stored yet. Use /remember <text> to add one.".to_string()
-                                        ));
-                                    }
-                                    Ok(memories) => {
-                                        let mut lines = vec![format!("Memories ({} total)\n", memories.len())];
-                                        let mut last_cat = String::new();
-                                        for m in &memories {
-                                            let cat = m.category.as_str().to_string();
-                                            if cat != last_cat {
-                                                lines.push(format!("\n[{cat}]"));
-                                                last_cat = cat;
-                                            }
-                                            lines.push(format!("  • {}", m.value));
-                                        }
-                                        app.entries.push(ChatEntry::system(lines.join("\n")));
-                                    }
-                                    Err(e) => app.entries.push(ChatEntry::system(
-                                        format!("Memory list error: {e}")
-                                    )),
+                            Ok(store) => match store.list(None) {
+                                Ok(memories) if memories.is_empty() => {
+                                    app.entries.push(ChatEntry::system(
+                                        "No memories stored yet. Use /remember <text> to add one."
+                                            .to_string(),
+                                    ));
                                 }
-                            }
-                            Err(e) => app.entries.push(ChatEntry::system(format!("Memory store error: {e}"))),
+                                Ok(memories) => {
+                                    let mut lines =
+                                        vec![format!("Memories ({} total)\n", memories.len())];
+                                    let mut last_cat = String::new();
+                                    for m in &memories {
+                                        let cat = m.category.as_str().to_string();
+                                        if cat != last_cat {
+                                            lines.push(format!("\n[{cat}]"));
+                                            last_cat = cat;
+                                        }
+                                        lines.push(format!("  • {}", m.value));
+                                    }
+                                    app.entries.push(ChatEntry::system(lines.join("\n")));
+                                }
+                                Err(e) => app
+                                    .entries
+                                    .push(ChatEntry::system(format!("Memory list error: {e}"))),
+                            },
+                            Err(e) => app
+                                .entries
+                                .push(ChatEntry::system(format!("Memory store error: {e}"))),
                         }
                         app.scroll_to_bottom();
                     }
                     CommandAction::MemoryClear => {
                         let cwd = config.cwd.clone();
                         match crate::memory::MemoryStore::open(&cwd) {
-                            Ok(store) => {
-                                match store.clear_all() {
-                                    Ok(()) => app.entries.push(ChatEntry::system(
-                                        "All memories cleared.".to_string()
-                                    )),
-                                    Err(e) => app.entries.push(ChatEntry::system(
-                                        format!("Memory clear error: {e}")
-                                    )),
-                                }
-                            }
-                            Err(e) => app.entries.push(ChatEntry::system(format!("Memory store error: {e}"))),
+                            Ok(store) => match store.clear_all() {
+                                Ok(()) => app
+                                    .entries
+                                    .push(ChatEntry::system("All memories cleared.".to_string())),
+                                Err(e) => app
+                                    .entries
+                                    .push(ChatEntry::system(format!("Memory clear error: {e}"))),
+                            },
+                            Err(e) => app
+                                .entries
+                                .push(ChatEntry::system(format!("Memory store error: {e}"))),
                         }
                         app.scroll_to_bottom();
                     }
@@ -2878,32 +3276,35 @@ async fn handle_key(
                         config.memory_auto_capture = on;
                         app.entries.push(ChatEntry::system(format!(
                             "Memory auto-capture {}.",
-                            if on { "enabled — notable decisions will be stored automatically" }
-                            else  { "disabled" }
+                            if on {
+                                "enabled — notable decisions will be stored automatically"
+                            } else {
+                                "disabled"
+                            }
                         )));
                         app.scroll_to_bottom();
                     }
                     CommandAction::MemoryInject => {
                         let cwd = config.cwd.clone();
                         match crate::memory::MemoryStore::open(&cwd) {
-                            Ok(store) => {
-                                match store.build_context(10) {
-                                    Ok(ctx_text) if ctx_text.is_empty() => {
-                                        app.entries.push(ChatEntry::system(
-                                            "No memories to inject — store is empty.".to_string()
-                                        ));
-                                    }
-                                    Ok(ctx_text) => {
-                                        app.entries.push(ChatEntry::system(
-                                            format!("Current memory context:\n\n{ctx_text}")
-                                        ));
-                                    }
-                                    Err(e) => app.entries.push(ChatEntry::system(
-                                        format!("Memory context error: {e}")
-                                    )),
+                            Ok(store) => match store.build_context(10) {
+                                Ok(ctx_text) if ctx_text.is_empty() => {
+                                    app.entries.push(ChatEntry::system(
+                                        "No memories to inject — store is empty.".to_string(),
+                                    ));
                                 }
-                            }
-                            Err(e) => app.entries.push(ChatEntry::system(format!("Memory store error: {e}"))),
+                                Ok(ctx_text) => {
+                                    app.entries.push(ChatEntry::system(format!(
+                                        "Current memory context:\n\n{ctx_text}"
+                                    )));
+                                }
+                                Err(e) => app
+                                    .entries
+                                    .push(ChatEntry::system(format!("Memory context error: {e}"))),
+                            },
+                            Err(e) => app
+                                .entries
+                                .push(ChatEntry::system(format!("Memory store error: {e}"))),
                         }
                         app.scroll_to_bottom();
                     }
@@ -2917,13 +3318,15 @@ async fn handle_key(
                             Some(v) if v < 0.0 => {
                                 // Clear budget
                                 app.cost_tracker.clear_budget();
-                                app.entries.push(ChatEntry::system("Budget limit removed.".to_string()));
+                                app.entries
+                                    .push(ChatEntry::system("Budget limit removed.".to_string()));
                             }
                             Some(v) => {
                                 app.cost_tracker.set_budget(v);
-                                app.entries.push(ChatEntry::system(
-                                    format!("Budget set to ${:.2}. Use /budget to check status.", v)
-                                ));
+                                app.entries.push(ChatEntry::system(format!(
+                                    "Budget set to ${:.2}. Use /budget to check status.",
+                                    v
+                                )));
                             }
                         }
                         app.scroll_to_bottom();
@@ -2931,18 +3334,17 @@ async fn handle_key(
                     CommandAction::RouterToggle => {
                         app.router.enabled = !app.router.enabled;
                         let state = if app.router.enabled { "ON" } else { "OFF" };
-                        app.entries.push(ChatEntry::system(
-                            format!("Smart model router: {state}\n\
+                        app.entries.push(ChatEntry::system(format!(
+                            "Smart model router: {state}\n\
                                      Low → {}\n\
                                      Medium → {}\n\
                                      High → {}\n\
                                      Super-High → {}",
-                                app.router.low_model,
-                                app.router.medium_model,
-                                app.router.high_model,
-                                app.router.super_high_model,
-                            )
-                        ));
+                            app.router.low_model,
+                            app.router.medium_model,
+                            app.router.high_model,
+                            app.router.super_high_model,
+                        )));
                         app.scroll_to_bottom();
                     }
                     CommandAction::RouterStatus => {
@@ -2962,7 +3364,8 @@ async fn handle_key(
                         );
                         if savings > 0.001 {
                             text.push_str(&format!(
-                                "\nEstimated savings from routing: ${:.4}", savings
+                                "\nEstimated savings from routing: ${:.4}",
+                                savings
                             ));
                         }
                         text.push_str(&format!("\n\n{}", app.cost_tracker.summary()));
@@ -2977,30 +3380,34 @@ async fn handle_key(
                             "super-high" => app.router.super_high_model = model.clone(),
                             _ => {}
                         }
-                        app.entries.push(ChatEntry::system(
-                            format!("Router {tier} tier set to: {model}")
-                        ));
+                        app.entries.push(ChatEntry::system(format!(
+                            "Router {tier} tier set to: {model}"
+                        )));
                         app.scroll_to_bottom();
                     }
                     CommandAction::SetAutonomy(level) => {
                         config.autonomy = level.clone();
-                        app.entries.push(ChatEntry::system(format!("Autonomy set to: {level}")));
+                        app.entries
+                            .push(ChatEntry::system(format!("Autonomy set to: {level}")));
                         app.scroll_to_bottom();
                     }
                     CommandAction::GitCheckpoint(msg) => {
                         let cwd = config.cwd.clone();
                         let result = tokio::task::spawn_blocking(move || {
                             git_checkpoint(&cwd, msg.as_deref())
-                        }).await;
+                        })
+                        .await;
                         match result {
                             Ok(Ok(summary)) => {
                                 app.entries.push(ChatEntry::system(summary));
                             }
                             Ok(Err(e)) => {
-                                app.entries.push(ChatEntry::system(format!("Checkpoint failed: {e}")));
+                                app.entries
+                                    .push(ChatEntry::system(format!("Checkpoint failed: {e}")));
                             }
                             Err(e) => {
-                                app.entries.push(ChatEntry::system(format!("Checkpoint task error: {e}")));
+                                app.entries
+                                    .push(ChatEntry::system(format!("Checkpoint task error: {e}")));
                             }
                         }
                         app.scroll_to_bottom();
@@ -3016,20 +3423,24 @@ async fn handle_key(
                         let reg = spawn_registry.clone();
                         let task2 = task.clone();
                         tokio::spawn(async move {
-                            match crate::spawn::spawn_agent(task2.clone(), &cfg, &reg, tx2.clone()).await {
+                            match crate::spawn::spawn_agent(task2.clone(), &cfg, &reg, tx2.clone())
+                                .await
+                            {
                                 Ok(id) => {
                                     let _ = tx2.send(AppEvent::SystemMessage(
                                         format!("Spawned agent [{id}]: {task2}\nWorking in background. Use /spawn list to check status."),
                                     ));
                                 }
                                 Err(e) => {
-                                    let _ = tx2.send(AppEvent::SystemMessage(
-                                        format!("Failed to spawn agent: {e:#}"),
-                                    ));
+                                    let _ = tx2.send(AppEvent::SystemMessage(format!(
+                                        "Failed to spawn agent: {e:#}"
+                                    )));
                                 }
                             }
                         });
-                        app.entries.push(ChatEntry::system(format!("Spawning background agent: {task}")));
+                        app.entries.push(ChatEntry::system(format!(
+                            "Spawning background agent: {task}"
+                        )));
                     }
                     CommandAction::ListSpawns => {
                         let text = crate::spawn::list_agents(spawn_registry);
@@ -3048,11 +3459,18 @@ async fn handle_key(
                         let id2 = id.clone();
                         tokio::spawn(async move {
                             match crate::spawn::merge_agent(&reg, &id2, &cwd).await {
-                                Ok(msg) => { let _ = tx2.send(AppEvent::SystemMessage(msg)); }
-                                Err(e) => { let _ = tx2.send(AppEvent::SystemMessage(format!("Merge failed: {e:#}"))); }
+                                Ok(msg) => {
+                                    let _ = tx2.send(AppEvent::SystemMessage(msg));
+                                }
+                                Err(e) => {
+                                    let _ = tx2.send(AppEvent::SystemMessage(format!(
+                                        "Merge failed: {e:#}"
+                                    )));
+                                }
                             }
                         });
-                        app.entries.push(ChatEntry::system(format!("Merging agent [{id}]...")));
+                        app.entries
+                            .push(ChatEntry::system(format!("Merging agent [{id}]...")));
                     }
                     CommandAction::KillSpawn(id) => {
                         match crate::spawn::kill_agent(spawn_registry, &id) {
@@ -3095,8 +3513,14 @@ async fn handle_key(
                         let tx2 = tx.clone();
                         tokio::spawn(async move {
                             match crate::voice::save_voice_clone(tier).await {
-                                Ok(msg)  => { let _ = tx2.send(AppEvent::SystemMessage(msg)); }
-                                Err(e) => { let _ = tx2.send(AppEvent::SystemMessage(format!("Voice clone save failed: {e:#}"))); }
+                                Ok(msg) => {
+                                    let _ = tx2.send(AppEvent::SystemMessage(msg));
+                                }
+                                Err(e) => {
+                                    let _ = tx2.send(AppEvent::SystemMessage(format!(
+                                        "Voice clone save failed: {e:#}"
+                                    )));
+                                }
                             }
                         });
                         app.entries.push(ChatEntry::system("Saving voice clone..."));
@@ -3112,21 +3536,30 @@ async fn handle_key(
                         let tx2 = tx.clone();
                         let xtts_ok = crate::voice::xtts_available();
                         let server_up = crate::voice::xtts_server_running();
-                        let label = format!("XTTS v2 default ({})", crate::voice::XTTS_DEFAULT_SPEAKER);
-                        let time_hint = if server_up { "~1 second" } else if xtts_ok { "starting server ~10s, then ~1s" } else { "a few seconds" };
-                        let has_clone = crate::voice::voice_clone_sample_path()
-                            .is_some_and(|p| p.exists());
+                        let label =
+                            format!("XTTS v2 default ({})", crate::voice::XTTS_DEFAULT_SPEAKER);
+                        let time_hint = if server_up {
+                            "~1 second"
+                        } else if xtts_ok {
+                            "starting server ~10s, then ~1s"
+                        } else {
+                            "a few seconds"
+                        };
+                        let has_clone =
+                            crate::voice::voice_clone_sample_path().is_some_and(|p| p.exists());
                         let clone_hint = if has_clone {
                             " Custom voice active for responses. /voice clone to change it."
                         } else {
                             " /voice clone to record any voice — yours, a friend, anyone."
                         };
-                        app.entries.push(ChatEntry::system(
-                            format!("Synthesizing with {label}… ({time_hint}, Esc to cancel){clone_hint}")
-                        ));
+                        app.entries.push(ChatEntry::system(format!(
+                            "Synthesizing with {label}… ({time_hint}, Esc to cancel){clone_hint}"
+                        )));
                         tokio::spawn(async move {
                             // Auto-start server if XTTS v2 is available but server not running
-                            if crate::voice::xtts_available() && !crate::voice::xtts_server_running() {
+                            if crate::voice::xtts_available()
+                                && !crate::voice::xtts_server_running()
+                            {
                                 let _ = crate::voice::ensure_xtts_server().await;
                             }
                             let test_text = "Hello, I am RustyClaw, your personal coding \
@@ -3134,10 +3567,14 @@ async fn handle_key(
                                 than ever before.";
                             match crate::voice::speak_default_only(test_text, stop_rx).await {
                                 Ok(_) => {
-                                    let _ = tx2.send(AppEvent::SystemMessage("Voice test complete.".into()));
+                                    let _ = tx2.send(AppEvent::SystemMessage(
+                                        "Voice test complete.".into(),
+                                    ));
                                 }
                                 Err(e) => {
-                                    let _ = tx2.send(AppEvent::SystemMessage(format!("Voice test failed: {e}")));
+                                    let _ = tx2.send(AppEvent::SystemMessage(format!(
+                                        "Voice test failed: {e}"
+                                    )));
                                 }
                             }
                         });
@@ -3146,8 +3583,13 @@ async fn handle_key(
                         let tx2 = tx.clone();
                         tokio::spawn(async move {
                             match crate::voice::remove_voice_clone().await {
-                                Ok(msg)  => { let _ = tx2.send(AppEvent::SystemMessage(msg)); }
-                                Err(e) => { let _ = tx2.send(AppEvent::SystemMessage(format!("Failed: {e:#}"))); }
+                                Ok(msg) => {
+                                    let _ = tx2.send(AppEvent::SystemMessage(msg));
+                                }
+                                Err(e) => {
+                                    let _ =
+                                        tx2.send(AppEvent::SystemMessage(format!("Failed: {e:#}")));
+                                }
                             }
                         });
                     }
@@ -3158,11 +3600,18 @@ async fn handle_key(
                         let id2 = id.clone();
                         tokio::spawn(async move {
                             match crate::spawn::discard_agent(&reg, &id2, &cwd).await {
-                                Ok(msg) => { let _ = tx2.send(AppEvent::SystemMessage(msg)); }
-                                Err(e) => { let _ = tx2.send(AppEvent::SystemMessage(format!("Discard failed: {e:#}"))); }
+                                Ok(msg) => {
+                                    let _ = tx2.send(AppEvent::SystemMessage(msg));
+                                }
+                                Err(e) => {
+                                    let _ = tx2.send(AppEvent::SystemMessage(format!(
+                                        "Discard failed: {e:#}"
+                                    )));
+                                }
                             }
                         });
-                        app.entries.push(ChatEntry::system(format!("Discarding agent [{id}]...")));
+                        app.entries
+                            .push(ChatEntry::system(format!("Discarding agent [{id}]...")));
                     }
                     CommandAction::Undo { n } => {
                         if app.is_loading {
@@ -3188,10 +3637,8 @@ async fn handle_key(
                         } else {
                             match n {
                                 Some(k) => {
-                                    let new_pos = session
-                                        .meta
-                                        .undo_position
-                                        .saturating_sub(k as usize);
+                                    let new_pos =
+                                        session.meta.undo_position.saturating_sub(k as usize);
                                     match rustyclaw::autocommit::restore_to(
                                         &config.cwd,
                                         &session.meta.auto_commits,
@@ -3225,10 +3672,17 @@ async fn handle_key(
                                     let cur = session.meta.undo_position;
                                     for i in (0..cur).rev() {
                                         let target_pos = i + 1;
-                                        let marker = if target_pos == cur { " ← current" } else { "" };
+                                        let marker = if target_pos == cur {
+                                            " ← current"
+                                        } else {
+                                            ""
+                                        };
                                         labels.push(format!(
                                             "turn {target_pos}  ·  {}{marker}",
-                                            session.meta.auto_commits[i].chars().take(7).collect::<String>()
+                                            session.meta.auto_commits[i]
+                                                .chars()
+                                                .take(7)
+                                                .collect::<String>()
                                         ));
                                         positions.push(target_pos);
                                     }
@@ -3258,9 +3712,8 @@ async fn handle_key(
                                 "[redo] auto-commit disabled — not a git repo",
                             ));
                         } else if session.meta.undo_position == session.meta.auto_commits.len() {
-                            app.entries.push(ChatEntry::system(
-                                "[redo] nothing to redo (at latest turn)",
-                            ));
+                            app.entries
+                                .push(ChatEntry::system("[redo] nothing to redo (at latest turn)"));
                         } else {
                             match n {
                                 Some(k) => {
@@ -3297,7 +3750,10 @@ async fn handle_key(
                                     } else {
                                         format!(
                                             "turn {cur}  ·  {} ← current",
-                                            session.meta.auto_commits[cur - 1].chars().take(7).collect::<String>()
+                                            session.meta.auto_commits[cur - 1]
+                                                .chars()
+                                                .take(7)
+                                                .collect::<String>()
                                         )
                                     };
                                     labels.push(cur_label);
@@ -3306,7 +3762,10 @@ async fn handle_key(
                                         labels.push(format!(
                                             "turn {}  ·  {}",
                                             i + 1,
-                                            session.meta.auto_commits[i].chars().take(7).collect::<String>()
+                                            session.meta.auto_commits[i]
+                                                .chars()
+                                                .take(7)
+                                                .collect::<String>()
                                         ));
                                         positions.push(i + 1);
                                     }
@@ -3331,8 +3790,16 @@ async fn handle_key(
                              Undo position:  {} / {}\n  \
                              Retention:      keep {} most recent sessions\n  \
                              Message prefix: \"{}\"",
-                            if config.auto_commit.enabled { "yes" } else { "no" },
-                            if cwd_ok { "git detected (cwd)" } else { "not a git repo" },
+                            if config.auto_commit.enabled {
+                                "yes"
+                            } else {
+                                "no"
+                            },
+                            if cwd_ok {
+                                "git detected (cwd)"
+                            } else {
+                                "not a git repo"
+                            },
                             session.id,
                             session.meta.auto_commits.len(),
                             session.meta.undo_position,
@@ -3345,40 +3812,42 @@ async fn handle_key(
                     CommandAction::Unknown(name) => {
                         // Try skill expansion before giving up
                         if let Some((skill_name, args)) = parse_skill_invocation(&input)
-                            && let Some(skill) = skills.get(skill_name) {
-                                let mut prompt = skill.expand(args);
-                                if config.disable_skill_shell_execution {
-                                    prompt.push_str("\n\nNote: shell command execution (Bash tool) is disabled for skill invocations.");
-                                }
-                                app.entries.push(ChatEntry::system(
-                                    format!("Skill: {} — {}", skill.name, skill.description),
-                                ));
-                                app.entries.push(ChatEntry::user(input));
-                                app.scroll_to_bottom();
-                                app.start_loading();
-                                // Skills are also ephemeral — don't contaminate history
-                                let mut snapshot = messages.clone();
-                                snapshot.push(Message {
-                                    role: Role::User,
-                                    content: vec![ContentBlock::Text { text: prompt }],
-                                });
-                                let c2 = client.clone();
-                                let tvec = tools.to_vec();
-                                let cfg = config.clone();
-                                let tx2 = tx.clone();
-                                let sp = system_prompt.clone();
-                                let ps = perm_state.clone();
-                                let pm = app.plan_mode;
-                                let sid4 = session.id.clone();
-                                let handle = tokio::spawn(async move {
-                                    run_api_task(c2, tvec, snapshot, cfg, ps, sp, tx2, pm, sid4).await;
-                                });
-                                app.api_task = Some(handle.abort_handle());
-                                return Ok(());
+                            && let Some(skill) = skills.get(skill_name)
+                        {
+                            let mut prompt = skill.expand(args);
+                            if config.disable_skill_shell_execution {
+                                prompt.push_str("\n\nNote: shell command execution (Bash tool) is disabled for skill invocations.");
                             }
-                        app.entries.push(ChatEntry::system(
-                            format!("Unknown command '/{name}'. Type /help for available commands.")
-                        ));
+                            app.entries.push(ChatEntry::system(format!(
+                                "Skill: {} — {}",
+                                skill.name, skill.description
+                            )));
+                            app.entries.push(ChatEntry::user(input));
+                            app.scroll_to_bottom();
+                            app.start_loading();
+                            // Skills are also ephemeral — don't contaminate history
+                            let mut snapshot = messages.clone();
+                            snapshot.push(Message {
+                                role: Role::User,
+                                content: vec![ContentBlock::Text { text: prompt }],
+                            });
+                            let c2 = client.clone();
+                            let tvec = tools.to_vec();
+                            let cfg = config.clone();
+                            let tx2 = tx.clone();
+                            let sp = system_prompt.clone();
+                            let ps = perm_state.clone();
+                            let pm = app.plan_mode;
+                            let sid4 = session.id.clone();
+                            let handle = tokio::spawn(async move {
+                                run_api_task(c2, tvec, snapshot, cfg, ps, sp, tx2, pm, sid4).await;
+                            });
+                            app.api_task = Some(handle.abort_handle());
+                            return Ok(());
+                        }
+                        app.entries.push(ChatEntry::system(format!(
+                            "Unknown command '/{name}'. Type /help for available commands."
+                        )));
                     }
                 }
                 return Ok(());
@@ -3398,7 +3867,8 @@ async fn handle_key(
                         user_content.push(image_block);
                     }
                     Err(e) => {
-                        app.entries.push(ChatEntry::error(format!("Image attach failed: {e}")));
+                        app.entries
+                            .push(ChatEntry::error(format!("Image attach failed: {e}")));
                     }
                 }
             }
@@ -3412,9 +3882,16 @@ async fn handle_key(
             let final_text = if let Some(hook_cfg) = &config.hooks {
                 if !config.disable_all_hooks {
                     if let Some(extra_ctx) = hooks::run_user_prompt_hooks(
-                        hook_cfg, &final_text, &session.id, &config.cwd,
-                    ).await {
-                        format!("{final_text}\n\n<additional_context>{extra_ctx}</additional_context>")
+                        hook_cfg,
+                        &final_text,
+                        &session.id,
+                        &config.cwd,
+                    )
+                    .await
+                    {
+                        format!(
+                            "{final_text}\n\n<additional_context>{extra_ctx}</additional_context>"
+                        )
                     } else {
                         final_text
                     }
@@ -3424,7 +3901,9 @@ async fn handle_key(
             } else {
                 final_text
             };
-            user_content.push(ContentBlock::Text { text: final_text.clone() });
+            user_content.push(ContentBlock::Text {
+                text: final_text.clone(),
+            });
 
             messages.push(Message {
                 role: Role::User,
@@ -3437,7 +3916,7 @@ async fn handle_key(
                 crate::config::Config::sessions_dir()
                     .join(&session.id)
                     .join("snapshots")
-                    .join(format!("turn-{}", *turn_counter))
+                    .join(format!("turn-{}", *turn_counter)),
             );
 
             // Background incremental re-index: pick up any files changed since last index.
@@ -3449,7 +3928,8 @@ async fn handle_key(
                         if let Ok(db) = crate::rag::RagDb::open(&cwd) {
                             let _ = crate::rag::indexer::index_project(&db, &cwd, false);
                         }
-                    }).await;
+                    })
+                    .await;
                 });
             }
 
@@ -3470,21 +3950,25 @@ async fn handle_key(
                 if phase != crate::router::Phase::Default {
                     let routed_model = config.phase_router.model_for(phase).to_string();
                     if routed_model != config.model {
-                        app.entries.push(ChatEntry::system(
-                            format!("[phase: {} → {}]", phase, crate::tui::app::pretty_model_name(&routed_model))
-                        ));
+                        app.entries.push(ChatEntry::system(format!(
+                            "[phase: {} → {}]",
+                            phase,
+                            crate::tui::app::pretty_model_name(&routed_model)
+                        )));
                         cfg.model = routed_model;
                     }
                 }
-            } else if app.router.enabled && !crate::api::is_ollama_model(&config.model)
+            } else if app.router.enabled
+                && !crate::api::is_ollama_model(&config.model)
                 && !crate::api::is_openai_compat_model(&config.model)
             {
                 let complexity = crate::router::detect_complexity(&final_text);
                 let routed_model = app.router.model_for(complexity).to_string();
                 if routed_model != config.model {
-                    app.entries.push(ChatEntry::system(
-                        format!("Router: {complexity} complexity → {}", crate::tui::app::pretty_model_name(&routed_model))
-                    ));
+                    app.entries.push(ChatEntry::system(format!(
+                        "Router: {complexity} complexity → {}",
+                        crate::tui::app::pretty_model_name(&routed_model)
+                    )));
                     cfg.model = routed_model;
                 }
             }
@@ -3513,7 +3997,10 @@ async fn handle_key(
 
         // '?' shows keybindings as an overlay when input is empty — otherwise insert normally
         (Char('?'), _) if !app.is_loading && app.input.is_empty() => {
-            let last_assistant = app.entries.iter().rev()
+            let last_assistant = app
+                .entries
+                .iter()
+                .rev()
                 .find(|e| matches!(e.kind, crate::tui::app::EntryKind::Assistant))
                 .map(|e| e.text.as_str());
             let ctx = CommandContext {
@@ -3539,7 +4026,10 @@ async fn handle_key(
         }
 
         (Backspace, _) => app.backspace(),
-        (Delete, _) => { app.cursor_right(); app.backspace(); }
+        (Delete, _) => {
+            app.cursor_right();
+            app.backspace();
+        }
 
         // ── Readline-style editing shortcuts ───────────────────────────────────
         (Char('a'), KeyModifiers::CONTROL) => app.cursor_home(),
@@ -3552,7 +4042,7 @@ async fn handle_key(
         // Alt+D delete word forward
         (Char('d'), KeyModifiers::ALT) => app.delete_word_forward(),
         // Ctrl+Left / Ctrl+Right word navigation (some terminals)
-        (Left,  KeyModifiers::CONTROL) => app.word_back_readline(),
+        (Left, KeyModifiers::CONTROL) => app.word_back_readline(),
         (Right, KeyModifiers::CONTROL) => app.word_forward_readline(),
 
         // ── Tab: history autosuggestion, then slash-command/model completion ────
@@ -3560,11 +4050,10 @@ async fn handle_key(
             let raw: String = app.input.iter().collect();
 
             // If input is non-empty and not a slash command, try history suggestion first
-            if !raw.is_empty() && !raw.starts_with('/')
-                && app.history_suggestion().is_some() {
-                    app.accept_suggestion();
-                    return Ok(());
-                }
+            if !raw.is_empty() && !raw.starts_with('/') && app.history_suggestion().is_some() {
+                app.accept_suggestion();
+                return Ok(());
+            }
 
             // "/model ollama:<prefix>" → complete from installed Ollama models
             if let Some(after) = raw.strip_prefix("/model ") {
@@ -3574,7 +4063,8 @@ async fn handle_key(
                 let models = crate::api::list_ollama_models(ollama_host).await;
                 // Strip "ollama:" prefix for display, filter by what's typed
                 let typed_bare = query.strip_prefix("ollama:").unwrap_or(query);
-                let matches: Vec<String> = models.iter()
+                let matches: Vec<String> = models
+                    .iter()
                     .filter(|m| {
                         let bare = crate::api::strip_ollama_prefix(m);
                         bare.contains(typed_bare)
@@ -3594,7 +4084,8 @@ async fn handle_key(
                             lines.push(format!("  {}. {}", i + 1, m));
                         }
                         lines.push(String::new());
-                        lines.push("  ↑↓ select · Enter switch · 1-9 quick pick · Esc close".into());
+                        lines
+                            .push("  ↑↓ select · Enter switch · 1-9 quick pick · Esc close".into());
                         app.overlay = Some(Overlay::with_items("models", lines.join("\n"), ids));
                     }
                 }
@@ -3603,7 +4094,8 @@ async fn handle_key(
                 let prefix = raw.trim_start_matches('/');
 
                 // Static slash commands
-                let mut all_completions: Vec<String> = crate::commands::SLASH_COMMANDS.iter()
+                let mut all_completions: Vec<String> = crate::commands::SLASH_COMMANDS
+                    .iter()
                     .filter(|&&cmd| cmd.starts_with(prefix))
                     .map(|&s| s.to_string())
                     .collect();
@@ -3614,15 +4106,17 @@ async fn handle_key(
                 for tool in tools.iter() {
                     let name = tool.name();
                     if let Some(rest) = name.strip_prefix("mcp__")
-                        && let Some(sep) = rest.find("__") {
-                            let server = &rest[..sep];
-                            let cmd = &rest[sep + 2..];
-                            // Convert underscores back to hyphens for the slash form
-                            let entry = format!("{}:{}", server.replace('_', "-"), cmd.replace('_', "-"));
-                            if entry.starts_with(prefix) {
-                                all_completions.push(entry);
-                            }
+                        && let Some(sep) = rest.find("__")
+                    {
+                        let server = &rest[..sep];
+                        let cmd = &rest[sep + 2..];
+                        // Convert underscores back to hyphens for the slash form
+                        let entry =
+                            format!("{}:{}", server.replace('_', "-"), cmd.replace('_', "-"));
+                        if entry.starts_with(prefix) {
+                            all_completions.push(entry);
                         }
+                    }
                 }
 
                 match all_completions.len() {
@@ -3633,7 +4127,8 @@ async fn handle_key(
                     }
                     _ => {
                         all_completions.sort();
-                        let list = all_completions.iter()
+                        let list = all_completions
+                            .iter()
                             .map(|s| format!("/{s}"))
                             .collect::<Vec<_>>()
                             .join("   ");
@@ -3646,8 +4141,13 @@ async fn handle_key(
         (Left, _) => app.cursor_left(),
         (Right, _) => app.cursor_right(),
         // Ctrl+Home → jump to very top of chat; Ctrl+End → jump to bottom
-        (Home, KeyModifiers::CONTROL) => { app.follow_bottom = false; app.scroll = 0; }
-        (End, KeyModifiers::CONTROL) => { app.follow_bottom = true; }
+        (Home, KeyModifiers::CONTROL) => {
+            app.follow_bottom = false;
+            app.scroll = 0;
+        }
+        (End, KeyModifiers::CONTROL) => {
+            app.follow_bottom = true;
+        }
         (Home, _) => app.cursor_home(),
         (End, _) => app.cursor_end(),
         (Up, _) => {
@@ -3680,7 +4180,9 @@ async fn handle_key(
             }
         }
         (PageUp, _) => app.scroll_up(),
-        (PageDown, _) => { app.follow_bottom = true; }
+        (PageDown, _) => {
+            app.follow_bottom = true;
+        }
         (Char('u'), KeyModifiers::CONTROL) => app.clear_line(),
         (Char(c), _) => app.insert_char(c),
         _ => {}
@@ -3702,7 +4204,9 @@ fn handle_vim_normal(key: crossterm::event::KeyEvent, app: &mut App) {
     // Handle pending two-char commands (e.g. "dd")
     if let Some(pending) = app.vim_pending.take() {
         match (pending, key.code) {
-            ('d', Char('d')) => { app.clear_line(); }
+            ('d', Char('d')) => {
+                app.clear_line();
+            }
             _ => {} // Unknown combination — silently drop
         }
         return;
@@ -3711,15 +4215,24 @@ fn handle_vim_normal(key: crossterm::event::KeyEvent, app: &mut App) {
     match key.code {
         // ── Enter insert mode ──────────────────────────────────────────────────
         Char('i') => app.vim_enter_insert(),
-        Char('a') => { app.cursor_right(); app.vim_enter_insert(); }
-        Char('A') => { app.cursor_end();   app.vim_enter_insert(); }
-        Char('I') => { app.cursor_home();  app.vim_enter_insert(); }
+        Char('a') => {
+            app.cursor_right();
+            app.vim_enter_insert();
+        }
+        Char('A') => {
+            app.cursor_end();
+            app.vim_enter_insert();
+        }
+        Char('I') => {
+            app.cursor_home();
+            app.vim_enter_insert();
+        }
 
         // ── Horizontal motion ──────────────────────────────────────────────────
-        Char('h') | Left  => app.cursor_left(),
+        Char('h') | Left => app.cursor_left(),
         Char('l') | Right => app.cursor_right(),
-        Char('0') | Home  => app.cursor_home(),
-        Char('$') | End   => {
+        Char('0') | Home => app.cursor_home(),
+        Char('$') | End => {
             // In normal mode $ lands on last char, not past it
             if !app.input.is_empty() {
                 app.cursor = app.input.len() - 1;
@@ -3734,7 +4247,9 @@ fn handle_vim_normal(key: crossterm::event::KeyEvent, app: &mut App) {
         // ── Edit operators ─────────────────────────────────────────────────────
         Char('x') => app.delete_under(),
         // 'd' starts a two-char sequence; 'dd' = clear line
-        Char('d') => { app.vim_pending = Some('d'); }
+        Char('d') => {
+            app.vim_pending = Some('d');
+        }
 
         // ── Chat scrolling (j/k in normal mode scroll chat, not move cursor) ──
         Char('j') | Down => {
@@ -3748,7 +4263,9 @@ fn handle_vim_normal(key: crossterm::event::KeyEvent, app: &mut App) {
         Char('G') => app.scroll_to_bottom(),
 
         // ── Esc in normal mode: clear pending, stay in normal ─────────────────
-        Esc => { app.vim_pending = None; }
+        Esc => {
+            app.vim_pending = None;
+        }
 
         _ => {}
     }
@@ -3808,9 +4325,9 @@ fn attach_image(path: &str) -> AResult<ContentBlock> {
         .as_deref()
     {
         Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("gif")  => "image/gif",
+        Some("gif") => "image/gif",
         Some("webp") => "image/webp",
-        _            => "image/png",
+        _ => "image/png",
     };
 
     let data = base64_encode(&bytes);
@@ -3828,12 +4345,28 @@ fn base64_encode(data: &[u8]) -> String {
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as usize;
-        let b1 = if chunk.len() > 1 { chunk[1] as usize } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as usize } else { 0 };
+        let b1 = if chunk.len() > 1 {
+            chunk[1] as usize
+        } else {
+            0
+        };
+        let b2 = if chunk.len() > 2 {
+            chunk[2] as usize
+        } else {
+            0
+        };
         out.push(CHARS[b0 >> 2] as char);
         out.push(CHARS[((b0 & 3) << 4) | (b1 >> 4)] as char);
-        out.push(if chunk.len() > 1 { CHARS[((b1 & 0xf) << 2) | (b2 >> 6)] as char } else { '=' });
-        out.push(if chunk.len() > 2 { CHARS[b2 & 0x3f] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            CHARS[((b1 & 0xf) << 2) | (b2 >> 6)] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            CHARS[b2 & 0x3f] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -3876,7 +4409,11 @@ async fn run_api_task(
     let mut effective_plan_mode = plan_mode;
 
     // max_turns from CLI overrides the built-in safety cap (0 = use default cap)
-    let turn_limit = if config.max_turns > 0 { config.max_turns } else { MAX_TOOL_ITERATIONS };
+    let turn_limit = if config.max_turns > 0 {
+        config.max_turns
+    } else {
+        MAX_TOOL_ITERATIONS
+    };
 
     // Shared Read-tool cache so repeat reads of unchanged files emit a
     // compact notice instead of the full body (v2.1.86).
@@ -3884,7 +4421,8 @@ async fn run_api_task(
 
     // Loop detection: track recent (tool_name, args_hash) to catch repeated failures.
     // If the same call appears 3+ times in the last 6 entries, pause and ask.
-    let mut recent_calls: std::collections::VecDeque<(String, u64)> = std::collections::VecDeque::new();
+    let mut recent_calls: std::collections::VecDeque<(String, u64)> =
+        std::collections::VecDeque::new();
     const LOOP_WINDOW: usize = 6;
     const LOOP_THRESHOLD: usize = 3;
 
@@ -3903,20 +4441,20 @@ async fn run_api_task(
 
         // Build tool definitions, optionally adding prompt cache marker to the last one
         let mut tool_defs: Vec<ToolDefinition> = tools.iter().map(|t| t.definition()).collect();
-        if config.prompt_cache && !tool_defs.is_empty()
-            && let Some(last) = tool_defs.last_mut() {
-                last.cache_control = Some(crate::api::types::CacheControl::ephemeral());
-            }
+        if config.prompt_cache
+            && !tool_defs.is_empty()
+            && let Some(last) = tool_defs.last_mut()
+        {
+            last.cache_control = Some(crate::api::types::CacheControl::ephemeral());
+        }
 
         // Build system content — wrap in blocks for prompt caching if enabled
         let system_content = if config.prompt_cache {
-            crate::api::types::SystemContent::Blocks(vec![
-                crate::api::types::SystemBlock {
-                    block_type: "text".into(),
-                    text: system_prompt.clone(),
-                    cache_control: Some(crate::api::types::CacheControl::ephemeral()),
-                }
-            ])
+            crate::api::types::SystemContent::Blocks(vec![crate::api::types::SystemBlock {
+                block_type: "text".into(),
+                text: system_prompt.clone(),
+                cache_control: Some(crate::api::types::CacheControl::ephemeral()),
+            }])
         } else {
             crate::api::types::SystemContent::Plain(system_prompt.clone())
         };
@@ -3951,7 +4489,8 @@ async fn run_api_task(
                     for item in content.iter_mut() {
                         let ToolResultContent::Text { text } = item;
                         if text.len() > TOOL_RESULT_MAX_CHARS {
-                            let truncated: String = text.chars().take(TOOL_RESULT_MAX_CHARS).collect();
+                            let truncated: String =
+                                text.chars().take(TOOL_RESULT_MAX_CHARS).collect();
                             *text = format!(
                                 "{truncated}\n\n[... output truncated to {TOOL_RESULT_MAX_CHARS} characters]"
                             );
@@ -3993,7 +4532,8 @@ async fn run_api_task(
                     let err_str = e.to_string();
 
                     // prompt_too_long: signal outer loop to compact and retry
-                    if err_str.contains("prompt is too long") || err_str.contains("prompt_too_long") {
+                    if err_str.contains("prompt is too long") || err_str.contains("prompt_too_long")
+                    {
                         should_compact_retry = true;
                         break StreamedResponse {
                             content: vec![],
@@ -4030,16 +4570,25 @@ async fn run_api_task(
         // Handle prompt_too_long: auto-compact and retry the outer loop
         if should_compact_retry {
             let _ = tx.send(AppEvent::SystemMessage(
-                "Prompt too long — auto-compacting context…".into()
+                "Prompt too long — auto-compacting context…".into(),
             ));
             match crate::compact::summarize_compact(&client, &messages, &config).await {
                 Ok(replacement) => {
                     let summary_len = replacement
                         .first()
                         .and_then(|m| m.content.first())
-                        .map(|b| if let ContentBlock::Text { text } = b { text.len() } else { 0 })
+                        .map(|b| {
+                            if let ContentBlock::Text { text } = b {
+                                text.len()
+                            } else {
+                                0
+                            }
+                        })
                         .unwrap_or(0);
-                    let _ = tx.send(AppEvent::Compacted { replacement: replacement.clone(), summary_len });
+                    let _ = tx.send(AppEvent::Compacted {
+                        replacement: replacement.clone(),
+                        summary_len,
+                    });
                     messages = replacement;
                     continue; // retry outer loop with compacted history
                 }
@@ -4055,7 +4604,7 @@ async fn run_api_task(
         // One-time notice when an Ollama model is detected as not supporting tools
         if client.take_tools_notice() {
             let _ = tx.send(AppEvent::SystemMessage(
-                "Note: this model doesn't support tools — running in text-only mode.".into()
+                "Note: this model doesn't support tools — running in text-only mode.".into(),
             ));
         }
 
@@ -4063,13 +4612,17 @@ async fn run_api_task(
         if config.show_thinking_summaries {
             for block in &response.content {
                 if let ContentBlock::Thinking { thinking, .. } = block
-                    && !thinking.trim().is_empty() {
-                        let _ = tx.send(AppEvent::ThinkingBlock(thinking.clone()));
-                    }
+                    && !thinking.trim().is_empty()
+                {
+                    let _ = tx.send(AppEvent::ThinkingBlock(thinking.clone()));
+                }
             }
         }
 
-        messages.push(Message { role: Role::Assistant, content: response.content.clone() });
+        messages.push(Message {
+            role: Role::Assistant,
+            content: response.content.clone(),
+        });
 
         match &response.stop_reason {
             Some(StopReason::EndTurn) | None | Some(StopReason::StopSequence) => {
@@ -4089,7 +4642,8 @@ async fn run_api_task(
                 // surface a warning instead of dropping the turn with an error.
                 let _ = tx.send(AppEvent::SystemMessage(
                     "Response capped at max_tokens — partial output preserved. \
-                     Ask the model to continue if more output is needed.".into()
+                     Ask the model to continue if more output is needed."
+                        .into(),
                 ));
                 let _ = tx.send(AppEvent::Done {
                     tokens_in: response.usage.input_tokens,
@@ -4138,7 +4692,11 @@ async fn run_api_task(
                 // Drain any pending plan_mode changes before processing tools
                 while let Ok(enabled) = plan_rx.try_recv() {
                     effective_plan_mode = enabled;
-                    let msg = if enabled { "Plan mode enabled by Claude." } else { "Plan mode disabled by Claude." };
+                    let msg = if enabled {
+                        "Plan mode enabled by Claude."
+                    } else {
+                        "Plan mode disabled by Claude."
+                    };
                     let _ = tx.send(AppEvent::SystemMessage(msg.into()));
                     let _ = tx.send(AppEvent::SetPlanMode(enabled));
                 }
@@ -4146,7 +4704,10 @@ async fn run_api_task(
                 for block in &response.content {
                     if let ContentBlock::ToolUse { id, name, input } = block {
                         let args = serde_json::to_string(input).unwrap_or_default();
-                        let _ = tx.send(AppEvent::ToolCall { name: name.clone(), args: args.clone() });
+                        let _ = tx.send(AppEvent::ToolCall {
+                            name: name.clone(),
+                            args: args.clone(),
+                        });
 
                         // ── Loop detection ──────────────────────────────────
                         {
@@ -4176,7 +4737,10 @@ async fn run_api_task(
                                  Use /plan to exit plan mode first.",
                                 name
                             );
-                            let _ = tx.send(AppEvent::ToolResult { is_error: true, text: msg.clone() });
+                            let _ = tx.send(AppEvent::ToolResult {
+                                is_error: true,
+                                text: msg.clone(),
+                            });
                             results.push(ContentBlock::ToolResult {
                                 tool_use_id: id.clone(),
                                 content: vec![ToolResultContent::text(msg)],
@@ -4187,18 +4751,27 @@ async fn run_api_task(
 
                         // Pre-tool-use hooks — can block execution
                         if let Some(hook_cfg) = &config.hooks
-                          && !config.disable_all_hooks {
+                            && !config.disable_all_hooks
+                        {
                             let hook_result = hooks::run_pre_tool_hooks(
-                                hook_cfg, name, &args, session_id, &config.cwd,
-                            ).await;
+                                hook_cfg,
+                                name,
+                                &args,
+                                session_id,
+                                &config.cwd,
+                            )
+                            .await;
                             if !hook_result.should_continue {
-                                let msg = hook_result.stop_reason.unwrap_or_else(|| {
-                                    format!("PreToolUse hook blocked: {name}")
-                                });
+                                let msg = hook_result
+                                    .stop_reason
+                                    .unwrap_or_else(|| format!("PreToolUse hook blocked: {name}"));
                                 if let Some(sys_msg) = hook_result.system_message {
                                     let _ = tx.send(AppEvent::SystemMessage(sys_msg));
                                 }
-                                let _ = tx.send(AppEvent::ToolResult { is_error: true, text: msg.clone() });
+                                let _ = tx.send(AppEvent::ToolResult {
+                                    is_error: true,
+                                    text: msg.clone(),
+                                });
                                 results.push(ContentBlock::ToolResult {
                                     tool_use_id: id.clone(),
                                     content: vec![ToolResultContent::text(msg)],
@@ -4209,7 +4782,7 @@ async fn run_api_task(
                             if let Some(sys_msg) = hook_result.system_message {
                                 let _ = tx.send(AppEvent::SystemMessage(sys_msg));
                             }
-                          } // disable_all_hooks guard
+                        } // disable_all_hooks guard
 
                         // Autonomy check: "suggest" mode forces Ask for Write/Edit
                         let autonomy_override = if config.autonomy == "suggest"
@@ -4234,15 +4807,20 @@ async fn run_api_task(
                             }
                         }) {
                             CheckResult::Allow => PermissionDecision::Allow,
-                            CheckResult::Deny  => PermissionDecision::Deny,
+                            CheckResult::Deny => PermissionDecision::Deny,
                             CheckResult::Ask => {
                                 let desc = describe_tool_call(name, input);
                                 let (reply_tx, reply_rx) = oneshot::channel();
-                                if tx.send(AppEvent::PermissionRequest {
-                                    tool_name: name.clone(),
-                                    description: desc,
-                                    reply: reply_tx,
-                                }).is_err() { return; }
+                                if tx
+                                    .send(AppEvent::PermissionRequest {
+                                        tool_name: name.clone(),
+                                        description: desc,
+                                        reply: reply_tx,
+                                    })
+                                    .is_err()
+                                {
+                                    return;
+                                }
                                 // Security contract: if the oneshot sender is
                                 // dropped without a value, we MUST treat this
                                 // as Deny. This fires on TUI shutdown, panic,
@@ -4266,7 +4844,9 @@ async fn run_api_task(
                             });
                             results.push(ContentBlock::ToolResult {
                                 tool_use_id: id.clone(),
-                                content: vec![ToolResultContent::text(format!("Permission denied: {name}"))],
+                                content: vec![ToolResultContent::text(format!(
+                                    "Permission denied: {name}"
+                                ))],
                                 is_error: Some(true),
                             });
                             continue;
@@ -4274,27 +4854,45 @@ async fn run_api_task(
 
                         let tool = tools.iter().find(|t| t.name() == name);
                         let output: ToolOutput = match tool {
-                            Some(t) => t.execute(input.clone(), &ctx).await
+                            Some(t) => t
+                                .execute(input.clone(), &ctx)
+                                .await
                                 .unwrap_or_else(|e| ToolOutput::error(e.to_string())),
                             None => ToolOutput::error(format!("Unknown tool: {name}")),
                         };
 
-                        let result_text = output.content.iter()
-                            .map(|c| { let ToolResultContent::Text { text } = c; text.as_str() })
-                            .collect::<Vec<_>>().join("\n");
+                        let result_text = output
+                            .content
+                            .iter()
+                            .map(|c| {
+                                let ToolResultContent::Text { text } = c;
+                                text.as_str()
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
 
                         // Post-tool-use hooks — fire and don't block
                         if let Some(hook_cfg) = &config.hooks
-                            && !config.disable_all_hooks {
-                                hooks::run_post_tool_hooks(
-                                    hook_cfg, name, &result_text, session_id, &config.cwd,
-                                ).await;
-                            }
+                            && !config.disable_all_hooks
+                        {
+                            hooks::run_post_tool_hooks(
+                                hook_cfg,
+                                name,
+                                &result_text,
+                                session_id,
+                                &config.cwd,
+                            )
+                            .await;
+                        }
 
                         // Check if a plan mode change was emitted by a tool (EnterPlanMode / ExitPlanMode)
                         while let Ok(enabled) = plan_rx.try_recv() {
                             effective_plan_mode = enabled;
-                            let msg = if enabled { "Plan mode enabled by Claude." } else { "Plan mode disabled by Claude." };
+                            let msg = if enabled {
+                                "Plan mode enabled by Claude."
+                            } else {
+                                "Plan mode disabled by Claude."
+                            };
                             let _ = tx.send(AppEvent::SystemMessage(msg.into()));
                             let _ = tx.send(AppEvent::SetPlanMode(enabled));
                         }
@@ -4308,8 +4906,7 @@ async fn run_api_task(
                         // calls for the auto-fix post-loop check.
                         if !output.is_error
                             && matches!(name.as_str(), "Write" | "Edit" | "MultiEdit")
-                            && let Some(fp) =
-                                input.get("file_path").and_then(|v| v.as_str())
+                            && let Some(fp) = input.get("file_path").and_then(|v| v.as_str())
                         {
                             let path = std::path::PathBuf::from(fp);
                             if !auto_fix_touched.contains(&path) {
@@ -4387,7 +4984,10 @@ async fn run_api_task(
                     return;
                 }
 
-                messages.push(Message { role: Role::User, content: results });
+                messages.push(Message {
+                    role: Role::User,
+                    content: results,
+                });
                 // Loop → send next request
             }
         }
@@ -4449,7 +5049,9 @@ fn git_checkpoint(cwd: &std::path::Path, message: Option<&str>) -> anyhow::Resul
     let short = String::from_utf8_lossy(&hash.stdout).trim().to_string();
 
     let changed: usize = status_text.lines().count();
-    Ok(format!("Checkpoint created: {short} ({changed} files) — \"{full_msg}\"\nUse `git reset HEAD~1` to undo."))
+    Ok(format!(
+        "Checkpoint created: {short} ({changed} files) — \"{full_msg}\"\nUse `git reset HEAD~1` to undo."
+    ))
 }
 
 /// Simple timestamp without pulling in chrono: "2026-04-08T15:30:42"
@@ -4474,15 +5076,33 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
     let mut y = 1970;
     loop {
         let dy = if is_leap(y) { 366 } else { 365 };
-        if days < dy { break; }
+        if days < dy {
+            break;
+        }
         days -= dy;
         y += 1;
     }
     let leap = is_leap(y);
-    let month_days: [u64; 12] = [31, if leap {29} else {28}, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_days: [u64; 12] = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut mo = 0;
     for (i, &md) in month_days.iter().enumerate() {
-        if days < md { mo = i; break; }
+        if days < md {
+            mo = i;
+            break;
+        }
         days -= md;
     }
     (y, (mo + 1) as u64, days + 1)

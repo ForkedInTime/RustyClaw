@@ -78,10 +78,7 @@ fn shadow_ref(session_id: &str) -> String {
 /// Run a git command, capturing stdout; return the trimmed stdout as a String
 /// on success or an error carrying stderr on failure.
 fn git_output(cmd: &mut Command) -> anyhow::Result<String> {
-    let out = cmd
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()?;
+    let out = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).output()?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         anyhow::bail!("git command failed: {stderr}");
@@ -258,7 +255,10 @@ pub fn snapshot_turn(
     auto_commits.push(commit_sha.clone());
     *undo_position = auto_commits.len();
 
-    Ok(SnapshotOutcome::Committed { sha: commit_sha, files })
+    Ok(SnapshotOutcome::Committed {
+        sha: commit_sha,
+        files,
+    })
 }
 
 // ── Restore pipeline ──────────────────────────────────────────────────────────
@@ -272,7 +272,12 @@ fn list_tree_files(cwd: &Path, tree: &str) -> Vec<String> {
         .ok()
         .filter(|o| o.status.success())
         .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.lines().filter(|l| !l.is_empty()).map(|l| l.to_string()).collect())
+        .map(|s| {
+            s.lines()
+                .filter(|l| !l.is_empty())
+                .map(|l| l.to_string())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -288,7 +293,12 @@ fn list_tracked_files(cwd: &Path) -> Vec<String> {
         .ok()
         .filter(|o| o.status.success())
         .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.lines().filter(|l| !l.is_empty()).map(|l| l.to_string()).collect())
+        .map(|s| {
+            s.lines()
+                .filter(|l| !l.is_empty())
+                .map(|l| l.to_string())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -301,7 +311,10 @@ pub fn restore_to(
         anyhow::bail!("not a git repo");
     }
     if target_position > auto_commits.len() {
-        anyhow::bail!("target_position {target_position} out of range (max {})", auto_commits.len());
+        anyhow::bail!(
+            "target_position {target_position} out of range (max {})",
+            auto_commits.len()
+        );
     }
 
     // Resolve target tree.
@@ -378,7 +391,10 @@ pub fn restore_to(
         anyhow::bail!("git checkout-index --prefix={prefix} failed");
     }
 
-    Ok(RestoreReport { files_restored: target_files.len() as u32, orphaned_files })
+    Ok(RestoreReport {
+        files_restored: target_files.len() as u32,
+        orphaned_files,
+    })
 }
 
 // ── Prune pipeline ────────────────────────────────────────────────────────────
@@ -455,7 +471,15 @@ pub fn snapshot_turn_raw(
         keep_sessions: DEFAULT_KEEP_SESSIONS,
         message_prefix: message_prefix.to_string(),
     };
-    snapshot_turn(cwd, &config, session_id, user_prompt, turn_index, auto_commits, undo_position)
+    snapshot_turn(
+        cwd,
+        &config,
+        session_id,
+        user_prompt,
+        turn_index,
+        auto_commits,
+        undo_position,
+    )
 }
 
 #[cfg(test)]
@@ -512,8 +536,8 @@ mod git_detection_tests {
 
 #[cfg(test)]
 mod snapshot_tests {
-    use super::*;
     use super::git_detection_tests::init_test_repo;
+    use super::*;
     use std::fs;
 
     pub(super) fn write_file(repo: &Path, rel: &str, body: &str) {
@@ -558,7 +582,10 @@ mod snapshot_tests {
         match outcome {
             SnapshotOutcome::Committed { sha, files } => {
                 assert_eq!(sha.len(), 40, "sha should be full 40-char hex");
-                assert_eq!(files, 2, "README.md + src/lib.rs should both be in the tree");
+                assert_eq!(
+                    files, 2,
+                    "README.md + src/lib.rs should both be in the tree"
+                );
                 assert_eq!(commits, vec![sha]);
                 assert_eq!(pos, 1);
             }
@@ -639,16 +666,8 @@ mod snapshot_tests {
         };
         let mut commits = Vec::new();
         let mut pos = 0usize;
-        let outcome = snapshot_turn(
-            td.path(),
-            &cfg,
-            "s",
-            "msg",
-            1,
-            &mut commits,
-            &mut pos,
-        )
-        .unwrap();
+        let outcome =
+            snapshot_turn(td.path(), &cfg, "s", "msg", 1, &mut commits, &mut pos).unwrap();
         match outcome {
             SnapshotOutcome::Disabled { reason } => {
                 assert!(reason.contains("disabled"), "reason: {reason}");
@@ -664,16 +683,8 @@ mod snapshot_tests {
         let cfg = AutoCommitConfig::default();
         let mut commits = Vec::new();
         let mut pos = 0usize;
-        let outcome = snapshot_turn(
-            td.path(),
-            &cfg,
-            "s",
-            "msg",
-            1,
-            &mut commits,
-            &mut pos,
-        )
-        .unwrap();
+        let outcome =
+            snapshot_turn(td.path(), &cfg, "s", "msg", 1, &mut commits, &mut pos).unwrap();
         assert!(matches!(outcome, SnapshotOutcome::Disabled { .. }));
     }
 
@@ -688,16 +699,7 @@ mod snapshot_tests {
         let cfg = AutoCommitConfig::default();
         let mut commits = Vec::new();
         let mut pos = 0usize;
-        snapshot_turn(
-            td.path(),
-            &cfg,
-            "s",
-            "ignored",
-            1,
-            &mut commits,
-            &mut pos,
-        )
-        .unwrap();
+        snapshot_turn(td.path(), &cfg, "s", "ignored", 1, &mut commits, &mut pos).unwrap();
         assert_eq!(commits.len(), 1);
 
         // ls-tree the commit and confirm secret.txt is NOT present.
@@ -706,7 +708,10 @@ mod snapshot_tests {
             .output()
             .unwrap();
         let tree = String::from_utf8(out.stdout).unwrap();
-        assert!(!tree.contains("secret.txt"), "secret.txt leaked into tree:\n{tree}");
+        assert!(
+            !tree.contains("secret.txt"),
+            "secret.txt leaked into tree:\n{tree}"
+        );
         assert!(tree.contains("ok.txt"));
     }
 
@@ -771,23 +776,33 @@ mod snapshot_tests {
         pos = 1;
         write_file(td.path(), "d.txt", "4\n");
         snapshot_turn(td.path(), &cfg, "s", "d", 2, &mut commits, &mut pos).unwrap();
-        assert_eq!(commits.len(), 2, "turns 2 and 3 should be dropped, new turn 2 appended");
+        assert_eq!(
+            commits.len(),
+            2,
+            "turns 2 and 3 should be dropped, new turn 2 appended"
+        );
         assert_eq!(pos, 2);
     }
 }
 
 #[cfg(test)]
 mod restore_tests {
-    use super::*;
     use super::git_detection_tests::init_test_repo;
     use super::snapshot_tests::write_file;
+    use super::*;
 
     #[test]
     fn restore_overwrites_modified_files() {
         let td = init_test_repo();
         write_file(td.path(), "app.txt", "v1\n");
-        git_cmd(td.path()).args(["add", "app.txt"]).status().unwrap();
-        git_cmd(td.path()).args(["commit", "-q", "-m", "v1"]).status().unwrap();
+        git_cmd(td.path())
+            .args(["add", "app.txt"])
+            .status()
+            .unwrap();
+        git_cmd(td.path())
+            .args(["commit", "-q", "-m", "v1"])
+            .status()
+            .unwrap();
 
         let cfg = AutoCommitConfig::default();
         let mut commits = Vec::new();
@@ -812,8 +827,14 @@ mod restore_tests {
     fn restore_leaves_untracked_files_alone() {
         let td = init_test_repo();
         write_file(td.path(), "tracked.txt", "x\n");
-        git_cmd(td.path()).args(["add", "tracked.txt"]).status().unwrap();
-        git_cmd(td.path()).args(["commit", "-q", "-m", "base"]).status().unwrap();
+        git_cmd(td.path())
+            .args(["add", "tracked.txt"])
+            .status()
+            .unwrap();
+        git_cmd(td.path())
+            .args(["commit", "-q", "-m", "base"])
+            .status()
+            .unwrap();
 
         let cfg = AutoCommitConfig::default();
         let mut commits = Vec::new();
@@ -825,16 +846,28 @@ mod restore_tests {
         write_file(td.path(), "untracked.log", "scratch\n");
 
         restore_to(td.path(), &commits, 0).unwrap();
-        assert_eq!(std::fs::read_to_string(td.path().join("tracked.txt")).unwrap(), "x\n");
-        assert!(td.path().join("untracked.log").exists(), "untracked file was deleted!");
+        assert_eq!(
+            std::fs::read_to_string(td.path().join("tracked.txt")).unwrap(),
+            "x\n"
+        );
+        assert!(
+            td.path().join("untracked.log").exists(),
+            "untracked file was deleted!"
+        );
     }
 
     #[test]
     fn restore_to_session_base_zero_position() {
         let td = init_test_repo();
         write_file(td.path(), "app.txt", "base\n");
-        git_cmd(td.path()).args(["add", "app.txt"]).status().unwrap();
-        git_cmd(td.path()).args(["commit", "-q", "-m", "base"]).status().unwrap();
+        git_cmd(td.path())
+            .args(["add", "app.txt"])
+            .status()
+            .unwrap();
+        git_cmd(td.path())
+            .args(["commit", "-q", "-m", "base"])
+            .status()
+            .unwrap();
 
         let cfg = AutoCommitConfig::default();
         let mut commits = Vec::new();
@@ -844,15 +877,24 @@ mod restore_tests {
         snapshot_turn(td.path(), &cfg, "s", "m", 1, &mut commits, &mut pos).unwrap();
 
         restore_to(td.path(), &commits, 0).unwrap();
-        assert_eq!(std::fs::read_to_string(td.path().join("app.txt")).unwrap(), "base\n");
+        assert_eq!(
+            std::fs::read_to_string(td.path().join("app.txt")).unwrap(),
+            "base\n"
+        );
     }
 
     #[test]
     fn restore_reports_orphaned_files() {
         let td = init_test_repo();
         write_file(td.path(), "old.txt", "kept\n");
-        git_cmd(td.path()).args(["add", "old.txt"]).status().unwrap();
-        git_cmd(td.path()).args(["commit", "-q", "-m", "base"]).status().unwrap();
+        git_cmd(td.path())
+            .args(["add", "old.txt"])
+            .status()
+            .unwrap();
+        git_cmd(td.path())
+            .args(["commit", "-q", "-m", "base"])
+            .status()
+            .unwrap();
 
         let cfg = AutoCommitConfig::default();
         let mut commits = Vec::new();
@@ -889,13 +931,19 @@ mod restore_tests {
             .output()
             .unwrap();
         let body = String::from_utf8(out.stdout).unwrap();
-        assert!(!body.contains("\nparent "), "expected root commit, got:\n{body}");
+        assert!(
+            !body.contains("\nparent "),
+            "expected root commit, got:\n{body}"
+        );
 
         // Restore to session base → empty tree.
         let report = restore_to(td.path(), &commits, 0).unwrap();
         // only.txt was in turn 1 but not in empty target tree → orphaned.
         assert!(
-            report.orphaned_files.iter().any(|p| p.ends_with("only.txt")),
+            report
+                .orphaned_files
+                .iter()
+                .any(|p| p.ends_with("only.txt")),
             "expected only.txt as orphan: {:?}",
             report.orphaned_files
         );
@@ -904,8 +952,8 @@ mod restore_tests {
 
 #[cfg(test)]
 mod prune_tests {
-    use super::*;
     use super::git_detection_tests::init_test_repo;
+    use super::*;
 
     /// Create a single empty commit so we can point shadow refs at it.
     fn make_empty_commit(cwd: &Path, subject: &str) -> String {
@@ -943,7 +991,10 @@ mod prune_tests {
         let td = init_test_repo();
         std::fs::write(td.path().join("x"), "").unwrap();
         git_cmd(td.path()).args(["add", "x"]).status().unwrap();
-        git_cmd(td.path()).args(["commit", "-q", "-m", "x"]).status().unwrap();
+        git_cmd(td.path())
+            .args(["commit", "-q", "-m", "x"])
+            .status()
+            .unwrap();
 
         for i in 0..5 {
             let sha = make_empty_commit(td.path(), &format!("session-{i}"));
@@ -954,7 +1005,11 @@ mod prune_tests {
         assert_eq!(deleted, 2, "should delete the 2 oldest of 5 refs");
 
         let out = git_cmd(td.path())
-            .args(["for-each-ref", "--format=%(refname)", "refs/rustyclaw/sessions/"])
+            .args([
+                "for-each-ref",
+                "--format=%(refname)",
+                "refs/rustyclaw/sessions/",
+            ])
             .output()
             .unwrap();
         let remaining = String::from_utf8(out.stdout).unwrap();
@@ -966,7 +1021,10 @@ mod prune_tests {
         let td = init_test_repo();
         std::fs::write(td.path().join("x"), "").unwrap();
         git_cmd(td.path()).args(["add", "x"]).status().unwrap();
-        git_cmd(td.path()).args(["commit", "-q", "-m", "x"]).status().unwrap();
+        git_cmd(td.path())
+            .args(["commit", "-q", "-m", "x"])
+            .status()
+            .unwrap();
         for i in 0..3 {
             let sha = make_empty_commit(td.path(), &format!("s{i}"));
             make_ref(td.path(), &format!("refs/rustyclaw/sessions/s{i}"), &sha);
@@ -980,7 +1038,10 @@ mod prune_tests {
         let td = init_test_repo();
         std::fs::write(td.path().join("x"), "").unwrap();
         git_cmd(td.path()).args(["add", "x"]).status().unwrap();
-        git_cmd(td.path()).args(["commit", "-q", "-m", "x"]).status().unwrap();
+        git_cmd(td.path())
+            .args(["commit", "-q", "-m", "x"])
+            .status()
+            .unwrap();
         for i in 0..2 {
             let sha = make_empty_commit(td.path(), &format!("s{i}"));
             make_ref(td.path(), &format!("refs/rustyclaw/sessions/s{i}"), &sha);

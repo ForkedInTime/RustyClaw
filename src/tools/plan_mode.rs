@@ -2,8 +2,7 @@
 ///
 /// In plan mode, destructive tools (Bash, Write, Edit, MultiEdit, EnterWorktree)
 /// are blocked.  Claude uses this to outline a plan before executing changes.
-
-use crate::tools::{async_trait, Tool, ToolContext, ToolOutput};
+use crate::tools::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 
 pub struct EnterPlanModeTool;
@@ -11,7 +10,9 @@ pub struct ExitPlanModeTool;
 
 #[async_trait]
 impl Tool for EnterPlanModeTool {
-    fn name(&self) -> &str { "EnterPlanMode" }
+    fn name(&self) -> &str {
+        "EnterPlanMode"
+    }
 
     fn description(&self) -> &str {
         "Enter plan mode. In plan mode you can only read files and think; all write/execute \
@@ -29,14 +30,16 @@ impl Tool for EnterPlanModeTool {
         }
         Ok(ToolOutput::success(
             "Plan mode enabled. Destructive tools are now blocked. \
-             Use ExitPlanMode when you are ready to execute the plan."
+             Use ExitPlanMode when you are ready to execute the plan.",
         ))
     }
 }
 
 #[async_trait]
 impl Tool for ExitPlanModeTool {
-    fn name(&self) -> &str { "ExitPlanMode" }
+    fn name(&self) -> &str {
+        "ExitPlanMode"
+    }
 
     fn description(&self) -> &str {
         "Exit plan mode and return to normal mode where all tools are available."
@@ -51,7 +54,7 @@ impl Tool for ExitPlanModeTool {
             let _ = tx.send(false);
         }
         Ok(ToolOutput::success(
-            "Plan mode disabled. All tools are now available."
+            "Plan mode disabled. All tools are now available.",
         ))
     }
 }

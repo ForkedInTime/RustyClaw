@@ -1,10 +1,9 @@
 /// NotebookEditTool — port of notebook.ts
 /// Read and edit Jupyter notebook (.ipynb) cells.
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
-use anyhow::{anyhow, Result};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub struct NotebookReadTool;
 pub struct NotebookEditTool;
@@ -68,7 +67,9 @@ struct ReadInput {
 
 #[async_trait]
 impl Tool for NotebookReadTool {
-    fn name(&self) -> &str { "NotebookRead" }
+    fn name(&self) -> &str {
+        "NotebookRead"
+    }
 
     fn description(&self) -> &str {
         "Read the contents of a Jupyter notebook (.ipynb) file. Returns each cell's id, \
@@ -92,11 +93,12 @@ impl Tool for NotebookReadTool {
         let input: ReadInput = serde_json::from_value(input)?;
         let path = resolve_path(&ctx.cwd, &input.notebook_path);
 
-        let content = tokio::fs::read_to_string(&path).await
+        let content = tokio::fs::read_to_string(&path)
+            .await
             .map_err(|e| anyhow!("Cannot read {}: {}", path.display(), e))?;
 
-        let notebook: Notebook = serde_json::from_str(&content)
-            .map_err(|e| anyhow!("Invalid notebook JSON: {e}"))?;
+        let notebook: Notebook =
+            serde_json::from_str(&content).map_err(|e| anyhow!("Invalid notebook JSON: {e}"))?;
 
         let mut out = String::new();
         for (i, cell) in notebook.cells.iter().enumerate() {
@@ -136,7 +138,9 @@ struct EditInput {
 
 #[async_trait]
 impl Tool for NotebookEditTool {
-    fn name(&self) -> &str { "NotebookEdit" }
+    fn name(&self) -> &str {
+        "NotebookEdit"
+    }
 
     fn description(&self) -> &str {
         "Edit a Jupyter notebook cell. Supports replace, insert_before, insert_after, and delete. \
@@ -178,33 +182,46 @@ impl Tool for NotebookEditTool {
         let input: EditInput = serde_json::from_value(input)?;
         let path = resolve_path(&ctx.cwd, &input.notebook_path);
 
-        let content = tokio::fs::read_to_string(&path).await
+        let content = tokio::fs::read_to_string(&path)
+            .await
             .map_err(|e| anyhow!("Cannot read {}: {}", path.display(), e))?;
 
-        let mut notebook: Notebook = serde_json::from_str(&content)
-            .map_err(|e| anyhow!("Invalid notebook JSON: {e}"))?;
+        let mut notebook: Notebook =
+            serde_json::from_str(&content).map_err(|e| anyhow!("Invalid notebook JSON: {e}"))?;
 
         match input.edit_mode.as_str() {
             "replace" => {
-                let cell_id = input.cell_id.as_deref()
+                let cell_id = input
+                    .cell_id
+                    .as_deref()
                     .ok_or_else(|| anyhow!("cell_id is required for replace"))?;
-                let new_source = input.new_source.as_deref()
+                let new_source = input
+                    .new_source
+                    .as_deref()
                     .ok_or_else(|| anyhow!("new_source is required for replace"))?;
 
-                let cell = notebook.cells.iter_mut()
+                let cell = notebook
+                    .cells
+                    .iter_mut()
                     .find(|c| c.id.as_deref() == Some(cell_id))
                     .ok_or_else(|| anyhow!("Cell not found: {cell_id}"))?;
 
                 cell.source = CellSource::from_str(new_source);
             }
             "insert_before" | "insert_after" => {
-                let cell_id = input.cell_id.as_deref()
+                let cell_id = input
+                    .cell_id
+                    .as_deref()
                     .ok_or_else(|| anyhow!("cell_id is required for insert"))?;
-                let new_source = input.new_source.as_deref()
+                let new_source = input
+                    .new_source
+                    .as_deref()
                     .ok_or_else(|| anyhow!("new_source is required for insert"))?;
                 let cell_type = input.cell_type.as_deref().unwrap_or("code").to_string();
 
-                let idx = notebook.cells.iter()
+                let idx = notebook
+                    .cells
+                    .iter()
                     .position(|c| c.id.as_deref() == Some(cell_id))
                     .ok_or_else(|| anyhow!("Cell not found: {cell_id}"))?;
 
@@ -215,14 +232,22 @@ impl Tool for NotebookEditTool {
                     extra: Default::default(),
                 };
 
-                let insert_at = if input.edit_mode == "insert_before" { idx } else { idx + 1 };
+                let insert_at = if input.edit_mode == "insert_before" {
+                    idx
+                } else {
+                    idx + 1
+                };
                 notebook.cells.insert(insert_at, new_cell);
             }
             "delete" => {
-                let cell_id = input.cell_id.as_deref()
+                let cell_id = input
+                    .cell_id
+                    .as_deref()
                     .ok_or_else(|| anyhow!("cell_id is required for delete"))?;
 
-                let idx = notebook.cells.iter()
+                let idx = notebook
+                    .cells
+                    .iter()
                     .position(|c| c.id.as_deref() == Some(cell_id))
                     .ok_or_else(|| anyhow!("Cell not found: {cell_id}"))?;
 
@@ -232,7 +257,8 @@ impl Tool for NotebookEditTool {
         }
 
         let updated = serde_json::to_string_pretty(&notebook)?;
-        tokio::fs::write(&path, updated).await
+        tokio::fs::write(&path, updated)
+            .await
             .map_err(|e| anyhow!("Cannot write {}: {}", path.display(), e))?;
 
         Ok(ToolOutput::success(format!(

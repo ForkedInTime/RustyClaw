@@ -3,11 +3,10 @@
 /// In rustyclaw (TS) this is gated behind the KAIROS build-time feature flag,
 /// making it dead code in external builds. In Rust there is no build-time DCE
 /// system, so the tool is always available.
-
 use crate::tools::{Tool, ToolContext, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub struct BriefTool;
 
@@ -75,12 +74,16 @@ impl Tool for BriefTool {
                 }
 
                 let size = path.metadata().map(|m| m.len()).unwrap_or(0);
-                let ext = path.extension()
+                let ext = path
+                    .extension()
                     .and_then(|e| e.to_str())
                     .unwrap_or("")
                     .to_lowercase();
 
-                let is_image = matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg");
+                let is_image = matches!(
+                    ext.as_str(),
+                    "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg"
+                );
 
                 if is_image {
                     attachment_results.push(format!("  [image: {} ({} bytes)]", path_str, size));
@@ -102,7 +105,11 @@ impl Tool for BriefTool {
         let suffix = if n == 0 {
             String::new()
         } else {
-            format!(" ({} attachment{} included)", n, if n == 1 { "" } else { "s" })
+            format!(
+                " ({} attachment{} included)",
+                n,
+                if n == 1 { "" } else { "s" }
+            )
         };
 
         // The tool result sent back to the API is the TS equivalent of
@@ -116,6 +123,8 @@ impl Tool for BriefTool {
             ctx.stream_line(att);
         }
 
-        Ok(ToolOutput::success(format!("Message delivered to user.{suffix}")))
+        Ok(ToolOutput::success(format!(
+            "Message delivered to user.{suffix}"
+        )))
     }
 }
