@@ -401,6 +401,62 @@ pub fn restore_to(
     Ok(RestoreReport { files_restored: target_files.len() as u32, orphaned_files })
 }
 
+// ── Prune pipeline ────────────────────────────────────────────────────────────
+
+/// Delete old `refs/rustyclaw/sessions/*` refs, keeping the `keep` newest by
+/// committer date. `keep == 0` disables pruning. Non-fatal: any error is
+/// logged via `tracing::warn!` and the function returns 0.
+pub fn prune_old_refs(cwd: &Path, keep: u32) -> anyhow::Result<u32> {
+    if keep == 0 || !is_git_repo(cwd) {
+        return Ok(0);
+    }
+
+    let out = git_cmd(cwd)
+        .args([
+            "for-each-ref",
+            "--format=%(committerdate:unix) %(refname)",
+            SHADOW_REF_PREFIX.trim_end_matches('/'),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()?;
+    if !out.status.success() {
+        return Ok(0);
+    }
+    let s = String::from_utf8(out.stdout)?;
+    let mut rows: Vec<(i64, String)> = s
+        .lines()
+        .filter_map(|line| {
+            let mut it = line.splitn(2, ' ');
+            let ts = it.next()?.parse::<i64>().ok()?;
+            let refname = it.next()?.to_string();
+            Some((ts, refname))
+        })
+        .collect();
+
+    if rows.len() <= keep as usize {
+        return Ok(0);
+    }
+
+    rows.sort_by(|a, b| b.0.cmp(&a.0));
+    let to_delete: Vec<String> = rows
+        .into_iter()
+        .skip(keep as usize)
+        .map(|(_, r)| r)
+        .collect();
+
+    let mut deleted = 0u32;
+    for r in &to_delete {
+        let status = git_cmd(cwd).args(["update-ref", "-d", r]).status();
+        match status {
+            Ok(s) if s.success() => deleted += 1,
+            Ok(_) => tracing::warn!("autoCommit prune: failed to delete {r}"),
+            Err(e) => tracing::warn!("autoCommit prune: error deleting {r}: {e}"),
+        }
+    }
+    Ok(deleted)
+}
+
 #[cfg(test)]
 mod git_detection_tests {
     use super::*;
@@ -842,5 +898,93 @@ mod restore_tests {
             "expected only.txt as orphan: {:?}",
             report.orphaned_files
         );
+    }
+}
+
+#[cfg(test)]
+mod prune_tests {
+    use super::*;
+    use super::git_detection_tests::init_test_repo;
+
+    /// Create a single empty commit so we can point shadow refs at it.
+    fn make_empty_commit(cwd: &Path, subject: &str) -> String {
+        let td = tempfile::TempDir::new().unwrap();
+        let idx = td.path().join("idx");
+        let tree = git_cmd(cwd)
+            .env("GIT_INDEX_FILE", &idx)
+            .args(["write-tree"])
+            .output()
+            .unwrap();
+        assert!(tree.status.success());
+        let tree_sha = String::from_utf8(tree.stdout).unwrap().trim().to_string();
+        let out = git_cmd(cwd)
+            .env("GIT_AUTHOR_NAME", "rustyclaw")
+            .env("GIT_AUTHOR_EMAIL", "noreply@rustyclaw.local")
+            .env("GIT_COMMITTER_NAME", "rustyclaw")
+            .env("GIT_COMMITTER_EMAIL", "noreply@rustyclaw.local")
+            .args(["commit-tree", &tree_sha, "-m", subject])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    fn make_ref(cwd: &Path, name: &str, sha: &str) {
+        let s = git_cmd(cwd)
+            .args(["update-ref", name, sha])
+            .status()
+            .unwrap();
+        assert!(s.success());
+    }
+
+    #[test]
+    fn prune_keeps_newest_n() {
+        let td = init_test_repo();
+        std::fs::write(td.path().join("x"), "").unwrap();
+        git_cmd(td.path()).args(["add", "x"]).status().unwrap();
+        git_cmd(td.path()).args(["commit", "-q", "-m", "x"]).status().unwrap();
+
+        for i in 0..5 {
+            let sha = make_empty_commit(td.path(), &format!("session-{i}"));
+            make_ref(td.path(), &format!("refs/rustyclaw/sessions/s{i}"), &sha);
+        }
+
+        let deleted = prune_old_refs(td.path(), 3).unwrap();
+        assert_eq!(deleted, 2, "should delete the 2 oldest of 5 refs");
+
+        let out = git_cmd(td.path())
+            .args(["for-each-ref", "--format=%(refname)", "refs/rustyclaw/sessions/"])
+            .output()
+            .unwrap();
+        let remaining = String::from_utf8(out.stdout).unwrap();
+        assert_eq!(remaining.lines().count(), 3);
+    }
+
+    #[test]
+    fn prune_noop_when_unlimited() {
+        let td = init_test_repo();
+        std::fs::write(td.path().join("x"), "").unwrap();
+        git_cmd(td.path()).args(["add", "x"]).status().unwrap();
+        git_cmd(td.path()).args(["commit", "-q", "-m", "x"]).status().unwrap();
+        for i in 0..3 {
+            let sha = make_empty_commit(td.path(), &format!("s{i}"));
+            make_ref(td.path(), &format!("refs/rustyclaw/sessions/s{i}"), &sha);
+        }
+        let deleted = prune_old_refs(td.path(), 0).unwrap();
+        assert_eq!(deleted, 0);
+    }
+
+    #[test]
+    fn prune_noop_when_below_threshold() {
+        let td = init_test_repo();
+        std::fs::write(td.path().join("x"), "").unwrap();
+        git_cmd(td.path()).args(["add", "x"]).status().unwrap();
+        git_cmd(td.path()).args(["commit", "-q", "-m", "x"]).status().unwrap();
+        for i in 0..2 {
+            let sha = make_empty_commit(td.path(), &format!("s{i}"));
+            make_ref(td.path(), &format!("refs/rustyclaw/sessions/s{i}"), &sha);
+        }
+        let deleted = prune_old_refs(td.path(), 10).unwrap();
+        assert_eq!(deleted, 0);
     }
 }
