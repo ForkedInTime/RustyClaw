@@ -13,28 +13,9 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-pub const DEFAULT_KEEP_SESSIONS: u32 = 10;
-pub const DEFAULT_MESSAGE_PREFIX: &str = "rustyclaw";
+pub use crate::settings::{AutoCommitConfig, DEFAULT_KEEP_SESSIONS, DEFAULT_MESSAGE_PREFIX};
+
 pub const SHADOW_REF_PREFIX: &str = "refs/rustyclaw/sessions/";
-
-/// Runtime config for the auto-commit loop. Built from `AutoCommitSettings`
-/// in `Config::load` with out-of-range `keep_sessions` clamped to the default.
-#[derive(Debug, Clone)]
-pub struct AutoCommitConfig {
-    pub enabled: bool,
-    pub keep_sessions: u32,
-    pub message_prefix: String,
-}
-
-impl Default for AutoCommitConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            keep_sessions: DEFAULT_KEEP_SESSIONS,
-            message_prefix: DEFAULT_MESSAGE_PREFIX.to_string(),
-        }
-    }
-}
 
 /// Outcome of a single `snapshot_turn` call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,15 +181,15 @@ pub fn snapshot_turn(
     } else {
         resolve_head(cwd)
     };
-    if let Some(p) = &parent {
-        if let Some(tree) = tree_of_commit(cwd, p) {
-            let s = git_cmd(cwd)
-                .env("GIT_INDEX_FILE", &temp_index)
-                .args(["read-tree", &tree])
-                .status()?;
-            if !s.success() {
-                anyhow::bail!("git read-tree {tree} failed");
-            }
+    if let Some(p) = &parent
+        && let Some(tree) = tree_of_commit(cwd, p)
+    {
+        let s = git_cmd(cwd)
+            .env("GIT_INDEX_FILE", &temp_index)
+            .args(["read-tree", &tree])
+            .status()?;
+        if !s.success() {
+            anyhow::bail!("git read-tree {tree} failed");
         }
     }
 
@@ -229,12 +210,11 @@ pub fn snapshot_turn(
     )?;
 
     // 5. Empty-turn optimization: compare against parent tree.
-    if let Some(p) = &parent {
-        if let Some(parent_tree) = tree_of_commit(cwd, p) {
-            if parent_tree == tree_sha {
-                return Ok(SnapshotOutcome::NoChanges);
-            }
-        }
+    if let Some(p) = &parent
+        && let Some(parent_tree) = tree_of_commit(cwd, p)
+        && parent_tree == tree_sha
+    {
+        return Ok(SnapshotOutcome::NoChanges);
     }
 
     // 6. Build the commit.

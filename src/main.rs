@@ -2,7 +2,6 @@
 /// Entry point
 
 mod api;
-mod autocommit;
 mod commands;
 mod compact;
 mod config;

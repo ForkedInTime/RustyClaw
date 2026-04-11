@@ -281,6 +281,32 @@ pub struct AutoFixSettings {
     pub timeout_secs: Option<u64>,
 }
 
+// ── Auto-commit runtime config ────────────────────────────────────────────────
+
+/// Default number of session shadow-ref sets to retain on startup prune.
+pub const DEFAULT_KEEP_SESSIONS: u32 = 10;
+/// Default subject prefix for auto-commit messages.
+pub const DEFAULT_MESSAGE_PREFIX: &str = "rustyclaw";
+
+/// Runtime config for the auto-commit loop. Built from `AutoCommitSettings`
+/// in `Config::load` with out-of-range `keep_sessions` clamped to the default.
+#[derive(Debug, Clone)]
+pub struct AutoCommitConfig {
+    pub enabled: bool,
+    pub keep_sessions: u32,
+    pub message_prefix: String,
+}
+
+impl Default for AutoCommitConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            keep_sessions: DEFAULT_KEEP_SESSIONS,
+            message_prefix: DEFAULT_MESSAGE_PREFIX.to_string(),
+        }
+    }
+}
+
 /// Settings for the auto-commit loop (per-turn shadow-ref snapshots + /undo).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
