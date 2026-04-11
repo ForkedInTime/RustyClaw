@@ -246,6 +246,11 @@ pub struct Settings {
     /// silent alias so existing user configs keep working.
     #[serde(rename = "autoFixLoop", alias = "autoRollback")]
     pub auto_fix: Option<AutoFixSettings>,
+
+    /// Auto-commit loop: per-turn working-tree snapshots on private shadow refs
+    /// (`refs/rustyclaw/sessions/<id>`) navigable via `/undo` and `/redo`.
+    #[serde(rename = "autoCommit")]
+    pub auto_commit: Option<AutoCommitSettings>,
 }
 
 /// Settings for phase-declarative model routing.
@@ -274,6 +279,18 @@ pub struct AutoFixSettings {
     /// Max wall-clock seconds the test command may run before being killed.
     /// Defaults to 60 when unset. Set to 0 for no timeout.
     pub timeout_secs: Option<u64>,
+}
+
+/// Settings for the auto-commit loop (per-turn shadow-ref snapshots + /undo).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoCommitSettings {
+    /// Enable the auto-commit loop (default: true).
+    pub enabled: Option<bool>,
+    /// How many session refs to keep on startup prune (default: 10, 0 = unlimited).
+    pub keep_sessions: Option<u32>,
+    /// Commit subject prefix (default: "rustyclaw").
+    pub message_prefix: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -392,6 +409,7 @@ impl Settings {
             memory_auto_capture:  other.memory_auto_capture.or(self.memory_auto_capture),
             phase_router:         other.phase_router.or(self.phase_router),
             auto_fix:             other.auto_fix.or(self.auto_fix),
+            auto_commit:          other.auto_commit.or(self.auto_commit),
             permissions: PermissionsConfig {
                 // Union both lists — project additions stack on top of global
                 allow: {
@@ -478,5 +496,47 @@ mod auto_fix_key_tests {
         let out = serde_json::to_string(&s).unwrap();
         assert!(out.contains("autoFixLoop"), "serialised form should use the new key: {out}");
         assert!(!out.contains("autoRollback"), "serialised form should not use the legacy key: {out}");
+    }
+}
+
+#[cfg(test)]
+mod auto_commit_key_tests {
+    use super::*;
+
+    #[test]
+    fn parses_full_autocommit_block() {
+        let json = r#"{
+            "autoCommit": {
+                "enabled": false,
+                "keepSessions": 25,
+                "messagePrefix": "claw"
+            }
+        }"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        let ac = s.auto_commit.expect("auto_commit should deserialise");
+        assert_eq!(ac.enabled, Some(false));
+        assert_eq!(ac.keep_sessions, Some(25));
+        assert_eq!(ac.message_prefix.as_deref(), Some("claw"));
+    }
+
+    #[test]
+    fn defaults_when_autocommit_missing() {
+        let s: Settings = serde_json::from_str("{}").unwrap();
+        assert!(s.auto_commit.is_none());
+    }
+
+    #[test]
+    fn serialises_with_camelcase_key() {
+        let s = Settings {
+            auto_commit: Some(AutoCommitSettings {
+                enabled: Some(true),
+                keep_sessions: Some(10),
+                message_prefix: Some("rustyclaw".to_string()),
+            }),
+            ..Default::default()
+        };
+        let out = serde_json::to_string(&s).unwrap();
+        assert!(out.contains("autoCommit"), "expected autoCommit key: {out}");
+        assert!(out.contains("keepSessions"), "expected keepSessions key: {out}");
     }
 }
