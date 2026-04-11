@@ -171,6 +171,7 @@ rustyclaw
 - **Session management** — Save, resume, search, export conversations
 - **Parallel agents** — Spawn background agents in isolated git worktrees
 - **Auto-fix loop** — After every Write/Edit, lint + tests run automatically; failures feed back to the model for up to 3 retries. [redacted]-style post-edit feedback, anti-cheat protected.
+- **Auto-commit snapshots with `/undo` and `/redo`** — Every assistant turn silently snapshots the working tree to a private shadow ref (`refs/rustyclaw/sessions/<id>`). Navigate history with a picker (`/undo`, `/redo`) or skip straight to a turn (`/undo 3`). Invisible to normal git tooling; never pushed.
 - **Sandboxing** — bwrap / firejail / strict isolation
 - **XDG compliant** — Respects `$XDG_CONFIG_HOME`, `$XDG_DATA_HOME`, `$XDG_CACHE_HOME`
 

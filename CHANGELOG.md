@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **SDK / Headless mode** — `--headless` flag starts an NDJSON stdio server for embedding in editors, CI/CD, scripts, and custom UIs. Full protocol reference in [`sdk/`](sdk/).
 - **Phase 1 robustness** — AGENTS.md support, XDG Base Directory compliance, context usage % in status bar, always-show-thinking, spinner style toggle, `/reload` hot-reload.
+- **Auto-commit loop** (Phase 2 robustness #1) — every assistant turn now takes a full-tree snapshot on a private shadow ref at `refs/rustyclaw/sessions/<id>`. New `/undo`, `/redo`, and `/autocommit` slash commands. `autoCommit.{enabled,keepSessions,messagePrefix}` settings with startup prune. Zero impact on the user's real git index.
 - **Auto-fix loop** (Phase 2) — After the model edits code, RustyClaw runs
   project-appropriate lint + test commands and, on failure, injects the
   output back as a synthetic user turn for up to `maxRetries` rounds

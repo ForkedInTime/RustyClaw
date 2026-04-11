@@ -23,6 +23,15 @@ pub struct SessionMeta {
     pub preview: String, // first user message (truncated)
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Auto-commit SHAs on the session's shadow ref, chronological order
+    /// (oldest → newest). Empty when auto-commit is disabled or cwd is
+    /// outside a git work tree.
+    #[serde(default)]
+    pub auto_commits: Vec<String>,
+    /// User's current read-head inside `auto_commits`. `0` means
+    /// "at session base"; `auto_commits.len()` means "at latest turn".
+    #[serde(default)]
+    pub undo_position: usize,
 }
 
 impl SessionMeta {
@@ -66,6 +75,8 @@ impl Session {
             created_at: unix_now(),
             preview: String::new(),
             tags: Vec::new(),
+            auto_commits: Vec::new(),
+            undo_position: 0,
         };
         meta.save().await?;
         Ok(Self { id: id.clone(), meta, path: Self::jsonl_path(&id) })
@@ -123,6 +134,12 @@ impl Session {
     /// Rename the session.
     pub async fn rename(&mut self, name: &str) -> Result<()> {
         self.meta.name = name.to_string();
+        self.meta.save().await
+    }
+
+    /// Persist the current `SessionMeta` to disk. Used by the auto-commit loop
+    /// to checkpoint updated `auto_commits` / `undo_position` after each turn.
+    pub async fn save_meta(&self) -> anyhow::Result<()> {
         self.meta.save().await
     }
 
@@ -368,4 +385,42 @@ fn first_user_preview(messages: &[Message]) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod meta_serde_tests {
+    use super::SessionMeta;
+
+    #[test]
+    fn loads_legacy_meta_without_autocommit_fields() {
+        let json = r#"{
+            "id": "abc",
+            "name": "Test",
+            "created_at": 1700000000,
+            "preview": "hello"
+        }"#;
+        let m: SessionMeta = serde_json::from_str(json).unwrap();
+        assert_eq!(m.id, "abc");
+        assert!(m.auto_commits.is_empty());
+        assert_eq!(m.undo_position, 0);
+    }
+
+    #[test]
+    fn roundtrips_with_autocommit_fields() {
+        let json = r#"{
+            "id": "xyz",
+            "name": "Test",
+            "created_at": 1700000000,
+            "preview": "hi",
+            "auto_commits": ["aaa111", "bbb222"],
+            "undo_position": 2
+        }"#;
+        let m: SessionMeta = serde_json::from_str(json).unwrap();
+        assert_eq!(m.auto_commits, vec!["aaa111", "bbb222"]);
+        assert_eq!(m.undo_position, 2);
+
+        let out = serde_json::to_string(&m).unwrap();
+        assert!(out.contains("auto_commits"));
+        assert!(out.contains("undo_position"));
+    }
 }
