@@ -348,7 +348,7 @@ pub struct Config {
     /// Auto-commit loop: per-turn working-tree snapshots on private shadow
     /// refs navigable via `/undo` and `/redo`.
     #[serde(skip)]
-    pub auto_commit: crate::autocommit::AutoCommitConfig,
+    pub auto_commit: crate::settings::AutoCommitConfig,
 }
 
 impl Default for Config {
@@ -424,7 +424,7 @@ impl Default for Config {
             memory_auto_capture: false,
             phase_router: crate::router::PhaseRouterConfig::default(),
             auto_fix: crate::autofix::AutoFixConfig::default(),
-            auto_commit: crate::autocommit::AutoCommitConfig::default(),
+            auto_commit: crate::settings::AutoCommitConfig::default(),
         }
     }
 }
@@ -551,9 +551,9 @@ impl Config {
                     tracing::warn!(
                         "autoCommit.keepSessions = {k} is out of bounds (0..=1000); \
                          clamping to default ({})",
-                        crate::autocommit::DEFAULT_KEEP_SESSIONS
+                        crate::settings::DEFAULT_KEEP_SESSIONS
                     );
-                    cfg.auto_commit.keep_sessions = crate::autocommit::DEFAULT_KEEP_SESSIONS;
+                    cfg.auto_commit.keep_sessions = crate::settings::DEFAULT_KEEP_SESSIONS;
                 }
             }
             if let Some(p) = &ac.message_prefix {
@@ -1370,7 +1370,7 @@ mod auto_fix_clamp_tests {
 
 #[cfg(test)]
 mod auto_commit_clamp_tests {
-    use crate::autocommit::{AutoCommitConfig, DEFAULT_KEEP_SESSIONS, DEFAULT_MESSAGE_PREFIX};
+    use crate::settings::{AutoCommitConfig, DEFAULT_KEEP_SESSIONS, DEFAULT_MESSAGE_PREFIX};
     use crate::settings::AutoCommitSettings;
 
     /// Mirrors the clamp logic in `Config::load` so we can unit-test it without
