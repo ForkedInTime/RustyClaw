@@ -344,6 +344,11 @@ pub struct Config {
     /// model with the failure output up to `max_retries` times.
     #[serde(skip)]
     pub auto_fix: crate::autofix::AutoFixConfig,
+
+    /// Auto-commit loop: per-turn working-tree snapshots on private shadow
+    /// refs navigable via `/undo` and `/redo`.
+    #[serde(skip)]
+    pub auto_commit: crate::settings::AutoCommitConfig,
 }
 
 impl Default for Config {
@@ -419,6 +424,7 @@ impl Default for Config {
             memory_auto_capture: false,
             phase_router: crate::router::PhaseRouterConfig::default(),
             auto_fix: crate::autofix::AutoFixConfig::default(),
+            auto_commit: crate::settings::AutoCommitConfig::default(),
         }
     }
 }
@@ -531,6 +537,28 @@ impl Config {
                 }
             }
             if let Some(t) = ar.timeout_secs { cfg.auto_fix.timeout_secs = t; }
+        }
+
+        // Auto-commit settings → AutoCommitConfig
+        if let Some(ac) = &settings.auto_commit {
+            if let Some(e) = ac.enabled {
+                cfg.auto_commit.enabled = e;
+            }
+            if let Some(k) = ac.keep_sessions {
+                if k <= 1000 {
+                    cfg.auto_commit.keep_sessions = k;
+                } else {
+                    tracing::warn!(
+                        "autoCommit.keepSessions = {k} is out of bounds (0..=1000); \
+                         clamping to default ({})",
+                        crate::settings::DEFAULT_KEEP_SESSIONS
+                    );
+                    cfg.auto_commit.keep_sessions = crate::settings::DEFAULT_KEEP_SESSIONS;
+                }
+            }
+            if let Some(p) = &ac.message_prefix {
+                cfg.auto_commit.message_prefix = p.clone();
+            }
         }
 
         // Resolve output style: load name from settings, look up prompt
@@ -1337,5 +1365,87 @@ mod auto_fix_clamp_tests {
         assert!(json.contains("testCommand"));
         assert!(json.contains("maxRetries"));
         assert!(json.contains("timeoutSecs"));
+    }
+}
+
+#[cfg(test)]
+mod auto_commit_clamp_tests {
+    use crate::settings::{AutoCommitConfig, DEFAULT_KEEP_SESSIONS, DEFAULT_MESSAGE_PREFIX};
+    use crate::settings::AutoCommitSettings;
+
+    /// Mirrors the clamp logic in `Config::load` so we can unit-test it without
+    /// touching disk. If this logic changes, `Config::load` must change in lockstep.
+    fn apply(settings: &AutoCommitSettings) -> AutoCommitConfig {
+        let mut cfg = AutoCommitConfig::default();
+        if let Some(e) = settings.enabled { cfg.enabled = e; }
+        if let Some(k) = settings.keep_sessions {
+            if k <= 1000 {
+                cfg.keep_sessions = k;
+            } else {
+                cfg.keep_sessions = DEFAULT_KEEP_SESSIONS;
+            }
+        }
+        if let Some(p) = &settings.message_prefix {
+            cfg.message_prefix = p.clone();
+        }
+        cfg
+    }
+
+    #[test]
+    fn default_config_matches_spec() {
+        let cfg = AutoCommitConfig::default();
+        assert!(cfg.enabled);
+        assert_eq!(cfg.keep_sessions, DEFAULT_KEEP_SESSIONS);
+        assert_eq!(cfg.message_prefix, DEFAULT_MESSAGE_PREFIX);
+    }
+
+    #[test]
+    fn keep_sessions_accepts_in_range() {
+        let s = AutoCommitSettings {
+            enabled: None,
+            keep_sessions: Some(25),
+            message_prefix: None,
+        };
+        assert_eq!(apply(&s).keep_sessions, 25);
+    }
+
+    #[test]
+    fn keep_sessions_accepts_zero_unlimited() {
+        let s = AutoCommitSettings {
+            enabled: None,
+            keep_sessions: Some(0),
+            message_prefix: None,
+        };
+        assert_eq!(apply(&s).keep_sessions, 0);
+    }
+
+    #[test]
+    fn keep_sessions_out_of_range_clamps_to_default() {
+        let s = AutoCommitSettings {
+            enabled: None,
+            keep_sessions: Some(9999),
+            message_prefix: None,
+        };
+        assert_eq!(apply(&s).keep_sessions, DEFAULT_KEEP_SESSIONS);
+    }
+
+    #[test]
+    fn disabled_propagates() {
+        let s = AutoCommitSettings {
+            enabled: Some(false),
+            keep_sessions: None,
+            message_prefix: None,
+        };
+        assert!(!apply(&s).enabled);
+    }
+
+    #[test]
+    fn message_prefix_override() {
+        let s = AutoCommitSettings {
+            enabled: None,
+            keep_sessions: None,
+            message_prefix: Some("claw".to_string()),
+        };
+        assert_eq!(apply(&s).message_prefix, "claw");
     }
 }

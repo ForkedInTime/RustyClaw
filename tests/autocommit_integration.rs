@@ -1,0 +1,215 @@
+//! End-to-end tests for the auto-commit loop against real `git init` tempdirs.
+
+#![cfg(unix)]
+
+use rustyclaw::autocommit::{
+    is_git_repo, prune_old_refs, restore_to, snapshot_turn, AutoCommitConfig, SnapshotOutcome,
+    SHADOW_REF_PREFIX,
+};
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+use tempfile::TempDir;
+
+fn git_init(path: &Path) {
+    let s = Command::new("git")
+        .args(["init", "--quiet", "--initial-branch=main"])
+        .current_dir(path)
+        .status()
+        .unwrap();
+    assert!(s.success());
+    for (k, v) in [
+        ("user.name", "rustyclaw-test"),
+        ("user.email", "noreply@rustyclaw.local"),
+        ("commit.gpgsign", "false"),
+    ] {
+        Command::new("git")
+            .args(["config", k, v])
+            .current_dir(path)
+            .status()
+            .unwrap();
+    }
+}
+
+fn write(path: &Path, rel: &str, body: &str) {
+    let p = path.join(rel);
+    if let Some(parent) = p.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(p, body).unwrap();
+}
+
+fn read(path: &Path, rel: &str) -> String {
+    fs::read_to_string(path.join(rel)).unwrap()
+}
+
+fn commit_initial(path: &Path) {
+    write(path, "README.md", "base\n");
+    Command::new("git")
+        .args(["add", "README.md"])
+        .current_dir(path)
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-q", "-m", "base"])
+        .current_dir(path)
+        .status()
+        .unwrap();
+}
+
+#[test]
+fn full_3_turn_sequence_with_undo_redo() {
+    let td = TempDir::new().unwrap();
+    git_init(td.path());
+    commit_initial(td.path());
+
+    let cfg = AutoCommitConfig::default();
+    let mut commits: Vec<String> = Vec::new();
+    let mut pos = 0usize;
+
+    write(td.path(), "app.txt", "v1\n");
+    snapshot_turn(td.path(), &cfg, "s", "turn 1", 1, &mut commits, &mut pos).unwrap();
+    write(td.path(), "app.txt", "v2\n");
+    snapshot_turn(td.path(), &cfg, "s", "turn 2", 2, &mut commits, &mut pos).unwrap();
+    write(td.path(), "app.txt", "v3\n");
+    snapshot_turn(td.path(), &cfg, "s", "turn 3", 3, &mut commits, &mut pos).unwrap();
+
+    assert_eq!(commits.len(), 3);
+    assert_eq!(pos, 3);
+    assert_eq!(read(td.path(), "app.txt"), "v3\n");
+
+    // /undo 1 → turn 2 state
+    restore_to(td.path(), &commits, 2).unwrap();
+    pos -= 1;
+    assert_eq!(pos, 2);
+    assert_eq!(read(td.path(), "app.txt"), "v2\n");
+
+    // /redo 1 → turn 3 state
+    restore_to(td.path(), &commits, 3).unwrap();
+    pos += 1;
+    assert_eq!(pos, 3);
+    assert_eq!(read(td.path(), "app.txt"), "v3\n");
+}
+
+#[test]
+fn undo_past_session_start_is_clamped() {
+    let td = TempDir::new().unwrap();
+    git_init(td.path());
+    commit_initial(td.path());
+
+    let cfg = AutoCommitConfig::default();
+    let mut commits: Vec<String> = Vec::new();
+    let mut pos = 0usize;
+
+    write(td.path(), "a.txt", "1\n");
+    snapshot_turn(td.path(), &cfg, "s", "a", 1, &mut commits, &mut pos).unwrap();
+    write(td.path(), "a.txt", "2\n");
+    snapshot_turn(td.path(), &cfg, "s", "b", 2, &mut commits, &mut pos).unwrap();
+
+    // Simulate `/undo 5` via saturating_sub → target_position = 0 (session base)
+    let new_pos = pos.saturating_sub(5);
+    assert_eq!(new_pos, 0);
+    let report = restore_to(td.path(), &commits, new_pos).unwrap();
+    // Session base had the initial "base\n" README. a.txt exists only in the
+    // shadow commits, so restoring to position 0 reports it as orphaned (Task 5
+    // reports orphans rather than deleting them; the caller decides the policy).
+    assert!(
+        report.orphaned_files.iter().any(|p| p.ends_with("a.txt")),
+        "expected a.txt to be reported as orphaned, got {:?}",
+        report.orphaned_files
+    );
+    assert_eq!(read(td.path(), "README.md"), "base\n");
+}
+
+#[test]
+fn redo_stack_discarded_on_new_turn() {
+    let td = TempDir::new().unwrap();
+    git_init(td.path());
+    commit_initial(td.path());
+
+    let cfg = AutoCommitConfig::default();
+    let mut commits: Vec<String> = Vec::new();
+    let mut pos = 0usize;
+
+    write(td.path(), "a.txt", "1\n");
+    snapshot_turn(td.path(), &cfg, "s", "a", 1, &mut commits, &mut pos).unwrap();
+    write(td.path(), "a.txt", "2\n");
+    snapshot_turn(td.path(), &cfg, "s", "b", 2, &mut commits, &mut pos).unwrap();
+    write(td.path(), "a.txt", "3\n");
+    snapshot_turn(td.path(), &cfg, "s", "c", 3, &mut commits, &mut pos).unwrap();
+    assert_eq!(commits.len(), 3);
+
+    // Simulate /undo 2 → pos = 1
+    pos = 1;
+    write(td.path(), "a.txt", "new2\n");
+    snapshot_turn(td.path(), &cfg, "s", "new", 2, &mut commits, &mut pos).unwrap();
+    assert_eq!(commits.len(), 2, "old turns 2 + 3 should be discarded");
+    assert_eq!(pos, 2);
+}
+
+#[test]
+fn disabled_config_emits_no_commits() {
+    let td = TempDir::new().unwrap();
+    git_init(td.path());
+    commit_initial(td.path());
+
+    let cfg = AutoCommitConfig {
+        enabled: false,
+        ..AutoCommitConfig::default()
+    };
+    let mut commits: Vec<String> = Vec::new();
+    let mut pos = 0usize;
+
+    write(td.path(), "x.txt", "1\n");
+    let out = snapshot_turn(td.path(), &cfg, "s", "x", 1, &mut commits, &mut pos).unwrap();
+    assert!(matches!(out, SnapshotOutcome::Disabled { .. }));
+    assert!(commits.is_empty());
+    assert_eq!(pos, 0);
+}
+
+#[test]
+fn non_git_dir_is_disabled() {
+    let td = TempDir::new().unwrap(); // no git init
+    assert!(!is_git_repo(td.path()));
+    let cfg = AutoCommitConfig::default();
+    let mut commits: Vec<String> = Vec::new();
+    let mut pos = 0usize;
+    let out = snapshot_turn(td.path(), &cfg, "s", "x", 1, &mut commits, &mut pos).unwrap();
+    assert!(matches!(out, SnapshotOutcome::Disabled { .. }));
+}
+
+#[test]
+fn prune_integration_15_refs_keeps_10() {
+    let td = TempDir::new().unwrap();
+    git_init(td.path());
+    commit_initial(td.path());
+
+    let cfg = AutoCommitConfig::default();
+    // Create 15 sessions with 1 turn each.
+    for i in 0..15 {
+        let mut commits: Vec<String> = Vec::new();
+        let mut pos = 0usize;
+        write(td.path(), "app.txt", &format!("v{i}\n"));
+        snapshot_turn(
+            td.path(),
+            &cfg,
+            &format!("s{i}"),
+            "t",
+            1,
+            &mut commits,
+            &mut pos,
+        )
+        .unwrap();
+    }
+
+    let deleted = prune_old_refs(td.path(), 10).unwrap();
+    assert_eq!(deleted, 5);
+
+    let out = Command::new("git")
+        .args(["for-each-ref", "--format=%(refname)", SHADOW_REF_PREFIX])
+        .current_dir(td.path())
+        .output()
+        .unwrap();
+    let remaining = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(remaining.lines().count(), 10);
+}
