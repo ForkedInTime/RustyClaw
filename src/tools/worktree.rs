@@ -109,7 +109,7 @@ impl Tool for EnterWorktreeTool {
         let worktree_path = PathBuf::from(&git_root)
             .parent()
             .unwrap_or(PathBuf::from("/tmp").as_path())
-            .join(format!("{}-{}", git_root.split('/').last().unwrap_or("repo"), &slug));
+            .join(format!("{}-{}", git_root.split('/').next_back().unwrap_or("repo"), &slug));
 
         // Create worktree + branch
         let output = Command::new("git")

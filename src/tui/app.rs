@@ -390,12 +390,12 @@ pub fn pretty_model_name(model: &str) -> String {
             .copied().collect();
         let version = nums.join(".");
         let mut f = family.to_string();
-        f.get_mut(0..1).map(|c| c.make_ascii_uppercase());
+        if let Some(c) = f.get_mut(0..1) { c.make_ascii_uppercase() }
         if version.is_empty() { f } else { format!("{f} {version}") }
     } else {
         // New format: "sonnet-4-6"
         let mut f = parts[0].to_string();
-        f.get_mut(0..1).map(|c| c.make_ascii_uppercase());
+        if let Some(c) = f.get_mut(0..1) { c.make_ascii_uppercase() }
         let version = parts[1..].join(".");
         if version.is_empty() { f } else { format!("{f} {version}") }
     }
@@ -889,13 +889,12 @@ impl App {
                 } else {
                     self.tool_stream_buf.clone()
                 };
-                if let Some(last) = self.entries.last_mut() {
-                    if matches!(last.kind, EntryKind::ToolStream) {
+                if let Some(last) = self.entries.last_mut()
+                    && matches!(last.kind, EntryKind::ToolStream) {
                         last.text = display;
                         self.scroll_to_bottom();
                         return;
                     }
-                }
                 self.entries.push(ChatEntry { kind: EntryKind::ToolStream, text: display });
                 self.scroll_to_bottom();
             }
@@ -1067,7 +1066,7 @@ fn truncate(s: &str, max: usize) -> String {
         // Truncate at a char boundary
         let end = s.char_indices()
             .map(|(i, _)| i)
-            .take_while(|&i| i <= max - 1)
+            .take_while(|&i| i < max)
             .last()
             .unwrap_or(0);
         format!("{}…", &s[..end])

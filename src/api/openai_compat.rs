@@ -447,19 +447,17 @@ pub(crate) async fn parse_oai_stream(
             let delta = choice.delta;
 
             // Text delta
-            if let Some(text) = delta.content {
-                if !text.is_empty() {
+            if let Some(text) = delta.content
+                && !text.is_empty() {
                     on_text(&text);
                     text_buf.push_str(&text);
                 }
-            }
 
             // DeepSeek R1 / QwQ reasoning content → Thinking block
-            if let Some(reasoning) = delta.reasoning_content {
-                if !reasoning.is_empty() {
+            if let Some(reasoning) = delta.reasoning_content
+                && !reasoning.is_empty() {
                     thinking_buf.push_str(&reasoning);
                 }
-            }
 
             // Tool call deltas
             if let Some(tc_deltas) = delta.tool_calls {

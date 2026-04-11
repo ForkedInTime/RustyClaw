@@ -428,7 +428,7 @@ fn load_dotenv(path: &std::path::Path) {
             let key = key.trim();
             let val = val.trim().trim_matches('"').trim_matches('\'');
             if !key.is_empty()
-                && SAFE_ENV_KEYS.iter().any(|&k| k == key)
+                && SAFE_ENV_KEYS.contains(&key)
                 && std::env::var(key).is_err()
             {
                 // SAFETY: single-threaded at this point — called before tokio runtime starts
@@ -783,9 +783,9 @@ async fn main() -> Result<()> {
             for line in stdin.lock().lines() {
                 let line = line.unwrap_or_default();
                 if line.is_empty() { continue; }
-                if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
-                    if event.get("type").and_then(|v| v.as_str()) == Some("user") {
-                        if let Some(text) = event
+                if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line)
+                    && event.get("type").and_then(|v| v.as_str()) == Some("user")
+                        && let Some(text) = event
                             .get("message")
                             .and_then(|m| m.get("content"))
                             .and_then(|c| c.as_array())
@@ -795,8 +795,6 @@ async fn main() -> Result<()> {
                         {
                             result = text.to_string();
                         }
-                    }
-                }
             }
             if result.is_empty() && !cli.prompt.is_empty() {
                 cli.prompt.join(" ")
@@ -1131,12 +1129,11 @@ fn mcp_remove_server(name: &str, scope: Option<&str>, config: &Config) -> Result
         let content = std::fs::read_to_string(path)?;
         let mut json: serde_json::Value = serde_json::from_str(&content)
             .unwrap_or(serde_json::json!({}));
-        if let Some(servers) = json.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
-            if servers.remove(name).is_some() {
+        if let Some(servers) = json.get_mut("mcpServers").and_then(|v| v.as_object_mut())
+            && servers.remove(name).is_some() {
                 std::fs::write(path, serde_json::to_string_pretty(&json)?)?;
                 removed = true;
             }
-        }
     }
     Ok(removed)
 }

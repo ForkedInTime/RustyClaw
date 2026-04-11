@@ -42,11 +42,10 @@ pub async fn load_skills() -> HashMap<String, Skill> {
     if let Ok(mut entries) = fs::read_dir(&skills_dir).await {
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("md") {
-                if let Ok(skill) = load_skill_file(&path).await {
+            if path.extension().and_then(|e| e.to_str()) == Some("md")
+                && let Ok(skill) = load_skill_file(&path).await {
                     skills.insert(skill.name.clone(), skill);
                 }
-            }
         }
     }
 

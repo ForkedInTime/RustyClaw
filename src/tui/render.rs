@@ -8,11 +8,11 @@
 ///   │  ~/cwd                    │  ◆ session entries…               │
 ///   ─────────────────────────────────────────────────────────────────
 ///   > _
-///   ? for shortcuts                ⠋ Thinking…  [Esc]       ● sonnet-4-6
+/// > ? for shortcuts                ⠋ Thinking…  [Esc]       ● sonnet-4-6
 ///
 /// Chat mode (banner gone, just messages):
 ///   > user message
-///   ● assistant response
+/// > ● assistant response
 ///   > _
 
 use crate::tui::app::{App, EntryKind};
@@ -102,7 +102,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         .split('\n')
         .map(|line| {
             let n = line.chars().count();
-            ((n + usable_w - 1) / usable_w).max(1) as u16
+            n.div_ceil(usable_w).max(1) as u16
         })
         .sum();
     let input_height = visual_lines.min(8).max(1);
@@ -264,7 +264,7 @@ fn draw_banner_right(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
     )));
     lines.push(Line::raw(""));
 
-    let divider: String = std::iter::repeat('─').take(max_w).collect();
+    let divider: String = std::iter::repeat_n('─', max_w).collect();
     lines.push(Line::from(Span::styled(
         format!(" {divider}"),
         Style::default().fg(tc.accent),
@@ -921,8 +921,8 @@ fn draw_overlay(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
         .skip(skip)
         .take(visible)
         .cloned()
-        .enumerate()
-        .map(|(_i, mut line)| {
+        
+        .map(|mut line| {
             // Check if this rendered line starts with a list number matching the selected item
             if selected_1based > 0 {
                 let raw: String = line.spans.iter().map(|s| s.content.as_ref()).collect();

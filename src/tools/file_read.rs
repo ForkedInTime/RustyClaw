@@ -89,8 +89,8 @@ impl Tool for FileReadTool {
         // path, emit a compact notice instead of re-sending the whole file.
         // Only applies when no offset/limit is requested (partial reads always
         // return their slice).
-        if input.offset.is_none() && input.limit.is_none() {
-            if let Some(cache) = &ctx.read_cache {
+        if input.offset.is_none() && input.limit.is_none()
+            && let Some(cache) = &ctx.read_cache {
                 let mut hasher = std::collections::hash_map::DefaultHasher::new();
                 content.hash(&mut hasher);
                 let hash = hasher.finish();
@@ -103,7 +103,6 @@ impl Tool for FileReadTool {
                 }
                 guard.insert(path.clone(), hash);
             }
-        }
 
         let lines: Vec<&str> = content.lines().collect();
         let total_lines = lines.len();

@@ -231,13 +231,12 @@ fn tokenize_line(line: &str, lang: &str) -> Vec<Span<'static>> {
             spans.push(Span::styled(rest, SYN_COMMENT));
             return spans;
         }
-        if let Some(lc2) = line_comment2 {
-            if starts_with_at(&chars, i, lc2) {
+        if let Some(lc2) = line_comment2
+            && starts_with_at(&chars, i, lc2) {
                 let rest: String = chars[i..].iter().collect();
                 spans.push(Span::styled(rest, SYN_COMMENT));
                 return spans;
             }
-        }
 
         // ── String literal (double-quoted) ────────────────────────────────────
         if chars[i] == '"' {
@@ -254,15 +253,14 @@ fn tokenize_line(line: &str, lang: &str) -> Vec<Span<'static>> {
             continue;
         }
         // Rust-style char/lifetime: 'a' or 'static — just treat as string if it looks like 'x'
-        if chars[i] == '\'' && matches!(lang, "rust" | "rs") {
-            if i + 2 < len && chars[i + 2] == '\'' {
+        if chars[i] == '\'' && matches!(lang, "rust" | "rs")
+            && i + 2 < len && chars[i + 2] == '\'' {
                 // char literal: 'x'
                 let s: String = chars[i..=(i + 2)].iter().collect();
                 spans.push(Span::styled(s, SYN_STR));
                 i += 3;
                 continue;
             }
-        }
 
         // ── Template literal (JS/TS) ──────────────────────────────────────────
         if chars[i] == '`' && matches!(lang, "javascript" | "js" | "typescript" | "ts" | "jsx" | "tsx") {
@@ -316,7 +314,7 @@ fn tokenize_line(line: &str, lang: &str) -> Vec<Span<'static>> {
             && !chars[i].is_ascii_digit()
             && !(
                 !line_comment.is_empty() && starts_with_at(&chars, i, line_comment)
-                || line_comment2.map_or(false, |lc| starts_with_at(&chars, i, lc))
+                || line_comment2.is_some_and(|lc| starts_with_at(&chars, i, lc))
             )
         {
             buf.push(chars[i]);
@@ -660,8 +658,8 @@ fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
             let start = i + 1;
             if let Some(close) = chars[start..].iter().position(|&c| c == ']') {
                 let after_bracket = start + close + 1;
-                if after_bracket < len && chars[after_bracket] == '(' {
-                    if let Some(close_paren) =
+                if after_bracket < len && chars[after_bracket] == '('
+                    && let Some(close_paren) =
                         chars[after_bracket + 1..].iter().position(|&c| c == ')')
                     {
                         flush(&mut current, &mut spans, base);
@@ -673,7 +671,6 @@ fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
                         i = after_bracket + 1 + close_paren + 1;
                         continue;
                     }
-                }
             }
         }
 

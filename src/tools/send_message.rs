@@ -111,11 +111,10 @@ impl Tool for SendMessageTool {
         };
 
         // Validate string messages need a summary
-        if message.is_string() && to != "*" {
-            if summary.map(|s| s.trim().is_empty()).unwrap_or(true) {
+        if message.is_string() && to != "*"
+            && summary.map(|s| s.trim().is_empty()).unwrap_or(true) {
                 return Ok(ToolOutput::error("summary is required when message is a string"));
             }
-        }
 
         // Broadcast: send to all members of the team file
         if to == "*" {

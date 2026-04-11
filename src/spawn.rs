@@ -103,7 +103,7 @@ pub async fn spawn_agent(
     .trim()
     .to_string();
 
-    let repo_name = git_root.split('/').last().unwrap_or("repo");
+    let repo_name = git_root.split('/').next_back().unwrap_or("repo");
     let worktree_path = PathBuf::from(&git_root)
         .parent()
         .unwrap_or(std::path::Path::new("/tmp"))
@@ -209,25 +209,23 @@ pub async fn spawn_agent(
 
         match result {
             Ok(summary) => {
-                if let Ok(mut reg) = reg.lock() {
-                    if let Some(agent) = reg.get_mut(&agent_id) {
+                if let Ok(mut reg) = reg.lock()
+                    && let Some(agent) = reg.get_mut(&agent_id) {
                         agent.status = SpawnStatus::Completed;
                         agent.summary = Some(summary.clone());
                         agent.diff = Some(diff);
                     }
-                }
                 let _ = event_tx.send(AppEvent::SystemMessage(format!(
                     "🏁 Agent [{agent_id}] completed: {desc}\n{stat}\nUse /review {agent_id} to inspect changes, /merge {agent_id} to apply them.",
                 )));
             }
             Err(e) => {
                 let err_msg = format!("{e:#}");
-                if let Ok(mut reg) = reg.lock() {
-                    if let Some(agent) = reg.get_mut(&agent_id) {
+                if let Ok(mut reg) = reg.lock()
+                    && let Some(agent) = reg.get_mut(&agent_id) {
                         agent.status = SpawnStatus::Failed;
                         agent.error = Some(err_msg.clone());
                     }
-                }
                 let _ = event_tx.send(AppEvent::SystemMessage(format!(
                     "❌ Agent [{agent_id}] failed: {desc}\n{err_msg}",
                 )));

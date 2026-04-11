@@ -259,7 +259,7 @@ pub fn check_sensitive_path(path: &std::path::Path, op: SensitiveOp) -> Option<T
     let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
     // Private-key material — blocked in both modes.
-    if PRIVATE_KEY_NAMES.iter().any(|n| *n == file_name) {
+    if PRIVATE_KEY_NAMES.contains(&file_name) {
         return Some(ToolOutput::error(format!(
             "Refusing to {} private-key file '{}'. This path is on the hard deny-list.",
             match op { SensitiveOp::Read => "read", SensitiveOp::Write => "modify" },
@@ -291,7 +291,7 @@ pub fn check_sensitive_path(path: &std::path::Path, op: SensitiveOp) -> Option<T
     }
 
     // Well-known credential files.
-    if SECRET_WRITE_BLOCK_NAMES.iter().any(|n| *n == file_name) {
+    if SECRET_WRITE_BLOCK_NAMES.contains(&file_name) {
         return Some(ToolOutput::error(format!(
             "Refusing to modify credential file '{}'. This path is on the hard deny-list.",
             file_name
@@ -310,6 +310,159 @@ pub fn check_sensitive_path(path: &std::path::Path, op: SensitiveOp) -> Option<T
     }
 
     None
+}
+
+/// The core Tool trait — mirrors the Tool interface in Tool.ts
+#[async_trait]
+pub trait Tool: Send + Sync {
+    /// Unique tool name sent to the API
+    fn name(&self) -> &str;
+
+    /// Human-readable description sent to the API
+    fn description(&self) -> &str;
+
+    /// JSON Schema for the tool's input parameters
+    fn input_schema(&self) -> serde_json::Value;
+
+    /// Execute the tool with the given JSON input
+    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> Result<ToolOutput>;
+
+    /// Build the ToolDefinition to include in API requests
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: self.name().to_string(),
+            description: self.description().to_string(),
+            input_schema: self.input_schema(),
+            cache_control: None,
+        }
+    }
+}
+
+pub type DynTool = Arc<dyn Tool>;
+
+/// Build the default tool set.
+pub fn default_tools() -> Vec<DynTool> {
+    vec![
+        Arc::new(bash::BashTool),
+        Arc::new(file_read::FileReadTool),
+        Arc::new(file_write::FileWriteTool),
+        Arc::new(file_edit::FileEditTool),
+        Arc::new(multi_edit::MultiEditTool),
+        Arc::new(glob::GlobTool),
+        Arc::new(grep::GrepTool),
+        Arc::new(web_fetch::WebFetchTool),
+    ]
+}
+
+/// All shared state needed by tools that must also be readable by slash commands.
+pub struct SharedToolState {
+    pub todo: todo::TodoState,
+}
+
+/// Build the full tool set. Returns tools + shared state so slash commands can read it.
+pub fn all_tools_with_state(config: &crate::config::Config) -> (Vec<DynTool>, SharedToolState) {
+    let mut tools = default_tools();
+
+    tools.push(Arc::new(web_search::WebSearchTool {
+        api_key: config.api_key.clone(),
+        model: config.model.clone(),
+    }));
+    tools.push(Arc::new(agent::AgentTool {
+        config: config.clone(),
+    }));
+
+    // Task management tools (shared registry)
+    let registry = tasks::new_registry();
+    tools.push(Arc::new(tasks::TaskCreateTool { registry: registry.clone() }));
+    tools.push(Arc::new(tasks::TaskGetTool    { registry: registry.clone() }));
+    tools.push(Arc::new(tasks::TaskListTool   { registry: registry.clone() }));
+    tools.push(Arc::new(tasks::TaskUpdateTool { registry: registry.clone() }));
+    tools.push(Arc::new(tasks::TaskStopTool   { registry: registry.clone() }));
+    tools.push(Arc::new(tasks::TaskOutputTool { registry: registry.clone() }));
+
+    // Worktree tools (shared state)
+    let wt_state = worktree::WorktreeState::default();
+    tools.push(Arc::new(worktree::EnterWorktreeTool { state: wt_state.clone() }));
+    tools.push(Arc::new(worktree::ExitWorktreeTool  { state: wt_state }));
+
+    // TodoWrite — shared state readable by /tasks command
+    let todo_state = todo::new_todo_state();
+    tools.push(Arc::new(todo::TodoWriteTool { state: todo_state.clone() }));
+
+    // Interactive / meta tools
+    tools.push(Arc::new(ask_user::AskUserQuestionTool));
+    tools.push(Arc::new(plan_mode::EnterPlanModeTool));
+    tools.push(Arc::new(plan_mode::ExitPlanModeTool));
+    tools.push(Arc::new(memory::MemoryReadTool));
+    tools.push(Arc::new(memory::MemoryWriteTool));
+
+    // BriefTool — always-on in Rust (no build-time KAIROS flag system)
+    tools.push(Arc::new(brief_tool::BriefTool));
+
+    // Agent swarm tools — enabled when RUSTYCLAW_EXPERIMENTAL_AGENT_TEAMS=1
+    if send_message::is_agent_swarms_enabled() {
+        tools.push(Arc::new(send_message::SendMessageTool));
+        tools.push(Arc::new(team_tools::TeamCreateTool));
+        tools.push(Arc::new(team_tools::TeamDeleteTool));
+    }
+
+    // Simple utilities
+    tools.push(Arc::new(sleep::SleepTool));
+    tools.push(Arc::new(powershell::PowerShellTool));
+    tools.push(Arc::new(web_browser::WebBrowserTool));
+    tools.push(Arc::new(lsp::LSPTool));
+    tools.push(Arc::new(discover_skills::DiscoverSkillsTool));
+    tools.push(Arc::new(skill_tool::SkillTool));
+    tools.push(Arc::new(workflow::WorkflowTool));
+
+    // Notebook tools
+    tools.push(Arc::new(notebook::NotebookReadTool));
+    tools.push(Arc::new(notebook::NotebookEditTool));
+
+    // Config tool
+    tools.push(Arc::new(config_tool::ConfigTool { config: config.clone() }));
+
+    // Cron tools (shared store)
+    let cron_store: cron::CronStore = Arc::new(std::sync::Mutex::new(cron::load_jobs()));
+    tools.push(Arc::new(cron::CronCreateTool { store: cron_store.clone() }));
+    tools.push(Arc::new(cron::CronDeleteTool { store: cron_store.clone() }));
+    tools.push(Arc::new(cron::CronListTool   { store: cron_store }));
+
+    // ToolSearch — built last so it can include all tool names+descriptions
+    let snapshot: Vec<(String, String)> = tools.iter()
+        .map(|t| (t.name().to_string(), t.description().to_string()))
+        .collect();
+    tools.push(Arc::new(tool_search::ToolSearchTool { tools_snapshot: snapshot }));
+
+    let shared = SharedToolState { todo: todo_state };
+    (tools, shared)
+}
+
+/// Convenience wrapper for callers that don't need the shared state.
+pub fn all_tools(config: &crate::config::Config) -> Vec<DynTool> {
+    all_tools_with_state(config).0
+}
+
+/// Build tools + shared state, then append MCP dynamic tools and resource tools.
+pub fn all_tools_with_state_and_mcp(
+    config: &crate::config::Config,
+    mcp_tools: Vec<DynTool>,
+    mcp_clients: Vec<Arc<crate::mcp::client::McpClient>>,
+) -> (Vec<DynTool>, SharedToolState) {
+    let (mut tools, shared) = all_tools_with_state(config);
+    tools.extend(mcp_tools);
+
+    // MCP resource tools (need the client list)
+    if !mcp_clients.is_empty() {
+        tools.push(Arc::new(mcp_resources::ListMcpResourcesTool {
+            clients: mcp_clients.clone(),
+        }));
+        tools.push(Arc::new(mcp_resources::ReadMcpResourceTool {
+            clients: mcp_clients,
+        }));
+    }
+
+    (tools, shared)
 }
 
 #[cfg(test)]
@@ -547,157 +700,4 @@ mod sensitive_path_tests {
             "substring match must not block unrelated files"
         );
     }
-}
-
-/// The core Tool trait — mirrors the Tool interface in Tool.ts
-#[async_trait]
-pub trait Tool: Send + Sync {
-    /// Unique tool name sent to the API
-    fn name(&self) -> &str;
-
-    /// Human-readable description sent to the API
-    fn description(&self) -> &str;
-
-    /// JSON Schema for the tool's input parameters
-    fn input_schema(&self) -> serde_json::Value;
-
-    /// Execute the tool with the given JSON input
-    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> Result<ToolOutput>;
-
-    /// Build the ToolDefinition to include in API requests
-    fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
-            name: self.name().to_string(),
-            description: self.description().to_string(),
-            input_schema: self.input_schema(),
-            cache_control: None,
-        }
-    }
-}
-
-pub type DynTool = Arc<dyn Tool>;
-
-/// Build the default tool set.
-pub fn default_tools() -> Vec<DynTool> {
-    vec![
-        Arc::new(bash::BashTool),
-        Arc::new(file_read::FileReadTool),
-        Arc::new(file_write::FileWriteTool),
-        Arc::new(file_edit::FileEditTool),
-        Arc::new(multi_edit::MultiEditTool),
-        Arc::new(glob::GlobTool),
-        Arc::new(grep::GrepTool),
-        Arc::new(web_fetch::WebFetchTool),
-    ]
-}
-
-/// All shared state needed by tools that must also be readable by slash commands.
-pub struct SharedToolState {
-    pub todo: todo::TodoState,
-}
-
-/// Build the full tool set. Returns tools + shared state so slash commands can read it.
-pub fn all_tools_with_state(config: &crate::config::Config) -> (Vec<DynTool>, SharedToolState) {
-    let mut tools = default_tools();
-
-    tools.push(Arc::new(web_search::WebSearchTool {
-        api_key: config.api_key.clone(),
-        model: config.model.clone(),
-    }));
-    tools.push(Arc::new(agent::AgentTool {
-        config: config.clone(),
-    }));
-
-    // Task management tools (shared registry)
-    let registry = tasks::new_registry();
-    tools.push(Arc::new(tasks::TaskCreateTool { registry: registry.clone() }));
-    tools.push(Arc::new(tasks::TaskGetTool    { registry: registry.clone() }));
-    tools.push(Arc::new(tasks::TaskListTool   { registry: registry.clone() }));
-    tools.push(Arc::new(tasks::TaskUpdateTool { registry: registry.clone() }));
-    tools.push(Arc::new(tasks::TaskStopTool   { registry: registry.clone() }));
-    tools.push(Arc::new(tasks::TaskOutputTool { registry: registry.clone() }));
-
-    // Worktree tools (shared state)
-    let wt_state = worktree::WorktreeState::default();
-    tools.push(Arc::new(worktree::EnterWorktreeTool { state: wt_state.clone() }));
-    tools.push(Arc::new(worktree::ExitWorktreeTool  { state: wt_state }));
-
-    // TodoWrite — shared state readable by /tasks command
-    let todo_state = todo::new_todo_state();
-    tools.push(Arc::new(todo::TodoWriteTool { state: todo_state.clone() }));
-
-    // Interactive / meta tools
-    tools.push(Arc::new(ask_user::AskUserQuestionTool));
-    tools.push(Arc::new(plan_mode::EnterPlanModeTool));
-    tools.push(Arc::new(plan_mode::ExitPlanModeTool));
-    tools.push(Arc::new(memory::MemoryReadTool));
-    tools.push(Arc::new(memory::MemoryWriteTool));
-
-    // BriefTool — always-on in Rust (no build-time KAIROS flag system)
-    tools.push(Arc::new(brief_tool::BriefTool));
-
-    // Agent swarm tools — enabled when RUSTYCLAW_EXPERIMENTAL_AGENT_TEAMS=1
-    if send_message::is_agent_swarms_enabled() {
-        tools.push(Arc::new(send_message::SendMessageTool));
-        tools.push(Arc::new(team_tools::TeamCreateTool));
-        tools.push(Arc::new(team_tools::TeamDeleteTool));
-    }
-
-    // Simple utilities
-    tools.push(Arc::new(sleep::SleepTool));
-    tools.push(Arc::new(powershell::PowerShellTool));
-    tools.push(Arc::new(web_browser::WebBrowserTool));
-    tools.push(Arc::new(lsp::LSPTool));
-    tools.push(Arc::new(discover_skills::DiscoverSkillsTool));
-    tools.push(Arc::new(skill_tool::SkillTool));
-    tools.push(Arc::new(workflow::WorkflowTool));
-
-    // Notebook tools
-    tools.push(Arc::new(notebook::NotebookReadTool));
-    tools.push(Arc::new(notebook::NotebookEditTool));
-
-    // Config tool
-    tools.push(Arc::new(config_tool::ConfigTool { config: config.clone() }));
-
-    // Cron tools (shared store)
-    let cron_store: cron::CronStore = Arc::new(std::sync::Mutex::new(cron::load_jobs()));
-    tools.push(Arc::new(cron::CronCreateTool { store: cron_store.clone() }));
-    tools.push(Arc::new(cron::CronDeleteTool { store: cron_store.clone() }));
-    tools.push(Arc::new(cron::CronListTool   { store: cron_store }));
-
-    // ToolSearch — built last so it can include all tool names+descriptions
-    let snapshot: Vec<(String, String)> = tools.iter()
-        .map(|t| (t.name().to_string(), t.description().to_string()))
-        .collect();
-    tools.push(Arc::new(tool_search::ToolSearchTool { tools_snapshot: snapshot }));
-
-    let shared = SharedToolState { todo: todo_state };
-    (tools, shared)
-}
-
-/// Convenience wrapper for callers that don't need the shared state.
-pub fn all_tools(config: &crate::config::Config) -> Vec<DynTool> {
-    all_tools_with_state(config).0
-}
-
-/// Build tools + shared state, then append MCP dynamic tools and resource tools.
-pub fn all_tools_with_state_and_mcp(
-    config: &crate::config::Config,
-    mcp_tools: Vec<DynTool>,
-    mcp_clients: Vec<Arc<crate::mcp::client::McpClient>>,
-) -> (Vec<DynTool>, SharedToolState) {
-    let (mut tools, shared) = all_tools_with_state(config);
-    tools.extend(mcp_tools);
-
-    // MCP resource tools (need the client list)
-    if !mcp_clients.is_empty() {
-        tools.push(Arc::new(mcp_resources::ListMcpResourcesTool {
-            clients: mcp_clients.clone(),
-        }));
-        tools.push(Arc::new(mcp_resources::ReadMcpResourceTool {
-            clients: mcp_clients,
-        }));
-    }
-
-    (tools, shared)
 }

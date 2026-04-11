@@ -140,8 +140,8 @@ impl Tool for LSPTool {
         let uri = path_to_uri(&file_path);
 
         // Open the document so the server can process it
-        if file_path.exists() {
-            if let Ok(content) = tokio::fs::read_to_string(&file_path).await {
+        if file_path.exists()
+            && let Ok(content) = tokio::fs::read_to_string(&file_path).await {
                 let lang_id = lang_id_for_ext(file_path.extension().and_then(|e| e.to_str()));
                 client.notify("textDocument/didOpen", json!({
                     "textDocument": {
@@ -154,7 +154,6 @@ impl Tool for LSPTool {
                 // Small delay to let server process the document
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             }
-        }
 
         let position = json!({
             "line": input.line.unwrap_or(0),
@@ -451,7 +450,8 @@ fn format_lsp_result(operation: &str, result: &Value) -> String {
     match operation {
         "hover" => {
             // { contents: { kind, value } | string | [strings] }
-            let text = result
+            
+            result
                 .get("contents")
                 .and_then(|c| {
                     if let Some(s) = c.as_str() { return Some(s.to_string()); }
@@ -460,8 +460,7 @@ fn format_lsp_result(operation: &str, result: &Value) -> String {
                     }
                     None
                 })
-                .unwrap_or_else(|| result.to_string());
-            text
+                .unwrap_or_else(|| result.to_string())
         }
         "documentSymbol" | "workspaceSymbol" => {
             if let Some(arr) = result.as_array() {

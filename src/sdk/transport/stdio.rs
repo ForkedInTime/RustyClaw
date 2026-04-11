@@ -19,6 +19,12 @@ pub struct StdioTransport {
     writer: Mutex<tokio::io::Stdout>,
 }
 
+impl Default for StdioTransport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StdioTransport {
     pub fn new() -> Self {
         Self {

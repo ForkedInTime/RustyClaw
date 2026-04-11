@@ -562,15 +562,14 @@ impl Config {
         }
 
         // Resolve output style: load name from settings, look up prompt
-        if let Some(ref style_name) = settings.output_style {
-            if style_name != "default" {
+        if let Some(ref style_name) = settings.output_style
+            && style_name != "default" {
                 let styles = Self::load_output_styles(&cfg.cwd);
                 if let Some(def) = styles.iter().find(|s| s.name.eq_ignore_ascii_case(style_name)) {
                     cfg.output_style = Some(def.name.clone());
                     cfg.output_style_prompt = Some(def.prompt.clone());
                 }
             }
-        }
 
         // ── CLAUDE.md + AGENTS.md files (global + project hierarchy) — skipped in bare mode
         if !cfg.bare_mode {
@@ -588,9 +587,9 @@ impl Config {
         cfg.api_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
 
         // ── ANTHROPIC_API_KEY_FILE_DESCRIPTOR: read API key from an open fd
-        if cfg.api_key.is_empty() {
-            if let Ok(fd_str) = std::env::var("RUSTYCLAW_API_KEY_FILE_DESCRIPTOR") {
-                if let Ok(fd) = fd_str.parse::<i32>() {
+        if cfg.api_key.is_empty()
+            && let Ok(fd_str) = std::env::var("RUSTYCLAW_API_KEY_FILE_DESCRIPTOR")
+                && let Ok(fd) = fd_str.parse::<i32>() {
                     use std::os::unix::io::FromRawFd;
                     use std::io::Read;
                     let mut f = unsafe { std::fs::File::from_raw_fd(fd) };
@@ -600,12 +599,10 @@ impl Config {
                     }
                     std::mem::forget(f); // don't close the fd
                 }
-            }
-        }
 
         // ── apiKeyHelper: run a shell command to get the API key
-        if cfg.api_key.is_empty() {
-            if let Some(ref helper_cmd) = cfg.api_key_helper.clone() {
+        if cfg.api_key.is_empty()
+            && let Some(ref helper_cmd) = cfg.api_key_helper.clone() {
                 match std::process::Command::new("sh")
                     .arg("-c")
                     .arg(helper_cmd)
@@ -626,7 +623,6 @@ impl Config {
                     }
                 }
             }
-        }
 
         // ── Optional env var overrides (env wins over settings files)
         if let Ok(model) = std::env::var("ANTHROPIC_MODEL") {
@@ -882,13 +878,12 @@ impl Config {
         if let Ok(entries) = std::fs::read_dir(&user_dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if p.extension().and_then(|e| e.to_str()) == Some("md") {
-                    if let Some(def) = OutputStyleDef::from_markdown_file(&p) {
+                if p.extension().and_then(|e| e.to_str()) == Some("md")
+                    && let Some(def) = OutputStyleDef::from_markdown_file(&p) {
                         // project styles override user styles with the same name
                         styles.retain(|s| !s.name.eq_ignore_ascii_case(&def.name));
                         styles.push(def);
                     }
-                }
             }
         }
 
@@ -897,12 +892,11 @@ impl Config {
         if let Ok(entries) = std::fs::read_dir(&project_dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if p.extension().and_then(|e| e.to_str()) == Some("md") {
-                    if let Some(def) = OutputStyleDef::from_markdown_file(&p) {
+                if p.extension().and_then(|e| e.to_str()) == Some("md")
+                    && let Some(def) = OutputStyleDef::from_markdown_file(&p) {
                         styles.retain(|s| !s.name.eq_ignore_ascii_case(&def.name));
                         styles.push(def);
                     }
-                }
             }
         }
 
@@ -1188,11 +1182,10 @@ Use the `gh` CLI for all GitHub-related tasks. When creating a PR:
         };
 
         // append_system_prompt is added after everything else
-        if let Some(ref append) = self.append_system_prompt {
-            if !append.is_empty() {
+        if let Some(ref append) = self.append_system_prompt
+            && !append.is_empty() {
                 return format!("{base}\n\n{append}");
             }
-        }
 
         base
     }
