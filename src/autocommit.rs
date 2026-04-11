@@ -437,6 +437,27 @@ pub fn prune_old_refs(cwd: &Path, keep: u32) -> anyhow::Result<u32> {
     Ok(deleted)
 }
 
+/// Variant of `snapshot_turn` that takes the message-prefix as a plain string
+/// instead of `&AutoCommitConfig`, avoiding cross-crate type-identity issues
+/// when the bin crate's TUI event loop calls into the lib.  The caller is
+/// responsible for checking `enabled` and `keep_sessions` before dispatching.
+pub fn snapshot_turn_raw(
+    cwd: &Path,
+    message_prefix: &str,
+    session_id: &str,
+    user_prompt: &str,
+    turn_index: u32,
+    auto_commits: &mut Vec<String>,
+    undo_position: &mut usize,
+) -> anyhow::Result<SnapshotOutcome> {
+    let config = AutoCommitConfig {
+        enabled: true,
+        keep_sessions: DEFAULT_KEEP_SESSIONS,
+        message_prefix: message_prefix.to_string(),
+    };
+    snapshot_turn(cwd, &config, session_id, user_prompt, turn_index, auto_commits, undo_position)
+}
+
 #[cfg(test)]
 mod git_detection_tests {
     use super::*;

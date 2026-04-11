@@ -542,6 +542,13 @@ async fn run_loop(
         }
     }
 
+    // Prune old auto-commit shadow refs (keeps the configured number of newest sessions).
+    if let Err(e) =
+        rustyclaw::autocommit::prune_old_refs(&config.cwd, config.auto_commit.keep_sessions)
+    {
+        tracing::warn!("autoCommit startup prune failed: {e}");
+    }
+
     // Pre-load recent sessions for the welcome screen — exclude the current session
     // so it doesn't appear in the list AND in the title bar at the same time.
     if let Ok(list) = Session::list().await {
@@ -909,6 +916,51 @@ async fn run_loop(
                                 }
                             }
                             app.apply(AppEvent::Done { tokens_in, tokens_out, cache_read, cache_write, messages: new_messages, model_used });
+
+                            // Auto-commit: snapshot the working tree for this turn.
+                            if config.auto_commit.enabled {
+                                let turn_index = (session.meta.auto_commits.len() as u32) + 1;
+                                let prompt = app
+                                    .entries
+                                    .iter()
+                                    .rev()
+                                    .find_map(|e| {
+                                        if matches!(e.kind, crate::tui::app::EntryKind::User) {
+                                            Some(e.text.clone())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .unwrap_or_default();
+                                match rustyclaw::autocommit::snapshot_turn_raw(
+                                    &config.cwd,
+                                    &config.auto_commit.message_prefix,
+                                    &session.id,
+                                    &prompt,
+                                    turn_index,
+                                    &mut session.meta.auto_commits,
+                                    &mut session.meta.undo_position,
+                                ) {
+                                    Ok(rustyclaw::autocommit::SnapshotOutcome::Committed { sha, files }) => {
+                                        tracing::info!(
+                                            "autoCommit: turn {turn_index} committed ({files} files, sha={})",
+                                            &sha[..7.min(sha.len())]
+                                        );
+                                        if let Err(e) = session.save_meta().await {
+                                            tracing::warn!("autoCommit: failed to save meta after snapshot: {e}");
+                                        }
+                                    }
+                                    Ok(rustyclaw::autocommit::SnapshotOutcome::NoChanges) => {
+                                        tracing::debug!("autoCommit: turn {turn_index} had no file changes");
+                                    }
+                                    Ok(rustyclaw::autocommit::SnapshotOutcome::Disabled { reason }) => {
+                                        tracing::debug!("autoCommit: disabled ({reason})");
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("autoCommit: snapshot failed: {e}");
+                                    }
+                                }
+                            }
                         }
                         AppEvent::Compacted { ref replacement, summary_len } => {
                             consecutive_compact_count = 0; // successful compact resets thrash counter
@@ -1147,13 +1199,69 @@ async fn handle_key(
             }
             KeyCode::Esc | KeyCode::Char('q') => {
                 app.overlay = None;
+                app.pending_undo_positions = None;
+                app.pending_redo_positions = None;
             }
             KeyCode::Enter if is_interactive => {
                 let title = app.overlay.as_ref().map(|o| o.title.clone()).unwrap_or_default();
+                let selected_index = app.overlay.as_ref().map(|o| o.selected).unwrap_or(0);
                 let selected_val = app.overlay.as_ref()
                     .and_then(|o| o.selectable_ids.get(o.selected).cloned());
                 app.overlay = None;
-                if let Some(val) = selected_val {
+                if title == "undo" {
+                    let positions = app.pending_undo_positions.take();
+                    let target_pos = positions.as_ref().and_then(|p| p.get(selected_index)).copied();
+                    if let Some(target_pos) = target_pos.filter(|&p| p != session.meta.undo_position) {
+                        match rustyclaw::autocommit::restore_to(
+                            &config.cwd,
+                            &session.meta.auto_commits,
+                            target_pos,
+                        ) {
+                            Ok(report) => {
+                                session.meta.undo_position = target_pos;
+                                let _ = session.save_meta().await;
+                                let label = if target_pos == 0 {
+                                    "session base".to_string()
+                                } else {
+                                    format!("turn {target_pos}")
+                                };
+                                app.entries.push(ChatEntry::system(format!(
+                                    "[undo] rewound to {label} ({} files restored)",
+                                    report.files_restored
+                                )));
+                            }
+                            Err(e) => {
+                                app.entries.push(ChatEntry::system(format!(
+                                    "[undo] restore failed: {e}"
+                                )));
+                            }
+                        }
+                    }
+                } else if title == "redo" {
+                    let positions = app.pending_redo_positions.take();
+                    let target_pos = positions.as_ref().and_then(|p| p.get(selected_index)).copied();
+                    if let Some(target_pos) = target_pos.filter(|&p| p != session.meta.undo_position) {
+                        match rustyclaw::autocommit::restore_to(
+                            &config.cwd,
+                            &session.meta.auto_commits,
+                            target_pos,
+                        ) {
+                            Ok(report) => {
+                                session.meta.undo_position = target_pos;
+                                let _ = session.save_meta().await;
+                                app.entries.push(ChatEntry::system(format!(
+                                    "[redo] advanced to turn {target_pos} ({} files restored)",
+                                    report.files_restored
+                                )));
+                            }
+                            Err(e) => {
+                                app.entries.push(ChatEntry::system(format!(
+                                    "[redo] restore failed: {e}"
+                                )));
+                            }
+                        }
+                    }
+                } else if let Some(val) = selected_val {
                     if title == "models" {
                         app.pending_model = Some(val);
                     } else if title == "help" {
@@ -3063,11 +3171,179 @@ async fn handle_key(
                         });
                         app.entries.push(ChatEntry::system(format!("Discarding agent [{id}]...")));
                     }
-                    CommandAction::Undo { .. } | CommandAction::Redo { .. } | CommandAction::AutoCommitStatus => {
-                        // Task 9 wires these up. For now, inform the user.
-                        app.entries.push(ChatEntry::system(
-                            "auto-commit commands not yet wired (Task 9)".to_string()
-                        ));
+                    CommandAction::Undo { n } => {
+                        if app.is_loading {
+                            app.entries.push(ChatEntry::system(
+                                "[undo] cannot undo while an assistant turn is running",
+                            ));
+                        } else if !config.auto_commit.enabled {
+                            app.entries.push(ChatEntry::system(
+                                "[undo] auto-commit is disabled in settings",
+                            ));
+                        } else if !rustyclaw::autocommit::is_git_repo(&config.cwd) {
+                            app.entries.push(ChatEntry::system(
+                                "[undo] auto-commit disabled — not a git repo",
+                            ));
+                        } else if session.meta.auto_commits.is_empty() {
+                            app.entries.push(ChatEntry::system(
+                                "[undo] nothing to undo (session has no auto-commits)",
+                            ));
+                        } else if session.meta.undo_position == 0 {
+                            app.entries.push(ChatEntry::system(
+                                "[undo] at session start, nothing more to undo",
+                            ));
+                        } else {
+                            match n {
+                                Some(k) => {
+                                    let new_pos = session
+                                        .meta
+                                        .undo_position
+                                        .saturating_sub(k as usize);
+                                    match rustyclaw::autocommit::restore_to(
+                                        &config.cwd,
+                                        &session.meta.auto_commits,
+                                        new_pos,
+                                    ) {
+                                        Ok(report) => {
+                                            session.meta.undo_position = new_pos;
+                                            let _ = session.save_meta().await;
+                                            let label = if new_pos == 0 {
+                                                "session base".to_string()
+                                            } else {
+                                                format!("turn {new_pos}")
+                                            };
+                                            app.entries.push(ChatEntry::system(format!(
+                                                "[undo] rewound to {label} ({} files restored)",
+                                                report.files_restored
+                                            )));
+                                        }
+                                        Err(e) => {
+                                            app.entries.push(ChatEntry::system(format!(
+                                                "[undo] restore failed: {e}"
+                                            )));
+                                        }
+                                    }
+                                }
+                                None => {
+                                    let mut labels: Vec<String> = Vec::new();
+                                    let mut positions: Vec<usize> = Vec::new();
+                                    let cur = session.meta.undo_position;
+                                    for i in (0..cur).rev() {
+                                        let target_pos = i + 1;
+                                        let marker = if target_pos == cur { " ← current" } else { "" };
+                                        labels.push(format!(
+                                            "turn {target_pos}  ·  {}{marker}",
+                                            session.meta.auto_commits[i].chars().take(7).collect::<String>()
+                                        ));
+                                        positions.push(target_pos);
+                                    }
+                                    labels.push("session base (pre-session)".to_string());
+                                    positions.push(0);
+                                    app.overlay = Some(crate::tui::app::Overlay::with_items(
+                                        "undo".to_string(),
+                                        String::new(),
+                                        labels,
+                                    ));
+                                    app.pending_undo_positions = Some(positions);
+                                }
+                            }
+                        }
+                    }
+                    CommandAction::Redo { n } => {
+                        if app.is_loading {
+                            app.entries.push(ChatEntry::system(
+                                "[redo] cannot redo while an assistant turn is running",
+                            ));
+                        } else if !config.auto_commit.enabled {
+                            app.entries.push(ChatEntry::system(
+                                "[redo] auto-commit is disabled in settings",
+                            ));
+                        } else if !rustyclaw::autocommit::is_git_repo(&config.cwd) {
+                            app.entries.push(ChatEntry::system(
+                                "[redo] auto-commit disabled — not a git repo",
+                            ));
+                        } else if session.meta.undo_position == session.meta.auto_commits.len() {
+                            app.entries.push(ChatEntry::system(
+                                "[redo] nothing to redo (at latest turn)",
+                            ));
+                        } else {
+                            match n {
+                                Some(k) => {
+                                    let new_pos = (session.meta.undo_position + k as usize)
+                                        .min(session.meta.auto_commits.len());
+                                    match rustyclaw::autocommit::restore_to(
+                                        &config.cwd,
+                                        &session.meta.auto_commits,
+                                        new_pos,
+                                    ) {
+                                        Ok(report) => {
+                                            session.meta.undo_position = new_pos;
+                                            let _ = session.save_meta().await;
+                                            app.entries.push(ChatEntry::system(format!(
+                                                "[redo] advanced to turn {new_pos} ({} files restored)",
+                                                report.files_restored
+                                            )));
+                                        }
+                                        Err(e) => {
+                                            app.entries.push(ChatEntry::system(format!(
+                                                "[redo] restore failed: {e}"
+                                            )));
+                                        }
+                                    }
+                                }
+                                None => {
+                                    let mut labels: Vec<String> = Vec::new();
+                                    let mut positions: Vec<usize> = Vec::new();
+                                    let cur = session.meta.undo_position;
+                                    let cur_label = if cur == 0 {
+                                        "session base (pre-session) ← current".to_string()
+                                    } else {
+                                        format!(
+                                            "turn {cur}  ·  {} ← current",
+                                            session.meta.auto_commits[cur - 1].chars().take(7).collect::<String>()
+                                        )
+                                    };
+                                    labels.push(cur_label);
+                                    positions.push(cur);
+                                    for i in cur..session.meta.auto_commits.len() {
+                                        labels.push(format!(
+                                            "turn {}  ·  {}",
+                                            i + 1,
+                                            session.meta.auto_commits[i].chars().take(7).collect::<String>()
+                                        ));
+                                        positions.push(i + 1);
+                                    }
+                                    app.overlay = Some(crate::tui::app::Overlay::with_items(
+                                        "redo".to_string(),
+                                        String::new(),
+                                        labels,
+                                    ));
+                                    app.pending_redo_positions = Some(positions);
+                                }
+                            }
+                        }
+                    }
+                    CommandAction::AutoCommitStatus => {
+                        let cwd_ok = rustyclaw::autocommit::is_git_repo(&config.cwd);
+                        let msg = format!(
+                            "Auto-commit status:\n  \
+                             Enabled:        {}\n  \
+                             Repo:           {}\n  \
+                             Session ID:     {}\n  \
+                             Turns recorded: {}\n  \
+                             Undo position:  {} / {}\n  \
+                             Retention:      keep {} most recent sessions\n  \
+                             Message prefix: \"{}\"",
+                            if config.auto_commit.enabled { "yes" } else { "no" },
+                            if cwd_ok { "git detected (cwd)" } else { "not a git repo" },
+                            session.id,
+                            session.meta.auto_commits.len(),
+                            session.meta.undo_position,
+                            session.meta.auto_commits.len(),
+                            config.auto_commit.keep_sessions,
+                            config.auto_commit.message_prefix,
+                        );
+                        app.entries.push(ChatEntry::system(msg));
                     }
                     CommandAction::Unknown(name) => {
                         // Try skill expansion before giving up
