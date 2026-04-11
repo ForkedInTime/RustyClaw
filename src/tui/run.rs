@@ -3237,7 +3237,7 @@ async fn handle_key(
                                         ));
                                         positions.push(target_pos);
                                     }
-                                    labels.push("session base (pre-session)".to_string());
+                                    labels.push("session base (pre-RustyClaw)".to_string());
                                     positions.push(0);
                                     app.overlay = Some(crate::tui::app::Overlay::with_items(
                                         "undo".to_string(),
@@ -3296,7 +3296,7 @@ async fn handle_key(
                                     let mut positions: Vec<usize> = Vec::new();
                                     let cur = session.meta.undo_position;
                                     let cur_label = if cur == 0 {
-                                        "session base (pre-session) ← current".to_string()
+                                        "session base (pre-RustyClaw) ← current".to_string()
                                     } else {
                                         format!(
                                             "turn {cur}  ·  {} ← current",
