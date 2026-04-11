@@ -1219,7 +1219,9 @@ async fn handle_key(
                         ) {
                             Ok(report) => {
                                 session.meta.undo_position = target_pos;
-                                let _ = session.save_meta().await;
+                                if let Err(e) = session.save_meta().await {
+                                    tracing::warn!("[undo] failed to save meta: {e}");
+                                }
                                 let label = if target_pos == 0 {
                                     "session base".to_string()
                                 } else {
@@ -1248,7 +1250,9 @@ async fn handle_key(
                         ) {
                             Ok(report) => {
                                 session.meta.undo_position = target_pos;
-                                let _ = session.save_meta().await;
+                                if let Err(e) = session.save_meta().await {
+                                    tracing::warn!("[redo] failed to save meta: {e}");
+                                }
                                 app.entries.push(ChatEntry::system(format!(
                                     "[redo] advanced to turn {target_pos} ({} files restored)",
                                     report.files_restored
@@ -3206,7 +3210,9 @@ async fn handle_key(
                                     ) {
                                         Ok(report) => {
                                             session.meta.undo_position = new_pos;
-                                            let _ = session.save_meta().await;
+                                            if let Err(e) = session.save_meta().await {
+                                                tracing::warn!("[undo] failed to save meta: {e}");
+                                            }
                                             let label = if new_pos == 0 {
                                                 "session base".to_string()
                                             } else {
@@ -3278,7 +3284,9 @@ async fn handle_key(
                                     ) {
                                         Ok(report) => {
                                             session.meta.undo_position = new_pos;
-                                            let _ = session.save_meta().await;
+                                            if let Err(e) = session.save_meta().await {
+                                                tracing::warn!("[redo] failed to save meta: {e}");
+                                            }
                                             app.entries.push(ChatEntry::system(format!(
                                                 "[redo] advanced to turn {new_pos} ({} files restored)",
                                                 report.files_restored
