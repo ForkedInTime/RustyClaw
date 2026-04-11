@@ -30,7 +30,9 @@ pub struct Policy {
     pub approval_timeout_seconds: u64,
 }
 
-fn default_approval_timeout() -> u64 { 60 }
+fn default_approval_timeout() -> u64 {
+    60
+}
 
 /// Host capabilities — tells the agent what the environment supports.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -49,7 +51,9 @@ pub struct Capabilities {
     pub supports_images: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 impl Default for Capabilities {
     fn default() -> Self {
@@ -156,10 +160,7 @@ pub enum SdkRequest {
     },
 
     #[serde(rename = "session/export")]
-    SessionExport {
-        id: String,
-        session_id: String,
-    },
+    SessionExport { id: String, session_id: String },
 
     #[serde(rename = "turn/start")]
     TurnStart {
@@ -169,16 +170,10 @@ pub enum SdkRequest {
     },
 
     #[serde(rename = "turn/interrupt")]
-    TurnInterrupt {
-        id: String,
-        session_id: String,
-    },
+    TurnInterrupt { id: String, session_id: String },
 
     #[serde(rename = "tool/approve")]
-    ToolApprove {
-        id: String,
-        approval_id: String,
-    },
+    ToolApprove { id: String, approval_id: String },
 
     #[serde(rename = "tool/deny")]
     ToolDeny {
@@ -204,9 +199,7 @@ pub enum SdkRequest {
     },
 
     #[serde(rename = "health/check")]
-    HealthCheck {
-        id: String,
-    },
+    HealthCheck { id: String },
 }
 
 // ── Responses (RustyClaw → Host, correlated by ID) ──────────────────────────
@@ -232,16 +225,10 @@ pub enum SdkResponse {
     },
 
     #[serde(rename = "session/export")]
-    SessionExport {
-        id: String,
-        log: serde_json::Value,
-    },
+    SessionExport { id: String, log: serde_json::Value },
 
     #[serde(rename = "rag/search")]
-    RagSearchResult {
-        id: String,
-        results: Vec<RagResult>,
-    },
+    RagSearchResult { id: String, results: Vec<RagResult> },
 
     #[serde(rename = "cost/report")]
     CostReport {
@@ -278,16 +265,10 @@ pub enum SdkResponse {
 #[serde(tag = "type")]
 pub enum SdkNotification {
     #[serde(rename = "message/delta")]
-    MessageDelta {
-        session_id: String,
-        content: String,
-    },
+    MessageDelta { session_id: String, content: String },
 
     #[serde(rename = "thinking/delta")]
-    ThinkingDelta {
-        session_id: String,
-        content: String,
-    },
+    ThinkingDelta { session_id: String, content: String },
 
     #[serde(rename = "tool/started")]
     ToolStarted {

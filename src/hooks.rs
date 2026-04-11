@@ -18,7 +18,6 @@
 ///   0   — success (allow, continue)
 ///   2   — blocking error (block tool/continue, show stopReason or stdout)
 ///   other — non-blocking error (logged, execution continues)
-
 use crate::settings::{HookEntry, HooksConfig};
 use serde::Deserialize;
 
@@ -39,7 +38,10 @@ pub struct HookResult {
 
 impl HookResult {
     pub fn allow() -> Self {
-        Self { should_continue: true, ..Default::default() }
+        Self {
+            should_continue: true,
+            ..Default::default()
+        }
     }
 }
 
@@ -64,7 +66,9 @@ struct HookOutput {
     additional_context: Option<String>,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 /// Run all matching PreToolUse hooks. Returns a HookResult — if `should_continue` is false,
 /// the caller must block the tool call.
@@ -77,23 +81,35 @@ pub async fn run_pre_tool_hooks(
 ) -> HookResult {
     let mut result = HookResult::allow();
     for hook in &hooks.pre_tool_use {
-        if !hook.matches(tool_name) { continue; }
-        let r = execute_hook(hook, HookEnvVars {
-            event: "PreToolUse",
-            tool_name: Some(tool_name),
-            tool_input: Some(tool_input),
-            tool_result: None,
-            prompt: None,
-            session_id,
-            cwd,
-        }).await;
+        if !hook.matches(tool_name) {
+            continue;
+        }
+        let r = execute_hook(
+            hook,
+            HookEnvVars {
+                event: "PreToolUse",
+                tool_name: Some(tool_name),
+                tool_input: Some(tool_input),
+                tool_result: None,
+                prompt: None,
+                session_id,
+                cwd,
+            },
+        )
+        .await;
         if !r.should_continue {
             return r;
         }
         // Merge system messages / decisions
-        if r.system_message.is_some() { result.system_message = r.system_message; }
-        if r.decision.is_some() { result.decision = r.decision; }
-        if r.additional_context.is_some() { result.additional_context = r.additional_context; }
+        if r.system_message.is_some() {
+            result.system_message = r.system_message;
+        }
+        if r.decision.is_some() {
+            result.decision = r.decision;
+        }
+        if r.additional_context.is_some() {
+            result.additional_context = r.additional_context;
+        }
     }
     result
 }
@@ -107,16 +123,22 @@ pub async fn run_post_tool_hooks(
     cwd: &std::path::Path,
 ) {
     for hook in &hooks.post_tool_use {
-        if !hook.matches(tool_name) { continue; }
-        execute_hook(hook, HookEnvVars {
-            event: "PostToolUse",
-            tool_name: Some(tool_name),
-            tool_input: None,
-            tool_result: Some(tool_result),
-            prompt: None,
-            session_id,
-            cwd,
-        }).await;
+        if !hook.matches(tool_name) {
+            continue;
+        }
+        execute_hook(
+            hook,
+            HookEnvVars {
+                event: "PostToolUse",
+                tool_name: Some(tool_name),
+                tool_input: None,
+                tool_result: Some(tool_result),
+                prompt: None,
+                session_id,
+                cwd,
+            },
+        )
+        .await;
     }
 }
 
@@ -129,95 +151,103 @@ pub async fn run_user_prompt_hooks(
 ) -> Option<String> {
     let mut additional: Vec<String> = Vec::new();
     for hook in &hooks.user_prompt_submit {
-        let r = execute_hook(hook, HookEnvVars {
-            event: "UserPromptSubmit",
-            tool_name: None,
-            tool_input: None,
-            tool_result: None,
-            prompt: Some(prompt),
-            session_id,
-            cwd,
-        }).await;
+        let r = execute_hook(
+            hook,
+            HookEnvVars {
+                event: "UserPromptSubmit",
+                tool_name: None,
+                tool_input: None,
+                tool_result: None,
+                prompt: Some(prompt),
+                session_id,
+                cwd,
+            },
+        )
+        .await;
         if let Some(ctx) = r.additional_context {
             additional.push(ctx);
         }
     }
-    if additional.is_empty() { None } else { Some(additional.join("\n")) }
+    if additional.is_empty() {
+        None
+    } else {
+        Some(additional.join("\n"))
+    }
 }
 
 /// Run Stop hooks when the session ends.
-pub async fn run_stop_hooks(
-    hooks: &HooksConfig,
-    session_id: &str,
-    cwd: &std::path::Path,
-) {
+pub async fn run_stop_hooks(hooks: &HooksConfig, session_id: &str, cwd: &std::path::Path) {
     for hook in &hooks.stop {
-        execute_hook(hook, HookEnvVars {
-            event: "Stop",
-            tool_name: None,
-            tool_input: None,
-            tool_result: None,
-            prompt: None,
-            session_id,
-            cwd,
-        }).await;
+        execute_hook(
+            hook,
+            HookEnvVars {
+                event: "Stop",
+                tool_name: None,
+                tool_input: None,
+                tool_result: None,
+                prompt: None,
+                session_id,
+                cwd,
+            },
+        )
+        .await;
     }
 }
 
 /// Run SessionStart hooks.
-pub async fn run_session_start_hooks(
-    hooks: &HooksConfig,
-    session_id: &str,
-    cwd: &std::path::Path,
-) {
+pub async fn run_session_start_hooks(hooks: &HooksConfig, session_id: &str, cwd: &std::path::Path) {
     for hook in &hooks.session_start {
-        execute_hook(hook, HookEnvVars {
-            event: "SessionStart",
-            tool_name: None,
-            tool_input: None,
-            tool_result: None,
-            prompt: None,
-            session_id,
-            cwd,
-        }).await;
+        execute_hook(
+            hook,
+            HookEnvVars {
+                event: "SessionStart",
+                tool_name: None,
+                tool_input: None,
+                tool_result: None,
+                prompt: None,
+                session_id,
+                cwd,
+            },
+        )
+        .await;
     }
 }
 
 /// Run PreCompact hooks.
-pub async fn run_pre_compact_hooks(
-    hooks: &HooksConfig,
-    session_id: &str,
-    cwd: &std::path::Path,
-) {
+pub async fn run_pre_compact_hooks(hooks: &HooksConfig, session_id: &str, cwd: &std::path::Path) {
     for hook in &hooks.pre_compact {
-        execute_hook(hook, HookEnvVars {
-            event: "PreCompact",
-            tool_name: None,
-            tool_input: None,
-            tool_result: None,
-            prompt: None,
-            session_id,
-            cwd,
-        }).await;
+        execute_hook(
+            hook,
+            HookEnvVars {
+                event: "PreCompact",
+                tool_name: None,
+                tool_input: None,
+                tool_result: None,
+                prompt: None,
+                session_id,
+                cwd,
+            },
+        )
+        .await;
     }
 }
 
 /// Run PostCompact hooks.
-pub async fn run_post_compact_hooks(
-    hooks: &HooksConfig,
-    session_id: &str,
-    cwd: &std::path::Path,
-) {
+pub async fn run_post_compact_hooks(hooks: &HooksConfig, session_id: &str, cwd: &std::path::Path) {
     for hook in &hooks.post_compact {
-        execute_hook(hook, HookEnvVars {
-            event: "PostCompact",
-            tool_name: None,
-            tool_input: None,
-            tool_result: None,
-            prompt: None,
-            session_id,
-            cwd,
-        }).await;
+        execute_hook(
+            hook,
+            HookEnvVars {
+                event: "PostCompact",
+                tool_name: None,
+                tool_input: None,
+                tool_result: None,
+                prompt: None,
+                session_id,
+                cwd,
+            },
+        )
+        .await;
     }
 }
 
@@ -247,10 +277,18 @@ async fn execute_hook(hook: &HookEntry, env: HookEnvVars<'_>) -> HookResult {
     cmd.env("CLAUDE_SESSION_ID", env.session_id);
     cmd.env("CLAUDE_CWD", env.cwd.to_string_lossy().as_ref());
 
-    if let Some(name) = env.tool_name   { cmd.env("TOOL_NAME", name); }
-    if let Some(inp)  = env.tool_input  { cmd.env("TOOL_INPUT", inp); }
-    if let Some(res)  = env.tool_result { cmd.env("TOOL_RESULT", res); }
-    if let Some(msg)  = env.prompt      { cmd.env("CLAUDE_MESSAGE", msg); }
+    if let Some(name) = env.tool_name {
+        cmd.env("TOOL_NAME", name);
+    }
+    if let Some(inp) = env.tool_input {
+        cmd.env("TOOL_INPUT", inp);
+    }
+    if let Some(res) = env.tool_result {
+        cmd.env("TOOL_RESULT", res);
+    }
+    if let Some(msg) = env.prompt {
+        cmd.env("CLAUDE_MESSAGE", msg);
+    }
 
     // Capture stdout and stderr
     cmd.stdout(std::process::Stdio::piped());
@@ -278,9 +316,9 @@ async fn execute_hook(hook: &HookEntry, env: HookEnvVars<'_>) -> HookResult {
         let trimmed = stdout.trim();
         let stop_reason = if trimmed.starts_with('{') {
             if let Ok(hook_out) = serde_json::from_str::<HookOutput>(trimmed) {
-                hook_out.stop_reason
-                    .or(hook_out.reason)
-                    .unwrap_or_else(|| format!("Hook '{}' blocked execution (exit 2)", hook.command))
+                hook_out.stop_reason.or(hook_out.reason).unwrap_or_else(|| {
+                    format!("Hook '{}' blocked execution (exit 2)", hook.command)
+                })
             } else {
                 // Malformed JSON — show raw so the hook author can debug
                 trimmed.to_string()
@@ -301,7 +339,8 @@ async fn execute_hook(hook: &HookEntry, env: HookEnvVars<'_>) -> HookResult {
     if exit_code != 0 {
         tracing::warn!(
             "Hook '{}' exited with code {} (non-blocking)",
-            hook.command, exit_code
+            hook.command,
+            exit_code
         );
         return HookResult::allow();
     }
@@ -309,33 +348,35 @@ async fn execute_hook(hook: &HookEntry, env: HookEnvVars<'_>) -> HookResult {
     // Parse JSON output from stdout if present
     let trimmed = stdout.trim();
     if trimmed.starts_with('{')
-        && let Ok(hook_out) = serde_json::from_str::<HookOutput>(trimmed) {
-            let decision = match hook_out.decision.as_deref() {
-                Some("approve") => Some(HookDecision::Approve),
-                Some("block")   => Some(HookDecision::Block),
-                _ => None,
-            };
+        && let Ok(hook_out) = serde_json::from_str::<HookOutput>(trimmed)
+    {
+        let decision = match hook_out.decision.as_deref() {
+            Some("approve") => Some(HookDecision::Approve),
+            Some("block") => Some(HookDecision::Block),
+            _ => None,
+        };
 
-            if !hook_out.continue_ {
-                return HookResult {
-                    should_continue: false,
-                    stop_reason: hook_out.stop_reason
-                        .or(hook_out.reason)
-                        .or_else(|| Some(format!("Hook '{}' requested stop", hook.command))),
-                    system_message: hook_out.system_message,
-                    decision,
-                    additional_context: hook_out.additional_context,
-                };
-            }
-
+        if !hook_out.continue_ {
             return HookResult {
-                should_continue: true,
-                stop_reason: None,
+                should_continue: false,
+                stop_reason: hook_out
+                    .stop_reason
+                    .or(hook_out.reason)
+                    .or_else(|| Some(format!("Hook '{}' requested stop", hook.command))),
                 system_message: hook_out.system_message,
                 decision,
                 additional_context: hook_out.additional_context,
             };
         }
+
+        return HookResult {
+            should_continue: true,
+            stop_reason: None,
+            system_message: hook_out.system_message,
+            decision,
+            additional_context: hook_out.additional_context,
+        };
+    }
 
     HookResult::allow()
 }

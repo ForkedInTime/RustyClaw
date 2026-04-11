@@ -8,7 +8,6 @@
 ///   Description of what it does.
 ///   ---
 ///   The prompt template. {{ARGS}} is replaced with the user's arguments.
-
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -24,7 +23,9 @@ pub struct Skill {
 impl Skill {
     /// Expand the skill with user arguments
     pub fn expand(&self, args: &str) -> String {
-        self.prompt_template.replace("{{ARGS}}", args).replace("{{args}}", args)
+        self.prompt_template
+            .replace("{{ARGS}}", args)
+            .replace("{{args}}", args)
     }
 }
 
@@ -43,9 +44,10 @@ pub async fn load_skills() -> HashMap<String, Skill> {
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("md")
-                && let Ok(skill) = load_skill_file(&path).await {
-                    skills.insert(skill.name.clone(), skill);
-                }
+                && let Ok(skill) = load_skill_file(&path).await
+            {
+                skills.insert(skill.name.clone(), skill);
+            }
         }
     }
 
@@ -85,7 +87,11 @@ fn parse_skill_content(content: &str, path: &PathBuf) -> Result<Skill> {
         (name.clone(), content.trim().to_string())
     };
 
-    Ok(Skill { name, description, prompt_template })
+    Ok(Skill {
+        name,
+        description,
+        prompt_template,
+    })
 }
 
 /// Check if an input string is a skill invocation (starts with /).

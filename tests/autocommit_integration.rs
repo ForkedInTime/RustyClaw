@@ -3,8 +3,8 @@
 #![cfg(unix)]
 
 use rustyclaw::autocommit::{
-    is_git_repo, prune_old_refs, restore_to, snapshot_turn, AutoCommitConfig, SnapshotOutcome,
-    SHADOW_REF_PREFIX,
+    AutoCommitConfig, SHADOW_REF_PREFIX, SnapshotOutcome, is_git_repo, prune_old_refs, restore_to,
+    snapshot_turn,
 };
 use std::fs;
 use std::path::Path;

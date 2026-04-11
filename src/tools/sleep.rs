@@ -1,7 +1,6 @@
 /// SleepTool — port of sleep.ts
 /// Pauses execution for a specified number of milliseconds (capped at 60 000).
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
@@ -15,7 +14,9 @@ struct Input {
 
 #[async_trait]
 impl Tool for SleepTool {
-    fn name(&self) -> &str { "Sleep" }
+    fn name(&self) -> &str {
+        "Sleep"
+    }
 
     fn description(&self) -> &str {
         "Pause execution for a number of milliseconds (max 60 000). \

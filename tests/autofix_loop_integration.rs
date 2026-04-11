@@ -6,9 +6,7 @@
 
 #![cfg(unix)]
 
-use rustyclaw::autofix::{
-    run_auto_fix_check, AutoFixAction, AutoFixConfig, AutoFixTrigger,
-};
+use rustyclaw::autofix::{AutoFixAction, AutoFixConfig, AutoFixTrigger, run_auto_fix_check};
 use std::fs;
 use tempfile::tempdir;
 
@@ -28,16 +26,17 @@ fn empty_dir_no_runners_continues_silently() {
     let dir = tempdir().unwrap();
     let cfg = base_cfg();
     let action = run_auto_fix_check(dir.path(), &cfg, "auto-edit", 0);
-    assert!(matches!(
-        action,
-        AutoFixAction::Continue { status: None }
-    ));
+    assert!(matches!(action, AutoFixAction::Continue { status: None }));
 }
 
 #[test]
 fn cargo_project_detects_and_passes_with_overrides() {
     let dir = tempdir().unwrap();
-    fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"x\"\nversion=\"0.1.0\"\n").unwrap();
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname=\"x\"\nversion=\"0.1.0\"\n",
+    )
+    .unwrap();
 
     let mut cfg = base_cfg();
     cfg.lint_command = Some("true".to_string());
@@ -98,10 +97,7 @@ fn trigger_autonomous_skips_in_read_only_mode() {
     cfg.lint_command = Some("false".to_string());
 
     let action = run_auto_fix_check(dir.path(), &cfg, "read-only", 0);
-    assert!(matches!(
-        action,
-        AutoFixAction::Continue { status: None }
-    ));
+    assert!(matches!(action, AutoFixAction::Continue { status: None }));
 }
 
 #[test]
@@ -113,8 +109,5 @@ fn trigger_off_short_circuits() {
     cfg.test_command = Some("false".to_string());
 
     let action = run_auto_fix_check(dir.path(), &cfg, "full-auto", 0);
-    assert!(matches!(
-        action,
-        AutoFixAction::Continue { status: None }
-    ));
+    assert!(matches!(action, AutoFixAction::Continue { status: None }));
 }

@@ -11,7 +11,7 @@
 
 #![cfg(unix)]
 
-use rustyclaw::tools::{bash::BashTool, Tool, ToolContext};
+use rustyclaw::tools::{Tool, ToolContext, bash::BashTool};
 use serde_json::json;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -44,10 +44,7 @@ async fn bash_tool_timeout_kills_grandchild_in_process_group() {
     // Background a long-lived sleep, record its PID, then have the shell
     // itself sleep long enough to trip the tool timeout. The fix must kill
     // BOTH the shell AND the backgrounded sleep (the whole process group).
-    let cmd = format!(
-        "sleep 30 & echo $! > {}; sleep 30",
-        pid_file.display()
-    );
+    let cmd = format!("sleep 30 & echo $! > {}; sleep 30", pid_file.display());
 
     let mut ctx = ToolContext::new(PathBuf::from("/tmp"));
     ctx.default_shell = Some("bash".into());
@@ -67,10 +64,11 @@ async fn bash_tool_timeout_kills_grandchild_in_process_group() {
     let mut pid: Option<i32> = None;
     for _ in 0..20 {
         if let Ok(s) = std::fs::read_to_string(&pid_file)
-            && let Ok(p) = s.trim().parse::<i32>() {
-                pid = Some(p);
-                break;
-            }
+            && let Ok(p) = s.trim().parse::<i32>()
+        {
+            pid = Some(p);
+            break;
+        }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     let pid = pid.expect("grandchild pid file never appeared");
@@ -82,7 +80,9 @@ async fn bash_tool_timeout_kills_grandchild_in_process_group() {
         unsafe {
             libc::kill(pid, libc::SIGKILL);
         }
-        panic!("grandchild pid {pid} still alive after BashTool timeout — process group NOT killed");
+        panic!(
+            "grandchild pid {pid} still alive after BashTool timeout — process group NOT killed"
+        );
     }
 }
 
@@ -91,10 +91,7 @@ async fn bash_tool_abort_kills_grandchild_in_process_group() {
     let tmp = TempDir::new().unwrap();
     let pid_file = tmp.path().join("grandchild2.pid");
 
-    let cmd = format!(
-        "sleep 30 & echo $! > {}; sleep 30",
-        pid_file.display()
-    );
+    let cmd = format!("sleep 30 & echo $! > {}; sleep 30", pid_file.display());
 
     let ctx = {
         let mut c = ToolContext::new(PathBuf::from("/tmp"));
@@ -108,18 +105,17 @@ async fn bash_tool_abort_kills_grandchild_in_process_group() {
 
     // Spawn the tool execution on its own task so we can abort it, simulating
     // a user pressing Esc mid-run.
-    let handle = tokio::spawn(async move {
-        BashTool.execute(input, &ctx).await
-    });
+    let handle = tokio::spawn(async move { BashTool.execute(input, &ctx).await });
 
     // Wait for the pid file to be written by the shell.
     let mut pid: Option<i32> = None;
     for _ in 0..40 {
         if let Ok(s) = std::fs::read_to_string(&pid_file)
-            && let Ok(p) = s.trim().parse::<i32>() {
-                pid = Some(p);
-                break;
-            }
+            && let Ok(p) = s.trim().parse::<i32>()
+        {
+            pid = Some(p);
+            break;
+        }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     let pid = pid.expect("grandchild pid file never appeared");

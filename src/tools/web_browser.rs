@@ -1,8 +1,7 @@
 /// WebBrowserTool — port of webBrowser.ts
 /// Fetches a URL using headless Chromium (if available) or falls back to reqwest.
 /// Returns rendered DOM text content, stripped of scripts and styles.
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
@@ -17,11 +16,15 @@ struct Input {
     max_chars: usize,
 }
 
-fn default_max_chars() -> usize { 50_000 }
+fn default_max_chars() -> usize {
+    50_000
+}
 
 #[async_trait]
 impl Tool for WebBrowserTool {
-    fn name(&self) -> &str { "WebBrowser" }
+    fn name(&self) -> &str {
+        "WebBrowser"
+    }
 
     fn description(&self) -> &str {
         "Open a URL in a headless browser and return the rendered page text. \
@@ -69,10 +72,15 @@ impl Tool for WebBrowserTool {
 /// Try to fetch via `chromium --headless --dump-dom`.
 async fn try_chromium(url: &str, max_chars: usize) -> Option<String> {
     use tokio::process::Command;
-    use tokio::time::{timeout, Duration};
+    use tokio::time::{Duration, timeout};
 
     // Try several common chromium executable names
-    for exe in &["chromium", "chromium-browser", "google-chrome", "google-chrome-stable"] {
+    for exe in &[
+        "chromium",
+        "chromium-browser",
+        "google-chrome",
+        "google-chrome-stable",
+    ] {
         let result = timeout(
             Duration::from_secs(20),
             Command::new(exe)
@@ -136,10 +144,12 @@ fn strip_html(html: &str, max_chars: usize) -> String {
                     in_style = false;
                 }
                 // Add space after block-level tags
-                let is_block = ["</p", "<br", "</div", "</h1", "</h2", "</h3",
-                                "</h4", "</h5", "</h6", "<li", "</li"]
-                    .iter()
-                    .any(|t| tag_lower.starts_with(t));
+                let is_block = [
+                    "</p", "<br", "</div", "</h1", "</h2", "</h3", "</h4", "</h5", "</h6", "<li",
+                    "</li",
+                ]
+                .iter()
+                .any(|t| tag_lower.starts_with(t));
                 if is_block && !prev_space {
                     out.push('\n');
                     prev_space = true;

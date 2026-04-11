@@ -25,7 +25,17 @@ fn test_session_start_deserialize() {
     }"#;
     let req: SdkRequest = serde_json::from_str(json).unwrap();
     match req {
-        SdkRequest::SessionStart { id, prompt, cwd, model, max_turns, max_budget_usd, record, policy, .. } => {
+        SdkRequest::SessionStart {
+            id,
+            prompt,
+            cwd,
+            model,
+            max_turns,
+            max_budget_usd,
+            record,
+            policy,
+            ..
+        } => {
             assert_eq!(id, "req-1");
             assert_eq!(prompt, "Fix the tests");
             assert_eq!(cwd.as_deref(), Some("/tmp/project"));
@@ -46,7 +56,11 @@ fn test_turn_start_deserialize() {
     let json = r#"{"id":"req-2","type":"turn/start","session_id":"abc-123","prompt":"Add error handling"}"#;
     let req: SdkRequest = serde_json::from_str(json).unwrap();
     match req {
-        SdkRequest::TurnStart { id, session_id, prompt } => {
+        SdkRequest::TurnStart {
+            id,
+            session_id,
+            prompt,
+        } => {
             assert_eq!(id, "req-2");
             assert_eq!(session_id, "abc-123");
             assert_eq!(prompt, "Add error handling");
@@ -70,10 +84,15 @@ fn test_tool_approve_deserialize() {
 
 #[test]
 fn test_tool_deny_with_reason_deserialize() {
-    let json = r#"{"id":"req-4","type":"tool/deny","approval_id":"appr-1","reason":"No shell in CI"}"#;
+    let json =
+        r#"{"id":"req-4","type":"tool/deny","approval_id":"appr-1","reason":"No shell in CI"}"#;
     let req: SdkRequest = serde_json::from_str(json).unwrap();
     match req {
-        SdkRequest::ToolDeny { id, approval_id, reason } => {
+        SdkRequest::ToolDeny {
+            id,
+            approval_id,
+            reason,
+        } => {
             assert_eq!(id, "req-4");
             assert_eq!(approval_id, "appr-1");
             assert_eq!(reason.as_deref(), Some("No shell in CI"));
@@ -102,7 +121,10 @@ fn test_turn_completed_serialize() {
         structured_output: None,
         cost_usd: 0.03,
         total_session_cost_usd: 0.12,
-        tokens: TokenUsage { input: 5000, output: 2000 },
+        tokens: TokenUsage {
+            input: 5000,
+            output: 2000,
+        },
         model: "claude-sonnet-4-6-20250514".into(),
         tools_used: vec!["Read".into(), "Edit".into()],
         duration_ms: 12500,

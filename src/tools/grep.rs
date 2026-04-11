@@ -1,7 +1,6 @@
 /// GrepTool — port of tools/GrepTool/GrepTool.ts
 /// Delegates to `rg` (ripgrep) when available, falls back to pure Rust regex.
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 use regex::Regex;
 use serde::Deserialize;
@@ -13,8 +12,18 @@ use walkdir::WalkDir;
 /// Directories skipped by walkers: VCS metadata + common vendor dirs.
 /// Includes `.jj` (Jujutsu) and `.sl` (Sapling) VCS directories.
 pub(crate) const EXCLUDED_DIRS: &[&str] = &[
-    ".git", ".jj", ".sl", ".hg", ".svn", ".husky",
-    "node_modules", "target", "dist", "build", ".next", ".cache",
+    ".git",
+    ".jj",
+    ".sl",
+    ".hg",
+    ".svn",
+    ".husky",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    ".next",
+    ".cache",
 ];
 
 pub struct GrepTool;
@@ -156,7 +165,11 @@ async fn run_with_rg(input: &GrepInput, ctx: &ToolContext) -> Result<ToolOutput>
     let search_path = match &input.path {
         Some(p) => {
             let p = Path::new(p);
-            if p.is_absolute() { p.to_path_buf() } else { ctx.cwd.join(p) }
+            if p.is_absolute() {
+                p.to_path_buf()
+            } else {
+                ctx.cwd.join(p)
+            }
         }
         None => ctx.cwd.clone(),
     };
@@ -194,7 +207,11 @@ async fn run_with_regex(input: &GrepInput, ctx: &ToolContext) -> Result<ToolOutp
     let search_path = match &input.path {
         Some(p) => {
             let p = Path::new(p);
-            if p.is_absolute() { p.to_path_buf() } else { ctx.cwd.join(p) }
+            if p.is_absolute() {
+                p.to_path_buf()
+            } else {
+                ctx.cwd.join(p)
+            }
         }
         None => ctx.cwd.clone(),
     };
@@ -231,11 +248,14 @@ async fn run_with_regex(input: &GrepInput, ctx: &ToolContext) -> Result<ToolOutp
 
         // Apply glob filter
         if let Some(ref gre) = glob_re
-            && !gre.is_match(&path_str) {
-                continue;
-            }
+            && !gre.is_match(&path_str)
+        {
+            continue;
+        }
 
-        let Ok(contents) = tokio::fs::read_to_string(path).await else { continue };
+        let Ok(contents) = tokio::fs::read_to_string(path).await else {
+            continue;
+        };
 
         let mut file_matched = false;
         let mut file_count = 0usize;

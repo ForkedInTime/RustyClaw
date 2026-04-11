@@ -1,7 +1,6 @@
 /// WebFetchTool — port of tools/WebFetchTool/WebFetchTool.ts
 /// Fetches a URL, converts HTML to readable text, returns content.
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
@@ -49,8 +48,8 @@ impl Tool for WebFetchTool {
         let input: WebFetchInput = serde_json::from_value(input)?;
 
         // Validate URL
-        let parsed = url::Url::parse(&input.url)
-            .map_err(|e| anyhow::anyhow!("Invalid URL: {e}"))?;
+        let parsed =
+            url::Url::parse(&input.url).map_err(|e| anyhow::anyhow!("Invalid URL: {e}"))?;
         if parsed.scheme() != "http" && parsed.scheme() != "https" {
             return Ok(ToolOutput::error("Only http/https URLs are supported"));
         }

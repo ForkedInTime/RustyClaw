@@ -1,13 +1,12 @@
 /// MCP resource tools — port of mcpResources in the TS codebase
 /// ListMcpResourcesTool: calls resources/list on all connected MCP servers
 /// ReadMcpResourceTool:  calls resources/read for a specific URI
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
+use crate::mcp::client::McpClient;
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use crate::mcp::client::McpClient;
 
 // ── ListMcpResourcesTool ──────────────────────────────────────────────────────
 
@@ -17,7 +16,9 @@ pub struct ListMcpResourcesTool {
 
 #[async_trait]
 impl Tool for ListMcpResourcesTool {
-    fn name(&self) -> &str { "ListMcpResources" }
+    fn name(&self) -> &str {
+        "ListMcpResources"
+    }
 
     fn description(&self) -> &str {
         "List all resources exposed by connected MCP servers. \
@@ -84,7 +85,9 @@ struct ReadInput {
 
 #[async_trait]
 impl Tool for ReadMcpResourceTool {
-    fn name(&self) -> &str { "ReadMcpResource" }
+    fn name(&self) -> &str {
+        "ReadMcpResource"
+    }
 
     fn description(&self) -> &str {
         "Read the content of an MCP resource by its URI. \
@@ -117,7 +120,10 @@ impl Tool for ReadMcpResourceTool {
 
         // Find the right client
         let clients_to_try: Vec<&Arc<McpClient>> = if let Some(server) = &input.server {
-            self.clients.iter().filter(|c| &c.server_name == server).collect()
+            self.clients
+                .iter()
+                .filter(|c| &c.server_name == server)
+                .collect()
         } else {
             self.clients.iter().collect()
         };
@@ -134,12 +140,15 @@ impl Tool for ReadMcpResourceTool {
         for client in clients_to_try {
             match client.read_resource(&input.uri).await {
                 Ok(text) => return Ok(ToolOutput::success(text)),
-                Err(e) => { last_err = e.to_string(); }
+                Err(e) => {
+                    last_err = e.to_string();
+                }
             }
         }
 
         Ok(ToolOutput::error(format!(
-            "Could not read resource '{}': {}", input.uri, last_err
+            "Could not read resource '{}': {}",
+            input.uri, last_err
         )))
     }
 }

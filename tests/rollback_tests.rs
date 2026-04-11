@@ -1,8 +1,6 @@
 //! Integration tests for auto-rollback core logic — TDD, written before implementation.
 
-use rustyclaw::autofix::{
-    detect_test_command, should_trigger, AutoFixConfig, AutoFixTrigger,
-};
+use rustyclaw::autofix::{AutoFixConfig, AutoFixTrigger, detect_test_command, should_trigger};
 use std::fs;
 use tempfile::TempDir;
 
@@ -35,7 +33,11 @@ fn test_detect_python_project_pyproject() {
 #[test]
 fn test_detect_python_project_setup() {
     let tmp = TempDir::new().unwrap();
-    fs::write(tmp.path().join("setup.py"), "from setuptools import setup\n").unwrap();
+    fs::write(
+        tmp.path().join("setup.py"),
+        "from setuptools import setup\n",
+    )
+    .unwrap();
     let got = detect_test_command(tmp.path(), &None);
     assert_eq!(got, Some("pytest".to_string()));
 }
@@ -128,7 +130,10 @@ fn test_default_config() {
     assert_eq!(cfg.trigger, AutoFixTrigger::Autonomous);
     assert_eq!(cfg.max_retries, 3);
     assert!(cfg.test_command.is_none());
-    assert_eq!(cfg.timeout_secs, rustyclaw::autofix::DEFAULT_TEST_TIMEOUT_SECS);
+    assert_eq!(
+        cfg.timeout_secs,
+        rustyclaw::autofix::DEFAULT_TEST_TIMEOUT_SECS
+    );
 }
 
 // ── settings parsing ──────────────────────────────────────────────────────────

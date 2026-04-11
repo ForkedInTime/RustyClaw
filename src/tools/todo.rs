@@ -2,8 +2,7 @@
 ///
 /// Claude uses this to maintain a structured todo/checklist during a session.
 /// The list is stored in a shared Arc<Mutex<>> so the /tasks command can read it.
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -23,9 +22,9 @@ pub enum TodoStatus {
 impl std::fmt::Display for TodoStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TodoStatus::Pending    => write!(f, "pending"),
+            TodoStatus::Pending => write!(f, "pending"),
             TodoStatus::InProgress => write!(f, "in_progress"),
-            TodoStatus::Completed  => write!(f, "completed"),
+            TodoStatus::Completed => write!(f, "completed"),
         }
     }
 }
@@ -41,9 +40,9 @@ pub enum TodoPriority {
 impl std::fmt::Display for TodoPriority {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TodoPriority::Low    => write!(f, "low"),
+            TodoPriority::Low => write!(f, "low"),
             TodoPriority::Medium => write!(f, "medium"),
-            TodoPriority::High   => write!(f, "high"),
+            TodoPriority::High => write!(f, "high"),
         }
     }
 }
@@ -84,7 +83,9 @@ struct TodoItemInput {
 
 #[async_trait]
 impl Tool for TodoWriteTool {
-    fn name(&self) -> &str { "TodoWrite" }
+    fn name(&self) -> &str {
+        "TodoWrite"
+    }
 
     fn description(&self) -> &str {
         "Create and manage a structured task list for the current coding session. \
@@ -119,27 +120,48 @@ impl Tool for TodoWriteTool {
         let parsed: TodoWriteInput = serde_json::from_value(input)
             .map_err(|e| anyhow::anyhow!("Invalid TodoWrite input: {e}"))?;
 
-        let new_todos: Vec<TodoItem> = parsed.todos.into_iter().map(|t| {
-            let status = match t.status.as_str() {
-                "in_progress" => TodoStatus::InProgress,
-                "completed"   => TodoStatus::Completed,
-                _             => TodoStatus::Pending,
-            };
-            let priority = match t.priority.as_str() {
-                "high"   => TodoPriority::High,
-                "low"    => TodoPriority::Low,
-                _        => TodoPriority::Medium,
-            };
-            TodoItem { id: t.id, content: t.content, status, priority }
-        }).collect();
+        let new_todos: Vec<TodoItem> = parsed
+            .todos
+            .into_iter()
+            .map(|t| {
+                let status = match t.status.as_str() {
+                    "in_progress" => TodoStatus::InProgress,
+                    "completed" => TodoStatus::Completed,
+                    _ => TodoStatus::Pending,
+                };
+                let priority = match t.priority.as_str() {
+                    "high" => TodoPriority::High,
+                    "low" => TodoPriority::Low,
+                    _ => TodoPriority::Medium,
+                };
+                TodoItem {
+                    id: t.id,
+                    content: t.content,
+                    status,
+                    priority,
+                }
+            })
+            .collect();
 
         let summary = {
-            let pending    = new_todos.iter().filter(|t| t.status == TodoStatus::Pending).count();
-            let in_progress = new_todos.iter().filter(|t| t.status == TodoStatus::InProgress).count();
-            let completed  = new_todos.iter().filter(|t| t.status == TodoStatus::Completed).count();
+            let pending = new_todos
+                .iter()
+                .filter(|t| t.status == TodoStatus::Pending)
+                .count();
+            let in_progress = new_todos
+                .iter()
+                .filter(|t| t.status == TodoStatus::InProgress)
+                .count();
+            let completed = new_todos
+                .iter()
+                .filter(|t| t.status == TodoStatus::Completed)
+                .count();
             format!(
                 "Todo list updated: {} items ({} pending, {} in progress, {} completed)",
-                new_todos.len(), pending, in_progress, completed
+                new_todos.len(),
+                pending,
+                in_progress,
+                completed
             )
         };
 

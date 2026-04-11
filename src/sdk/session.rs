@@ -10,7 +10,7 @@ use crate::cost::CostTracker;
 use crate::rag;
 use crate::sdk::approval::{ApprovalDecision, PolicyEngine};
 use crate::sdk::protocol::*;
-use crate::tools::{new_read_cache, DynTool, PermissionMode, ReadCache, ToolContext, ToolOutput};
+use crate::tools::{DynTool, PermissionMode, ReadCache, ToolContext, ToolOutput, new_read_cache};
 use anyhow::{Context, Result};
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -225,9 +225,7 @@ impl SdkSession {
             // Check stop reason
             match &response.stop_reason {
                 Some(StopReason::ToolUse) => {
-                    let tool_results = self
-                        .execute_tools_with_approval(&response.content)
-                        .await?;
+                    let tool_results = self.execute_tools_with_approval(&response.content).await?;
 
                     // Push tool results as user message
                     self.messages.push(Message {

@@ -1,7 +1,6 @@
 /// DiscoverSkillsTool — port of discoverSkills.ts
 /// Lists available skills from ~/.claude/skills/ and .claude/skills/
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 use serde_json::json;
 use std::path::PathBuf;
@@ -10,7 +9,9 @@ pub struct DiscoverSkillsTool;
 
 #[async_trait]
 impl Tool for DiscoverSkillsTool {
-    fn name(&self) -> &str { "DiscoverSkills" }
+    fn name(&self) -> &str {
+        "DiscoverSkills"
+    }
 
     fn description(&self) -> &str {
         "List available skills (slash commands) from ~/.claude/skills/ and .claude/skills/. \
@@ -34,16 +35,21 @@ impl Tool for DiscoverSkillsTool {
         };
 
         for dir in &dirs {
-            if !dir.is_dir() { continue; }
+            if !dir.is_dir() {
+                continue;
+            }
             let mut entries = tokio::fs::read_dir(dir).await?;
             while let Some(entry) = entries.next_entry().await? {
                 let path = entry.path();
                 if path.extension().and_then(|e| e.to_str()) == Some("md") {
-                    let name = path.file_stem()
+                    let name = path
+                        .file_stem()
                         .and_then(|n| n.to_str())
                         .unwrap_or("")
                         .to_string();
-                    if name.is_empty() { continue; }
+                    if name.is_empty() {
+                        continue;
+                    }
 
                     // Read first non-empty, non-frontmatter line as description
                     let desc = if let Ok(content) = tokio::fs::read_to_string(&path).await {
@@ -62,7 +68,7 @@ impl Tool for DiscoverSkillsTool {
 
         if skills.is_empty() {
             return Ok(ToolOutput::success(
-                "No skills found. Place .md files in ~/.claude/skills/ or .claude/skills/."
+                "No skills found. Place .md files in ~/.claude/skills/ or .claude/skills/.",
             ));
         }
 
@@ -103,11 +109,17 @@ fn extract_description(content: &str) -> String {
             }
         }
 
-        if in_frontmatter { continue; }
+        if in_frontmatter {
+            continue;
+        }
 
         // Skip blank lines and heading markers at the start
-        if trimmed.is_empty() { continue; }
-        if !frontmatter_done && trimmed.starts_with('#') { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !frontmatter_done && trimmed.starts_with('#') {
+            continue;
+        }
 
         // Strip leading '#' characters (headings)
         let clean = trimmed.trim_start_matches('#').trim();

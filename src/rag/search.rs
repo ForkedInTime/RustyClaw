@@ -2,7 +2,6 @@
 ///
 /// Given a natural language query (or keywords), retrieves the most relevant
 /// code chunks ranked by FTS5 relevance score + symbol-kind boost.
-
 use anyhow::Result;
 
 use super::RagDb;
@@ -188,12 +187,48 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let db = RagDb::open(tmp.path()).unwrap();
         let chunks = vec![
-            ("src/auth.rs", "authenticate_user", "function", "rust", "fn authenticate_user(token: &str) -> Result<User> { verify(token) }"),
-            ("src/auth.rs", "verify_token", "function", "rust", "fn verify_token(t: &str) -> bool { !t.is_empty() }"),
-            ("src/api.rs", "handle_request", "function", "rust", "fn handle_request(req: Request) -> Response { route(req) }"),
-            ("src/api.rs", "ApiServer", "struct", "rust", "struct ApiServer { port: u16, host: String }"),
-            ("src/db.rs", "DatabasePool", "struct", "rust", "struct DatabasePool { connections: Vec<Connection> }"),
-            ("src/db.rs", "query", "function", "rust", "fn query(pool: &DatabasePool, sql: &str) -> Vec<Row> { pool.execute(sql) }"),
+            (
+                "src/auth.rs",
+                "authenticate_user",
+                "function",
+                "rust",
+                "fn authenticate_user(token: &str) -> Result<User> { verify(token) }",
+            ),
+            (
+                "src/auth.rs",
+                "verify_token",
+                "function",
+                "rust",
+                "fn verify_token(t: &str) -> bool { !t.is_empty() }",
+            ),
+            (
+                "src/api.rs",
+                "handle_request",
+                "function",
+                "rust",
+                "fn handle_request(req: Request) -> Response { route(req) }",
+            ),
+            (
+                "src/api.rs",
+                "ApiServer",
+                "struct",
+                "rust",
+                "struct ApiServer { port: u16, host: String }",
+            ),
+            (
+                "src/db.rs",
+                "DatabasePool",
+                "struct",
+                "rust",
+                "struct DatabasePool { connections: Vec<Connection> }",
+            ),
+            (
+                "src/db.rs",
+                "query",
+                "function",
+                "rust",
+                "fn query(pool: &DatabasePool, sql: &str) -> Vec<Row> { pool.execute(sql) }",
+            ),
         ];
         for (path, name, kind, lang, content) in chunks {
             db.conn.execute(
@@ -295,16 +330,18 @@ mod tests {
 
     #[test]
     fn test_build_context_respects_char_limit() {
-        let results: Vec<SearchResult> = (0..100).map(|i| SearchResult {
-            file_path: format!("src/file{i}.rs"),
-            symbol_name: format!("func_{i}"),
-            symbol_kind: "function".to_string(),
-            language: "rust".to_string(),
-            start_line: 1,
-            end_line: 10,
-            content: "x".repeat(200),
-            rank: -(100 - i) as f64,
-        }).collect();
+        let results: Vec<SearchResult> = (0..100)
+            .map(|i| SearchResult {
+                file_path: format!("src/file{i}.rs"),
+                symbol_name: format!("func_{i}"),
+                symbol_kind: "function".to_string(),
+                language: "rust".to_string(),
+                start_line: 1,
+                end_line: 10,
+                content: "x".repeat(200),
+                rank: -(100 - i) as f64,
+            })
+            .collect();
         let ctx = build_context(&results, 500);
         assert!(ctx.len() < 600); // some overhead from wrapper tags
     }

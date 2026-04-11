@@ -3,7 +3,6 @@
 /// `/spawn "refactor auth"` creates a git worktree, launches a background
 /// QueryEngine in it, and reports back when done.  The user keeps working
 /// in the main TUI while the spawned agent operates in isolation.
-
 use crate::config::Config;
 use crate::query_engine::QueryEngine;
 use crate::tools::default_tools;
@@ -81,7 +80,13 @@ pub async fn spawn_agent(
     let slug: String = description
         .chars()
         .take(30)
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .trim_matches('-')
         .to_string();
@@ -112,7 +117,10 @@ pub async fn spawn_agent(
     // Create worktree + branch
     let output = Command::new("git")
         .args([
-            "worktree", "add", "-b", &slug,
+            "worktree",
+            "add",
+            "-b",
+            &slug,
             worktree_path.to_str().unwrap_or("/tmp/spawn-wt"),
             "HEAD",
         ])
@@ -173,9 +181,8 @@ pub async fn spawn_agent(
         slug,
         description,
     );
-    agent_config.append_system_prompt = Some(
-        agent_config.append_system_prompt.unwrap_or_default() + &spawn_context,
-    );
+    agent_config.append_system_prompt =
+        Some(agent_config.append_system_prompt.unwrap_or_default() + &spawn_context);
 
     // Launch background task
     let reg = registry.clone();
@@ -210,11 +217,12 @@ pub async fn spawn_agent(
         match result {
             Ok(summary) => {
                 if let Ok(mut reg) = reg.lock()
-                    && let Some(agent) = reg.get_mut(&agent_id) {
-                        agent.status = SpawnStatus::Completed;
-                        agent.summary = Some(summary.clone());
-                        agent.diff = Some(diff);
-                    }
+                    && let Some(agent) = reg.get_mut(&agent_id)
+                {
+                    agent.status = SpawnStatus::Completed;
+                    agent.summary = Some(summary.clone());
+                    agent.diff = Some(diff);
+                }
                 let _ = event_tx.send(AppEvent::SystemMessage(format!(
                     "🏁 Agent [{agent_id}] completed: {desc}\n{stat}\nUse /review {agent_id} to inspect changes, /merge {agent_id} to apply them.",
                 )));
@@ -222,10 +230,11 @@ pub async fn spawn_agent(
             Err(e) => {
                 let err_msg = format!("{e:#}");
                 if let Ok(mut reg) = reg.lock()
-                    && let Some(agent) = reg.get_mut(&agent_id) {
-                        agent.status = SpawnStatus::Failed;
-                        agent.error = Some(err_msg.clone());
-                    }
+                    && let Some(agent) = reg.get_mut(&agent_id)
+                {
+                    agent.status = SpawnStatus::Failed;
+                    agent.error = Some(err_msg.clone());
+                }
                 let _ = event_tx.send(AppEvent::SystemMessage(format!(
                     "❌ Agent [{agent_id}] failed: {desc}\n{err_msg}",
                 )));
@@ -233,11 +242,18 @@ pub async fn spawn_agent(
         }
 
         // Clean up worktree on failure/cancel (keep on success for review)
-        let status = reg.lock().ok()
+        let status = reg
+            .lock()
+            .ok()
             .and_then(|r| r.get(&agent_id).map(|a| a.status.clone()));
         if matches!(status, Some(SpawnStatus::Failed | SpawnStatus::Cancelled)) {
             let _ = Command::new("git")
-                .args(["worktree", "remove", "--force", wt_path.to_str().unwrap_or("")])
+                .args([
+                    "worktree",
+                    "remove",
+                    "--force",
+                    wt_path.to_str().unwrap_or(""),
+                ])
                 .current_dir(&orig_cwd)
                 .output()
                 .await;
@@ -294,9 +310,9 @@ pub fn list_agents(registry: &SpawnRegistry) -> String {
 
     for a in agents {
         let status = match &a.status {
-            SpawnStatus::Running   => "⚡ running",
+            SpawnStatus::Running => "⚡ running",
             SpawnStatus::Completed => "✅ done",
-            SpawnStatus::Failed    => "❌ failed",
+            SpawnStatus::Failed => "❌ failed",
             SpawnStatus::Cancelled => "⛔ cancelled",
         };
         lines.push(format!(
@@ -356,7 +372,11 @@ pub fn kill_agent(registry: &SpawnRegistry, id: &str) -> Result<String> {
     let agent = find_agent_mut(&mut reg, id)?;
 
     if agent.status != SpawnStatus::Running {
-        anyhow::bail!("Agent [{}] is not running (status: {:?}).", agent.id, agent.status);
+        anyhow::bail!(
+            "Agent [{}] is not running (status: {:?}).",
+            agent.id,
+            agent.status
+        );
     }
 
     // Send cancel signal
@@ -365,7 +385,10 @@ pub fn kill_agent(registry: &SpawnRegistry, id: &str) -> Result<String> {
     }
     agent.status = SpawnStatus::Cancelled;
 
-    Ok(format!("Agent [{}] cancelled: {}", agent.id, agent.description))
+    Ok(format!(
+        "Agent [{}] cancelled: {}",
+        agent.id, agent.description
+    ))
 }
 
 /// Merge a completed agent's worktree changes into the current branch.
@@ -374,7 +397,11 @@ pub async fn merge_agent(registry: &SpawnRegistry, id: &str, main_cwd: &PathBuf)
         let reg = registry.lock().unwrap();
         let agent = find_agent(&reg, id)?;
         if agent.status != SpawnStatus::Completed {
-            anyhow::bail!("Agent [{}] is not completed (status: {:?}). Only completed agents can be merged.", agent.id, agent.status);
+            anyhow::bail!(
+                "Agent [{}] is not completed (status: {:?}). Only completed agents can be merged.",
+                agent.id,
+                agent.status
+            );
         }
         (agent.branch.clone(), agent.worktree_path.clone())
     };
@@ -396,7 +423,9 @@ pub async fn merge_agent(registry: &SpawnRegistry, id: &str, main_cwd: &PathBuf)
 
         let commit_msg = format!("spawn: {}", {
             let reg = registry.lock().unwrap();
-            reg.get(id).map(|a| a.description.clone()).unwrap_or_default()
+            reg.get(id)
+                .map(|a| a.description.clone())
+                .unwrap_or_default()
         });
 
         let commit = Command::new("git")
@@ -420,7 +449,12 @@ pub async fn merge_agent(registry: &SpawnRegistry, id: &str, main_cwd: &PathBuf)
 
     // Clean up worktree
     let _ = Command::new("git")
-        .args(["worktree", "remove", "--force", wt_path.to_str().unwrap_or("")])
+        .args([
+            "worktree",
+            "remove",
+            "--force",
+            wt_path.to_str().unwrap_or(""),
+        ])
         .current_dir(main_cwd)
         .output()
         .await;
@@ -438,7 +472,9 @@ pub async fn merge_agent(registry: &SpawnRegistry, id: &str, main_cwd: &PathBuf)
     }
 
     if merge.status.success() {
-        Ok(format!("Merged branch '{branch}' into current branch. Worktree cleaned up."))
+        Ok(format!(
+            "Merged branch '{branch}' into current branch. Worktree cleaned up."
+        ))
     } else {
         let err = String::from_utf8_lossy(&merge.stderr);
         anyhow::bail!("Merge failed (resolve manually): {err}")
@@ -446,19 +482,36 @@ pub async fn merge_agent(registry: &SpawnRegistry, id: &str, main_cwd: &PathBuf)
 }
 
 /// Discard a completed/failed agent's worktree without merging.
-pub async fn discard_agent(registry: &SpawnRegistry, id: &str, main_cwd: &PathBuf) -> Result<String> {
+pub async fn discard_agent(
+    registry: &SpawnRegistry,
+    id: &str,
+    main_cwd: &PathBuf,
+) -> Result<String> {
     let (branch, wt_path, desc) = {
         let reg = registry.lock().unwrap();
         let agent = find_agent(&reg, id)?;
         if agent.status == SpawnStatus::Running {
-            anyhow::bail!("Agent [{}] is still running. Use /kill {} first.", agent.id, agent.id);
+            anyhow::bail!(
+                "Agent [{}] is still running. Use /kill {} first.",
+                agent.id,
+                agent.id
+            );
         }
-        (agent.branch.clone(), agent.worktree_path.clone(), agent.description.clone())
+        (
+            agent.branch.clone(),
+            agent.worktree_path.clone(),
+            agent.description.clone(),
+        )
     };
 
     // Remove worktree
     let _ = Command::new("git")
-        .args(["worktree", "remove", "--force", wt_path.to_str().unwrap_or("")])
+        .args([
+            "worktree",
+            "remove",
+            "--force",
+            wt_path.to_str().unwrap_or(""),
+        ])
         .current_dir(main_cwd)
         .output()
         .await;
@@ -475,33 +528,39 @@ pub async fn discard_agent(registry: &SpawnRegistry, id: &str, main_cwd: &PathBu
         reg.remove(id);
     }
 
-    Ok(format!("Discarded agent [{id}]: {desc}. Worktree and branch removed."))
+    Ok(format!(
+        "Discarded agent [{id}]: {desc}. Worktree and branch removed."
+    ))
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn find_agent<'a>(reg: &'a HashMap<String, SpawnedAgent>, id: &str) -> Result<&'a SpawnedAgent> {
     // Support prefix matching
-    let matches: Vec<&SpawnedAgent> = reg.values()
-        .filter(|a| a.id.starts_with(id))
-        .collect();
+    let matches: Vec<&SpawnedAgent> = reg.values().filter(|a| a.id.starts_with(id)).collect();
 
     match matches.len() {
         0 => anyhow::bail!("No agent found matching '{id}'. Use /agents to list."),
         1 => Ok(matches[0]),
-        _ => anyhow::bail!("Ambiguous id '{id}' — matches {} agents. Be more specific.", matches.len()),
+        _ => anyhow::bail!(
+            "Ambiguous id '{id}' — matches {} agents. Be more specific.",
+            matches.len()
+        ),
     }
 }
 
-fn find_agent_mut<'a>(reg: &'a mut HashMap<String, SpawnedAgent>, id: &str) -> Result<&'a mut SpawnedAgent> {
-    let matching_ids: Vec<String> = reg.keys()
-        .filter(|k| k.starts_with(id))
-        .cloned()
-        .collect();
+fn find_agent_mut<'a>(
+    reg: &'a mut HashMap<String, SpawnedAgent>,
+    id: &str,
+) -> Result<&'a mut SpawnedAgent> {
+    let matching_ids: Vec<String> = reg.keys().filter(|k| k.starts_with(id)).cloned().collect();
 
     match matching_ids.len() {
         0 => anyhow::bail!("No agent found matching '{id}'. Use /agents to list."),
         1 => Ok(reg.get_mut(&matching_ids[0]).unwrap()),
-        _ => anyhow::bail!("Ambiguous id '{id}' — matches {} agents. Be more specific.", matching_ids.len()),
+        _ => anyhow::bail!(
+            "Ambiguous id '{id}' — matches {} agents. Be more specific.",
+            matching_ids.len()
+        ),
     }
 }

@@ -7,7 +7,6 @@
 ///   Ask     — pause and prompt the user in the TUI
 ///
 /// "Always allow" decisions are remembered for the session.
-
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
@@ -49,15 +48,23 @@ impl PermissionState {
     pub fn new(bypass: bool, allow: &[String], deny: &[String]) -> Self {
         let mut inner = Inner::default();
         inner.bypass = bypass;
-        for t in allow { inner.always_allowed.insert(t.clone()); }
-        for t in deny  { inner.deny_list.insert(t.clone()); }
+        for t in allow {
+            inner.always_allowed.insert(t.clone());
+        }
+        for t in deny {
+            inner.deny_list.insert(t.clone());
+        }
         Self {
             inner: Arc::new(Mutex::new(inner)),
         }
     }
 
     /// Check with optional tool input for prefix-rule matching.
-    pub fn check_with_input(&self, tool_name: &str, input: Option<&serde_json::Value>) -> CheckResult {
+    pub fn check_with_input(
+        &self,
+        tool_name: &str,
+        input: Option<&serde_json::Value>,
+    ) -> CheckResult {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if inner.bypass {
             return CheckResult::Allow;
@@ -157,39 +164,61 @@ pub fn split_compound_command(cmd: &str) -> Vec<&str> {
     while i < len {
         let c = bytes[i];
         match c {
-            b'\'' if !in_double => { in_single = !in_single; i += 1; }
-            b'"'  if !in_single => { in_double = !in_double; i += 1; }
-            b'\\' if !in_single => { i += 2; } // skip escaped char
-            _ if in_single || in_double => { i += 1; }
+            b'\'' if !in_double => {
+                in_single = !in_single;
+                i += 1;
+            }
+            b'"' if !in_single => {
+                in_double = !in_double;
+                i += 1;
+            }
+            b'\\' if !in_single => {
+                i += 2;
+            } // skip escaped char
+            _ if in_single || in_double => {
+                i += 1;
+            }
             b'&' if i + 1 < len && bytes[i + 1] == b'&' => {
                 let part = cmd[start..i].trim();
-                if !part.is_empty() { parts.push(part); }
+                if !part.is_empty() {
+                    parts.push(part);
+                }
                 i += 2;
                 start = i;
             }
             b'|' if i + 1 < len && bytes[i + 1] == b'|' => {
                 let part = cmd[start..i].trim();
-                if !part.is_empty() { parts.push(part); }
+                if !part.is_empty() {
+                    parts.push(part);
+                }
                 i += 2;
                 start = i;
             }
             b';' => {
                 let part = cmd[start..i].trim();
-                if !part.is_empty() { parts.push(part); }
+                if !part.is_empty() {
+                    parts.push(part);
+                }
                 i += 1;
                 start = i;
             }
             b'|' => {
                 let part = cmd[start..i].trim();
-                if !part.is_empty() { parts.push(part); }
+                if !part.is_empty() {
+                    parts.push(part);
+                }
                 i += 1;
                 start = i;
             }
-            _ => { i += 1; }
+            _ => {
+                i += 1;
+            }
         }
     }
     let tail = cmd[start..].trim();
-    if !tail.is_empty() { parts.push(tail); }
+    if !tail.is_empty() {
+        parts.push(tail);
+    }
     parts
 }
 
@@ -213,7 +242,11 @@ pub fn check_compound_bash(state: &PermissionState, full_command: &str) -> Check
             CheckResult::Allow => {}
         }
     }
-    if any_ask { CheckResult::Ask } else { CheckResult::Allow }
+    if any_ask {
+        CheckResult::Ask
+    } else {
+        CheckResult::Allow
+    }
 }
 
 /// Build a human-readable description of a tool call for the permission dialog.
@@ -241,7 +274,8 @@ fn truncate(s: &str, max: usize) -> &str {
         s
     } else {
         // Find a char boundary at or before max to avoid slicing mid-codepoint
-        let end = s.char_indices()
+        let end = s
+            .char_indices()
             .map(|(i, _)| i)
             .take_while(|&i| i < max)
             .last()

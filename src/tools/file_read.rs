@@ -1,6 +1,5 @@
 /// FileReadTool — port of tools/FileReadTool/FileReadTool.ts
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
@@ -80,29 +79,31 @@ impl Tool for FileReadTool {
             )));
         }
 
-        let content = fs::read_to_string(&path).await.map_err(|e| {
-            anyhow::anyhow!("Failed to read {}: {}", path.display(), e)
-        })?;
+        let content = fs::read_to_string(&path)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))?;
 
         // v2.1.86: dedup unchanged re-reads. Hash the content and check against
         // the shared read-cache; if identical to a previous read of the same
         // path, emit a compact notice instead of re-sending the whole file.
         // Only applies when no offset/limit is requested (partial reads always
         // return their slice).
-        if input.offset.is_none() && input.limit.is_none()
-            && let Some(cache) = &ctx.read_cache {
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                content.hash(&mut hasher);
-                let hash = hasher.finish();
-                let mut guard = cache.lock().unwrap();
-                if guard.get(&path) == Some(&hash) {
-                    return Ok(ToolOutput::success(format!(
-                        "(unchanged since last read: {})",
-                        path.display()
-                    )));
-                }
-                guard.insert(path.clone(), hash);
+        if input.offset.is_none()
+            && input.limit.is_none()
+            && let Some(cache) = &ctx.read_cache
+        {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            content.hash(&mut hasher);
+            let hash = hasher.finish();
+            let mut guard = cache.lock().unwrap();
+            if guard.get(&path) == Some(&hash) {
+                return Ok(ToolOutput::success(format!(
+                    "(unchanged since last read: {})",
+                    path.display()
+                )));
             }
+            guard.insert(path.clone(), hash);
+        }
 
         let lines: Vec<&str> = content.lines().collect();
         let total_lines = lines.len();

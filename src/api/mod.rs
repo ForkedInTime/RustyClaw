@@ -1,19 +1,18 @@
 /// Anthropic API client — port of services/api/claude.ts
-
 pub mod ollama;
 pub mod openai_compat;
 pub mod types;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
-use reqwest::{header, Client};
+use reqwest::{Client, header};
 use std::collections::HashMap;
 use tracing::{debug, warn};
 
-pub use ollama::{is_ollama_model, list_ollama_models, strip_ollama_prefix, OllamaClient};
+pub use ollama::{OllamaClient, is_ollama_model, list_ollama_models, strip_ollama_prefix};
 pub use openai_compat::{
-    is_openai_compat_model, parse_provider_model, OpenAiCompatClient, PROVIDERS,
+    OpenAiCompatClient, PROVIDERS, is_openai_compat_model, parse_provider_model,
 };
 pub use types::*;
 
@@ -58,10 +57,7 @@ impl ClaudeClient {
 
     /// Non-streaming API call — mirrors callModel() in services/api/claude.ts
     #[allow(dead_code)] // used by SDK/headless mode (non-streaming path)
-    pub async fn messages(
-        &self,
-        request: MessagesRequest,
-    ) -> Result<MessagesResponse> {
+    pub async fn messages(&self, request: MessagesRequest) -> Result<MessagesResponse> {
         let url = format!("{}/v1/messages", self.base_url);
         debug!("POST {url} model={}", request.model);
 
@@ -73,10 +69,7 @@ impl ClaudeClient {
             builder = builder.header("X-Claude-Code-Session-Id", sid.as_str());
         }
 
-        let resp = builder
-            .send()
-            .await
-            .context("API request failed")?;
+        let resp = builder.send().await.context("API request failed")?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -146,19 +139,20 @@ impl ClaudeClient {
                 StreamEvent::MessageStart { message } => {
                     result.usage.input_tokens = message.usage.input_tokens;
                 }
-                StreamEvent::ContentBlockStart { index, content_block } => {
-                    match content_block {
-                        StreamContentBlock::Text { text } => {
-                            text_blocks.insert(index, text);
-                        }
-                        StreamContentBlock::ToolUse { id, name } => {
-                            tool_blocks.insert(index, (id, name, String::new()));
-                        }
-                        StreamContentBlock::Thinking { thinking } => {
-                            thinking_blocks.insert(index, (thinking, String::new()));
-                        }
+                StreamEvent::ContentBlockStart {
+                    index,
+                    content_block,
+                } => match content_block {
+                    StreamContentBlock::Text { text } => {
+                        text_blocks.insert(index, text);
                     }
-                }
+                    StreamContentBlock::ToolUse { id, name } => {
+                        tool_blocks.insert(index, (id, name, String::new()));
+                    }
+                    StreamContentBlock::Thinking { thinking } => {
+                        thinking_blocks.insert(index, (thinking, String::new()));
+                    }
+                },
                 StreamEvent::ContentBlockDelta { index, delta } => match delta {
                     ContentDelta::TextDelta { text } => {
                         on_text(&text);
@@ -194,9 +188,14 @@ impl ClaudeClient {
                         // JSON-encoded strings. Re-parse any string values that look
                         // like JSON arrays or objects (v2.1.89/92 fix).
                         normalize_tool_input(&mut input);
-                        result.content.push(ContentBlock::ToolUse { id, name, input });
+                        result
+                            .content
+                            .push(ContentBlock::ToolUse { id, name, input });
                     } else if let Some((thinking, signature)) = thinking_blocks.remove(&index) {
-                        result.content.push(ContentBlock::Thinking { thinking, signature });
+                        result.content.push(ContentBlock::Thinking {
+                            thinking,
+                            signature,
+                        });
                     }
                 }
                 StreamEvent::MessageDelta { delta, usage } => {
@@ -236,10 +235,14 @@ fn normalize_tool_input(val: &mut serde_json::Value) {
             let trimmed = s.trim_start();
             if (trimmed.starts_with('[') || trimmed.starts_with('{'))
                 && let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(s)
-                    && matches!(parsed, serde_json::Value::Array(_) | serde_json::Value::Object(_)) {
-                        normalize_tool_input(&mut parsed);
-                        *val = parsed;
-                    }
+                && matches!(
+                    parsed,
+                    serde_json::Value::Array(_) | serde_json::Value::Object(_)
+                )
+            {
+                normalize_tool_input(&mut parsed);
+                *val = parsed;
+            }
         }
         _ => {}
     }

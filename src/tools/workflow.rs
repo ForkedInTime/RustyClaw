@@ -1,11 +1,10 @@
 /// WorkflowTool — port of workflow.ts
 /// Executes named multi-step workflows defined in .claude/workflows/ as JSON/YAML files.
 /// Each workflow is a sequence of steps: { prompt: string, tool?: string, args?: object }
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
-use anyhow::{anyhow, Result};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 
 pub struct WorkflowTool;
@@ -45,7 +44,9 @@ struct Workflow {
 
 #[async_trait]
 impl Tool for WorkflowTool {
-    fn name(&self) -> &str { "Workflow" }
+    fn name(&self) -> &str {
+        "Workflow"
+    }
 
     fn description(&self) -> &str {
         "Execute a named workflow from .claude/workflows/. Workflows are JSON files \
@@ -103,7 +104,7 @@ impl Tool for WorkflowTool {
 
         output.push_str(
             "\n[Workflow loaded. Steps listed above — execute each step in order using the \
-            tools and prompts specified.]"
+            tools and prompts specified.]",
         );
 
         Ok(ToolOutput::success(output))
@@ -146,12 +147,13 @@ async fn load_workflow(cwd: &std::path::Path, name: &str) -> Result<Workflow> {
             } else {
                 // YAML fallback: treat as JSON (basic YAML is valid JSON superset concern —
                 // for simplicity we just try serde_json and return a clear error)
-                serde_json::from_str(&content)
-                    .map_err(|_| anyhow!(
+                serde_json::from_str(&content).map_err(|_| {
+                    anyhow!(
                         "YAML workflows require serde_yaml. Found at {}.\n\
                         Convert to JSON format or add serde_yaml dependency.",
                         path.display()
-                    ))?
+                    )
+                })?
             };
             return Ok(workflow);
         }

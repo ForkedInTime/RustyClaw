@@ -6,7 +6,6 @@
 ///
 /// Tool names use the format `mcp__<server>__<tool>` to avoid conflicts with
 /// built-in tools and to let Claude identify which server provides each tool.
-
 pub mod client;
 pub mod manager;
 pub mod types;
@@ -16,7 +15,7 @@ pub use manager::McpManager;
 // McpServerStatus is imported directly by consumers from types::
 
 use crate::api::types::ToolDefinition;
-use crate::tools::{async_trait, DynTool, Tool, ToolContext, ToolOutput};
+use crate::tools::{DynTool, Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -100,6 +99,12 @@ pub fn mcp_dyn_tools(manager: &McpManager) -> Vec<DynTool> {
 /// Replace non-alphanumeric characters with underscores for safe tool names.
 fn sanitize_name(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }

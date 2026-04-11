@@ -3,18 +3,19 @@
 /// Enabled when RUSTYCLAW_EXPERIMENTAL_AGENT_TEAMS=1 (same gate as SendMessageTool).
 ///
 /// Teams are stored in ~/.claude/teams/<name>.json
-
 use crate::tools::{Tool, ToolContext, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub struct TeamCreateTool;
 pub struct TeamDeleteTool;
 
 #[async_trait]
 impl Tool for TeamCreateTool {
-    fn name(&self) -> &str { "TeamCreate" }
+    fn name(&self) -> &str {
+        "TeamCreate"
+    }
 
     fn description(&self) -> &str {
         "Create a named agent team for multi-agent coordination. \
@@ -54,7 +55,7 @@ impl Tool for TeamCreateTool {
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
         if !crate::tools::send_message::is_agent_swarms_enabled() {
             return Ok(ToolOutput::error(
-                "Agent swarms are not enabled. Set RUSTYCLAW_EXPERIMENTAL_AGENT_TEAMS=1."
+                "Agent swarms are not enabled. Set RUSTYCLAW_EXPERIMENTAL_AGENT_TEAMS=1.",
             ));
         }
 
@@ -63,9 +64,12 @@ impl Tool for TeamCreateTool {
             _ => return Ok(ToolOutput::error("team name must not be empty")),
         };
 
-        if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        if !name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
             return Ok(ToolOutput::error(
-                "team name must contain only alphanumeric characters, hyphens, or underscores"
+                "team name must contain only alphanumeric characters, hyphens, or underscores",
             ));
         }
 
@@ -80,9 +84,7 @@ impl Tool for TeamCreateTool {
             return Ok(ToolOutput::error(format!("Team '{}' already exists", name)));
         }
 
-        let members: Vec<Value> = input["members"].as_array()
-            .cloned()
-            .unwrap_or_default();
+        let members: Vec<Value> = input["members"].as_array().cloned().unwrap_or_default();
 
         let description = input["description"].as_str().unwrap_or("");
 
@@ -112,7 +114,9 @@ impl Tool for TeamCreateTool {
 
 #[async_trait]
 impl Tool for TeamDeleteTool {
-    fn name(&self) -> &str { "TeamDelete" }
+    fn name(&self) -> &str {
+        "TeamDelete"
+    }
 
     fn description(&self) -> &str {
         "Delete a named agent team. \
@@ -135,7 +139,7 @@ impl Tool for TeamDeleteTool {
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
         if !crate::tools::send_message::is_agent_swarms_enabled() {
             return Ok(ToolOutput::error(
-                "Agent swarms are not enabled. Set RUSTYCLAW_EXPERIMENTAL_AGENT_TEAMS=1."
+                "Agent swarms are not enabled. Set RUSTYCLAW_EXPERIMENTAL_AGENT_TEAMS=1.",
             ));
         }
 

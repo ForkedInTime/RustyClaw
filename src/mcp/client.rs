@@ -3,17 +3,16 @@
 /// Implements the Model Context Protocol (MCP) JSON-RPC 2.0 protocol.
 /// Stdio transport: spawns the server process and communicates via stdin/stdout.
 /// HTTP transport:  POSTs JSON-RPC requests to a URL (streamable HTTP).
-
 use crate::mcp::types::{JsonRpcRequest, JsonRpcResponse, McpCallResult, McpResource, McpToolDef};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc,
+    atomic::{AtomicU64, Ordering},
 };
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{Mutex, oneshot};
 use tokio::time::Duration;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -402,8 +401,8 @@ impl McpClient {
             .await?;
 
         // Deserialize the result
-        let call_result: McpCallResult = serde_json::from_value(result.clone())
-            .unwrap_or(McpCallResult {
+        let call_result: McpCallResult =
+            serde_json::from_value(result.clone()).unwrap_or(McpCallResult {
                 content: vec![],
                 is_error: false,
             });
@@ -425,7 +424,9 @@ impl McpClient {
         // Respect _meta["anthropic/maxResultSizeChars"] from the tool definition.
         // This allows servers to declare a larger limit (up to 500K), otherwise we
         // cap at 25K to avoid flooding the context window.
-        let max_chars = self.tools.iter()
+        let max_chars = self
+            .tools
+            .iter()
             .find(|t| t.name == tool_name)
             .map(|t| t.max_result_chars())
             .unwrap_or(25_000);
@@ -435,7 +436,9 @@ impl McpClient {
             let truncated: String = output.chars().take(max_chars).collect();
             output = format!(
                 "{}\n\n[Result truncated: {} chars total, limit {}]",
-                truncated, output.len(), max_chars
+                truncated,
+                output.len(),
+                max_chars
             );
         }
 

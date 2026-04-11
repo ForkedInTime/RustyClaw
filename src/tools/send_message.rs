@@ -8,11 +8,10 @@
 /// in separate processes can exchange messages.
 ///
 /// Mailbox layout: ~/.claude/mailboxes/<team>/<recipient>/messages/<uuid>.json
-
 use crate::tools::{Tool, ToolContext, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub struct SendMessageTool;
 
@@ -75,7 +74,7 @@ impl Tool for SendMessageTool {
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
         if !is_agent_swarms_enabled() {
             return Ok(ToolOutput::error(
-                "Agent swarms are not enabled. Set RUSTYCLAW_EXPERIMENTAL_AGENT_TEAMS=1 to use this tool."
+                "Agent swarms are not enabled. Set RUSTYCLAW_EXPERIMENTAL_AGENT_TEAMS=1 to use this tool.",
             ));
         }
 
@@ -86,14 +85,15 @@ impl Tool for SendMessageTool {
 
         if to.contains('@') {
             return Ok(ToolOutput::error(
-                "to must be a bare teammate name or \"*\" — there is only one team per session"
+                "to must be a bare teammate name or \"*\" — there is only one team per session",
             ));
         }
 
         let message = &input["message"];
         let summary = input["summary"].as_str();
         let team_name = std::env::var("RUSTYCLAW_TEAM_NAME").unwrap_or_else(|_| "default".into());
-        let sender_name = std::env::var("RUSTYCLAW_AGENT_NAME").unwrap_or_else(|_| "team-lead".into());
+        let sender_name =
+            std::env::var("RUSTYCLAW_AGENT_NAME").unwrap_or_else(|_| "team-lead".into());
         let timestamp = {
             let secs = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -111,29 +111,39 @@ impl Tool for SendMessageTool {
         };
 
         // Validate string messages need a summary
-        if message.is_string() && to != "*"
-            && summary.map(|s| s.trim().is_empty()).unwrap_or(true) {
-                return Ok(ToolOutput::error("summary is required when message is a string"));
-            }
+        if message.is_string() && to != "*" && summary.map(|s| s.trim().is_empty()).unwrap_or(true)
+        {
+            return Ok(ToolOutput::error(
+                "summary is required when message is a string",
+            ));
+        }
 
         // Broadcast: send to all members of the team file
         if to == "*" {
             if !message.is_string() {
-                return Ok(ToolOutput::error("structured messages cannot be broadcast (to: \"*\")"));
+                return Ok(ToolOutput::error(
+                    "structured messages cannot be broadcast (to: \"*\")",
+                ));
             }
             let content = message.as_str().unwrap_or("");
-            let team_file_path = dirs::home_dir()
-                .map(|h| h.join(".claude").join("teams").join(format!("{}.json", team_name)));
+            let team_file_path = dirs::home_dir().map(|h| {
+                h.join(".claude")
+                    .join("teams")
+                    .join(format!("{}.json", team_name))
+            });
 
             let members = if let Some(path) = team_file_path.as_ref().filter(|p| p.exists()) {
                 let data = std::fs::read_to_string(path).unwrap_or_default();
                 let json: Value = serde_json::from_str(&data).unwrap_or_default();
-                json["members"].as_array()
-                    .map(|arr| arr.iter()
-                        .filter_map(|m| m["name"].as_str())
-                        .filter(|name| *name != sender_name.as_str())
-                        .map(|s| s.to_string())
-                        .collect::<Vec<_>>())
+                json["members"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|m| m["name"].as_str())
+                            .filter(|name| *name != sender_name.as_str())
+                            .map(|s| s.to_string())
+                            .collect::<Vec<_>>()
+                    })
                     .unwrap_or_default()
             } else {
                 vec![]
@@ -141,12 +151,19 @@ impl Tool for SendMessageTool {
 
             if members.is_empty() {
                 return Ok(ToolOutput::success(
-                    "{\"success\":true,\"message\":\"No teammates to broadcast to\",\"recipients\":[]}"
+                    "{\"success\":true,\"message\":\"No teammates to broadcast to\",\"recipients\":[]}",
                 ));
             }
 
             for recipient in &members {
-                write_mailbox_message(&team_name, recipient, &sender_name, content, summary, &timestamp)?;
+                write_mailbox_message(
+                    &team_name,
+                    recipient,
+                    &sender_name,
+                    content,
+                    summary,
+                    &timestamp,
+                )?;
             }
 
             let result = json!({
@@ -171,7 +188,14 @@ impl Tool for SendMessageTool {
                         "reason": reason,
                         "timestamp": timestamp
                     });
-                    write_mailbox_message(&team_name, to, &sender_name, &payload.to_string(), None, &timestamp)?;
+                    write_mailbox_message(
+                        &team_name,
+                        to,
+                        &sender_name,
+                        &payload.to_string(),
+                        None,
+                        &timestamp,
+                    )?;
                     let result = json!({
                         "success": true,
                         "message": format!("Shutdown request sent to {}. Request ID: {}", to, request_id),
@@ -181,18 +205,30 @@ impl Tool for SendMessageTool {
                     return Ok(ToolOutput::success(result.to_string()));
                 }
                 "shutdown_response" => {
-                    let request_id = msg_obj.get("request_id").and_then(|v| v.as_str()).unwrap_or("");
-                    let approve = msg_obj.get("approve")
+                    let request_id = msg_obj
+                        .get("request_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let approve = msg_obj
+                        .get("approve")
                         .map(|v| v.as_bool().unwrap_or(false))
                         .unwrap_or(false);
                     let reason = msg_obj.get("reason").and_then(|v| v.as_str()).unwrap_or("");
                     if to != "team-lead" {
-                        return Ok(ToolOutput::error("shutdown_response must be sent to \"team-lead\""));
+                        return Ok(ToolOutput::error(
+                            "shutdown_response must be sent to \"team-lead\"",
+                        ));
                     }
                     if !approve && reason.trim().is_empty() {
-                        return Ok(ToolOutput::error("reason is required when rejecting a shutdown request"));
+                        return Ok(ToolOutput::error(
+                            "reason is required when rejecting a shutdown request",
+                        ));
                     }
-                    let resp_type = if approve { "shutdown_approved" } else { "shutdown_rejected" };
+                    let resp_type = if approve {
+                        "shutdown_approved"
+                    } else {
+                        "shutdown_rejected"
+                    };
                     let payload = json!({
                         "type": resp_type,
                         "requestId": request_id,
@@ -200,21 +236,42 @@ impl Tool for SendMessageTool {
                         "reason": reason,
                         "timestamp": timestamp
                     });
-                    write_mailbox_message(&team_name, to, &sender_name, &payload.to_string(), None, &timestamp)?;
+                    write_mailbox_message(
+                        &team_name,
+                        to,
+                        &sender_name,
+                        &payload.to_string(),
+                        None,
+                        &timestamp,
+                    )?;
                     let msg = if approve {
-                        format!("Shutdown approved. Sent confirmation to team-lead. Agent {} is now exiting.", sender_name)
+                        format!(
+                            "Shutdown approved. Sent confirmation to team-lead. Agent {} is now exiting.",
+                            sender_name
+                        )
                     } else {
-                        format!("Shutdown rejected. Reason: \"{}\". Continuing to work.", reason)
+                        format!(
+                            "Shutdown rejected. Reason: \"{}\". Continuing to work.",
+                            reason
+                        )
                     };
-                    let result = json!({ "success": true, "message": msg, "request_id": request_id });
+                    let result =
+                        json!({ "success": true, "message": msg, "request_id": request_id });
                     return Ok(ToolOutput::success(result.to_string()));
                 }
                 "plan_approval_response" => {
-                    let request_id = msg_obj.get("request_id").and_then(|v| v.as_str()).unwrap_or("");
-                    let approve = msg_obj.get("approve")
+                    let request_id = msg_obj
+                        .get("request_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let approve = msg_obj
+                        .get("approve")
                         .map(|v| v.as_bool().unwrap_or(false))
                         .unwrap_or(false);
-                    let feedback = msg_obj.get("feedback").and_then(|v| v.as_str()).unwrap_or("");
+                    let feedback = msg_obj
+                        .get("feedback")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
                     let payload = json!({
                         "type": "plan_approval_response",
                         "requestId": request_id,
@@ -222,17 +279,28 @@ impl Tool for SendMessageTool {
                         "feedback": feedback,
                         "timestamp": timestamp
                     });
-                    write_mailbox_message(&team_name, to, &sender_name, &payload.to_string(), None, &timestamp)?;
+                    write_mailbox_message(
+                        &team_name,
+                        to,
+                        &sender_name,
+                        &payload.to_string(),
+                        None,
+                        &timestamp,
+                    )?;
                     let msg = if approve {
                         format!("Plan approved for {}.", to)
                     } else {
                         format!("Plan rejected for {} with feedback: \"{}\"", to, feedback)
                     };
-                    let result = json!({ "success": true, "message": msg, "request_id": request_id });
+                    let result =
+                        json!({ "success": true, "message": msg, "request_id": request_id });
                     return Ok(ToolOutput::success(result.to_string()));
                 }
                 _ => {
-                    return Ok(ToolOutput::error(format!("Unknown structured message type: {}", msg_type)));
+                    return Ok(ToolOutput::error(format!(
+                        "Unknown structured message type: {}",
+                        msg_type
+                    )));
                 }
             }
         }

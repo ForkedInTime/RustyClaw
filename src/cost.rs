@@ -2,7 +2,6 @@
 ///
 /// Tracks per-model token usage and cost across the session.
 /// Supports budget limits with warnings at 80% and hard stop at 100%.
-
 use std::collections::HashMap;
 
 // ─── Per-model pricing (USD per million tokens) ─────────────────────────────
@@ -15,27 +14,54 @@ struct ModelPrice {
 /// Get pricing for a model.  Returns (input_price, output_price) per million tokens.
 fn model_price(model: &str) -> ModelPrice {
     if model.contains("opus") {
-        ModelPrice { input: 15.0, output: 75.0 }
+        ModelPrice {
+            input: 15.0,
+            output: 75.0,
+        }
     } else if model.contains("haiku") {
-        ModelPrice { input: 0.25, output: 1.25 }
+        ModelPrice {
+            input: 0.25,
+            output: 1.25,
+        }
     } else if model.contains("sonnet") {
-        ModelPrice { input: 3.0, output: 15.0 }
+        ModelPrice {
+            input: 3.0,
+            output: 15.0,
+        }
     } else if model.starts_with("ollama:") {
         // Local models are free
-        ModelPrice { input: 0.0, output: 0.0 }
+        ModelPrice {
+            input: 0.0,
+            output: 0.0,
+        }
     } else if model.contains("groq:") || model.contains("together:") {
         // Rough estimate for hosted open-source models
-        ModelPrice { input: 0.5, output: 1.0 }
+        ModelPrice {
+            input: 0.5,
+            output: 1.0,
+        }
     } else if model.contains("deepseek:") {
-        ModelPrice { input: 0.27, output: 1.10 }
+        ModelPrice {
+            input: 0.27,
+            output: 1.10,
+        }
     } else if model.contains("mistral:") {
-        ModelPrice { input: 2.0, output: 6.0 }
+        ModelPrice {
+            input: 2.0,
+            output: 6.0,
+        }
     } else if model.contains("oai:") || model.contains("openai:") {
         // GPT-4o class pricing
-        ModelPrice { input: 2.5, output: 10.0 }
+        ModelPrice {
+            input: 2.5,
+            output: 10.0,
+        }
     } else {
         // Unknown — assume Sonnet-tier pricing
-        ModelPrice { input: 3.0, output: 15.0 }
+        ModelPrice {
+            input: 3.0,
+            output: 15.0,
+        }
     }
 }
 
@@ -135,7 +161,9 @@ impl CostTracker {
             let pct = (self.total_cost_usd / budget * 100.0).min(100.0);
             lines.push(format!(
                 "Budget: ${:.2} ({:.0}% used, ${:.4} remaining)",
-                budget, pct, (budget - self.total_cost_usd).max(0.0)
+                budget,
+                pct,
+                (budget - self.total_cost_usd).max(0.0)
             ));
         }
 
@@ -188,7 +216,9 @@ impl CostTracker {
 
     /// Context usage as percentage of a given context window size.
     pub fn context_pct(&self, context_window: u64) -> f64 {
-        if context_window == 0 { return 0.0; }
+        if context_window == 0 {
+            return 0.0;
+        }
         (self.last_input_tokens as f64 / context_window as f64 * 100.0).min(100.0)
     }
 
@@ -206,10 +236,14 @@ impl CostTracker {
     /// Estimate the savings from routing (compare actual cost vs all-high-model cost).
     pub fn routing_savings(&self, high_model: &str) -> f64 {
         let high_price = model_price(high_model);
-        let hypothetical: f64 = self.by_model.values().map(|u| {
-            (u.input_tokens as f64 / 1_000_000.0) * high_price.input
-                + (u.output_tokens as f64 / 1_000_000.0) * high_price.output
-        }).sum();
+        let hypothetical: f64 = self
+            .by_model
+            .values()
+            .map(|u| {
+                (u.input_tokens as f64 / 1_000_000.0) * high_price.input
+                    + (u.output_tokens as f64 / 1_000_000.0) * high_price.output
+            })
+            .sum();
         (hypothetical - self.total_cost_usd).max(0.0)
     }
 }

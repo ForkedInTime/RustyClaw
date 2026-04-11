@@ -1,5 +1,4 @@
 /// Tool trait and registry — port of Tool.ts and tools.ts
-
 pub mod agent;
 pub mod ask_user;
 pub mod bash;
@@ -19,11 +18,11 @@ pub mod multi_edit;
 pub mod notebook;
 pub mod plan_mode;
 pub mod powershell;
-pub mod skill_tool;
 pub mod send_message;
+pub mod skill_tool;
 pub mod sleep;
-pub mod team_tools;
 pub mod tasks;
+pub mod team_tools;
 pub mod todo;
 pub mod tool_search;
 pub mod web_browser;
@@ -141,17 +140,25 @@ impl ToolContext {
 /// The snapshot preserves the file at its current state so /rewind can restore it.
 /// Silently skips if snapshot_dir is None or the file doesn't exist yet (new file).
 pub async fn snapshot_file(ctx: &ToolContext, path: &std::path::Path) {
-    let Some(ref snap_dir) = ctx.snapshot_dir else { return };
-    if !path.exists() { return; } // new file — nothing to snapshot
+    let Some(ref snap_dir) = ctx.snapshot_dir else {
+        return;
+    };
+    if !path.exists() {
+        return;
+    } // new file — nothing to snapshot
 
     // Compute a relative-ish path for the snapshot filename
     // e.g. /home/user/project/src/main.rs → "home_user_project_src_main.rs"
-    let flat_name = path.display().to_string()
+    let flat_name = path
+        .display()
+        .to_string()
         .replace('/', "_")
         .trim_start_matches('_')
         .to_string();
 
-    if let Err(_) = tokio::fs::create_dir_all(snap_dir).await { return; }
+    if let Err(_) = tokio::fs::create_dir_all(snap_dir).await {
+        return;
+    }
     let dest = snap_dir.join(&flat_name);
     let _ = tokio::fs::copy(path, &dest).await;
 }
@@ -209,27 +216,23 @@ pub enum SensitiveOp {
 
 /// File names / suffixes that represent private-key material.
 /// Blocked for BOTH read and write.
-const PRIVATE_KEY_NAMES: &[&str] = &[
-    "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "identity",
-];
-const PRIVATE_KEY_SUFFIXES: &[&str] = &[
-    ".pem", ".key", ".p12", ".pfx", ".jks", ".keystore",
-];
+const PRIVATE_KEY_NAMES: &[&str] = &["id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "identity"];
+const PRIVATE_KEY_SUFFIXES: &[&str] = &[".pem", ".key", ".p12", ".pfx", ".jks", ".keystore"];
 
 /// File names that are secret-material for write-only.
 /// These are commonly read by tooling (e.g. `.env` for config inspection)
 /// but must never be clobbered by the agent.
 const SECRET_WRITE_BLOCK_NAMES: &[&str] = &[
-    "credentials", "credentials.json",
-    ".netrc", ".pgpass",
+    "credentials",
+    "credentials.json",
+    ".netrc",
+    ".pgpass",
     "kubeconfig",
 ];
 
 /// Directory components that signal a secrets tree.
 /// Any path containing one of these components is blocked on write.
-const SECRET_DIR_COMPONENTS: &[&str] = &[
-    ".ssh", ".aws", ".gnupg", ".kube",
-];
+const SECRET_DIR_COMPONENTS: &[&str] = &[".ssh", ".aws", ".gnupg", ".kube"];
 
 /// Does `file_name` look like a dotenv variant (`.env`, `.env.local`,
 /// `.env.production`, etc.) — but NOT `.env.example` / `.env.sample`
@@ -239,8 +242,12 @@ fn is_dotenv(file_name: &str) -> bool {
         return false;
     }
     let rest = &file_name[4..];
-    if rest.is_empty() || rest == ".local" || rest == ".production" || rest == ".development"
-        || rest == ".test" || rest == ".staging"
+    if rest.is_empty()
+        || rest == ".local"
+        || rest == ".production"
+        || rest == ".development"
+        || rest == ".test"
+        || rest == ".staging"
     {
         return true;
     }
@@ -262,14 +269,23 @@ pub fn check_sensitive_path(path: &std::path::Path, op: SensitiveOp) -> Option<T
     if PRIVATE_KEY_NAMES.contains(&file_name) {
         return Some(ToolOutput::error(format!(
             "Refusing to {} private-key file '{}'. This path is on the hard deny-list.",
-            match op { SensitiveOp::Read => "read", SensitiveOp::Write => "modify" },
+            match op {
+                SensitiveOp::Read => "read",
+                SensitiveOp::Write => "modify",
+            },
             file_name
         )));
     }
-    if PRIVATE_KEY_SUFFIXES.iter().any(|s| file_name.to_ascii_lowercase().ends_with(s)) {
+    if PRIVATE_KEY_SUFFIXES
+        .iter()
+        .any(|s| file_name.to_ascii_lowercase().ends_with(s))
+    {
         return Some(ToolOutput::error(format!(
             "Refusing to {} key-material file '{}'. This path is on the hard deny-list.",
-            match op { SensitiveOp::Read => "read", SensitiveOp::Write => "modify" },
+            match op {
+                SensitiveOp::Read => "read",
+                SensitiveOp::Write => "modify",
+            },
             file_name
         )));
     }
@@ -373,21 +389,37 @@ pub fn all_tools_with_state(config: &crate::config::Config) -> (Vec<DynTool>, Sh
 
     // Task management tools (shared registry)
     let registry = tasks::new_registry();
-    tools.push(Arc::new(tasks::TaskCreateTool { registry: registry.clone() }));
-    tools.push(Arc::new(tasks::TaskGetTool    { registry: registry.clone() }));
-    tools.push(Arc::new(tasks::TaskListTool   { registry: registry.clone() }));
-    tools.push(Arc::new(tasks::TaskUpdateTool { registry: registry.clone() }));
-    tools.push(Arc::new(tasks::TaskStopTool   { registry: registry.clone() }));
-    tools.push(Arc::new(tasks::TaskOutputTool { registry: registry.clone() }));
+    tools.push(Arc::new(tasks::TaskCreateTool {
+        registry: registry.clone(),
+    }));
+    tools.push(Arc::new(tasks::TaskGetTool {
+        registry: registry.clone(),
+    }));
+    tools.push(Arc::new(tasks::TaskListTool {
+        registry: registry.clone(),
+    }));
+    tools.push(Arc::new(tasks::TaskUpdateTool {
+        registry: registry.clone(),
+    }));
+    tools.push(Arc::new(tasks::TaskStopTool {
+        registry: registry.clone(),
+    }));
+    tools.push(Arc::new(tasks::TaskOutputTool {
+        registry: registry.clone(),
+    }));
 
     // Worktree tools (shared state)
     let wt_state = worktree::WorktreeState::default();
-    tools.push(Arc::new(worktree::EnterWorktreeTool { state: wt_state.clone() }));
-    tools.push(Arc::new(worktree::ExitWorktreeTool  { state: wt_state }));
+    tools.push(Arc::new(worktree::EnterWorktreeTool {
+        state: wt_state.clone(),
+    }));
+    tools.push(Arc::new(worktree::ExitWorktreeTool { state: wt_state }));
 
     // TodoWrite — shared state readable by /tasks command
     let todo_state = todo::new_todo_state();
-    tools.push(Arc::new(todo::TodoWriteTool { state: todo_state.clone() }));
+    tools.push(Arc::new(todo::TodoWriteTool {
+        state: todo_state.clone(),
+    }));
 
     // Interactive / meta tools
     tools.push(Arc::new(ask_user::AskUserQuestionTool));
@@ -420,19 +452,28 @@ pub fn all_tools_with_state(config: &crate::config::Config) -> (Vec<DynTool>, Sh
     tools.push(Arc::new(notebook::NotebookEditTool));
 
     // Config tool
-    tools.push(Arc::new(config_tool::ConfigTool { config: config.clone() }));
+    tools.push(Arc::new(config_tool::ConfigTool {
+        config: config.clone(),
+    }));
 
     // Cron tools (shared store)
     let cron_store: cron::CronStore = Arc::new(std::sync::Mutex::new(cron::load_jobs()));
-    tools.push(Arc::new(cron::CronCreateTool { store: cron_store.clone() }));
-    tools.push(Arc::new(cron::CronDeleteTool { store: cron_store.clone() }));
-    tools.push(Arc::new(cron::CronListTool   { store: cron_store }));
+    tools.push(Arc::new(cron::CronCreateTool {
+        store: cron_store.clone(),
+    }));
+    tools.push(Arc::new(cron::CronDeleteTool {
+        store: cron_store.clone(),
+    }));
+    tools.push(Arc::new(cron::CronListTool { store: cron_store }));
 
     // ToolSearch — built last so it can include all tool names+descriptions
-    let snapshot: Vec<(String, String)> = tools.iter()
+    let snapshot: Vec<(String, String)> = tools
+        .iter()
         .map(|t| (t.name().to_string(), t.description().to_string()))
         .collect();
-    tools.push(Arc::new(tool_search::ToolSearchTool { tools_snapshot: snapshot }));
+    tools.push(Arc::new(tool_search::ToolSearchTool {
+        tools_snapshot: snapshot,
+    }));
 
     let shared = SharedToolState { todo: todo_state };
     (tools, shared)
@@ -470,7 +511,9 @@ mod sensitive_path_tests {
     use super::*;
     use std::path::PathBuf;
 
-    fn p(s: &str) -> PathBuf { PathBuf::from(s) }
+    fn p(s: &str) -> PathBuf {
+        PathBuf::from(s)
+    }
 
     #[test]
     fn write_blocks_dotenv() {
@@ -488,7 +531,9 @@ mod sensitive_path_tests {
 
     #[test]
     fn write_blocks_ssh_dir() {
-        assert!(check_sensitive_path(&p("/home/u/.ssh/authorized_keys"), SensitiveOp::Write).is_some());
+        assert!(
+            check_sensitive_path(&p("/home/u/.ssh/authorized_keys"), SensitiveOp::Write).is_some()
+        );
         assert!(check_sensitive_path(&p("/home/u/.ssh/config"), SensitiveOp::Write).is_some());
     }
 
@@ -551,7 +596,11 @@ mod sensitive_path_tests {
         let all_entries: Vec<(&str, &str)> = PRIVATE_KEY_NAMES
             .iter()
             .map(|e| ("PRIVATE_KEY_NAMES", *e))
-            .chain(PRIVATE_KEY_SUFFIXES.iter().map(|e| ("PRIVATE_KEY_SUFFIXES", *e)))
+            .chain(
+                PRIVATE_KEY_SUFFIXES
+                    .iter()
+                    .map(|e| ("PRIVATE_KEY_SUFFIXES", *e)),
+            )
             .chain(
                 SECRET_WRITE_BLOCK_NAMES
                     .iter()

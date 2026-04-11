@@ -3,7 +3,6 @@
 /// Each session is stored as two files in ~/.claude/sessions/:
 ///   <uuid>.jsonl  — one Message per line (full API history)
 ///   <uuid>.meta   — JSON with name, created_at, first_preview
-
 use crate::api::types::{ContentBlock, Message, Role};
 use crate::tui::app::ChatEntry;
 use anyhow::{Context, Result};
@@ -79,21 +78,32 @@ impl Session {
             undo_position: 0,
         };
         meta.save().await?;
-        Ok(Self { id: id.clone(), meta, path: Self::jsonl_path(&id) })
+        Ok(Self {
+            id: id.clone(),
+            meta,
+            path: Self::jsonl_path(&id),
+        })
     }
 
     /// Resume an existing session by ID — loads meta, returns Session + messages.
     pub async fn resume(id: &str) -> Result<(Self, Vec<Message>)> {
-        let meta = SessionMeta::load(id).await
+        let meta = SessionMeta::load(id)
+            .await
             .with_context(|| format!("Session '{id}' not found"))?;
         let messages = Self::load_messages(id).await?;
-        let s = Self { id: id.to_string(), meta, path: Self::jsonl_path(id) };
+        let s = Self {
+            id: id.to_string(),
+            meta,
+            path: Self::jsonl_path(id),
+        };
         Ok((s, messages))
     }
 
     /// Append new messages to the session file.
     pub async fn append(&mut self, new_messages: &[Message]) -> Result<()> {
-        if new_messages.is_empty() { return Ok(()); }
+        if new_messages.is_empty() {
+            return Ok(());
+        }
 
         let mut file = fs::OpenOptions::new()
             .create(true)
@@ -109,10 +119,11 @@ impl Session {
 
         // Update preview from first user message if not yet set
         if self.meta.preview.is_empty()
-            && let Some(preview) = first_user_preview(new_messages) {
-                self.meta.preview = preview;
-                self.meta.save().await?;
-            }
+            && let Some(preview) = first_user_preview(new_messages)
+        {
+            self.meta.preview = preview;
+            self.meta.save().await?;
+        }
 
         Ok(())
     }
@@ -145,7 +156,9 @@ impl Session {
     /// Load all messages from a session file.
     pub async fn load_messages(id: &str) -> Result<Vec<Message>> {
         let path = Self::jsonl_path(id);
-        if !path.exists() { return Ok(Vec::new()); }
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
         let content = fs::read_to_string(&path).await?;
         content
             .lines()
@@ -158,7 +171,9 @@ impl Session {
     /// Backfills empty previews from session messages (for older sessions).
     pub async fn list() -> Result<Vec<SessionMeta>> {
         let dir = crate::config::Config::sessions_dir();
-        if !dir.exists() { return Ok(Vec::new()); }
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
 
         let mut entries = fs::read_dir(&dir).await?;
         let mut sessions: Vec<(u64, SessionMeta)> = Vec::new();
@@ -166,21 +181,24 @@ impl Session {
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("meta") {
-                let id = path.file_stem()
+                let id = path
+                    .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("")
                     .to_string();
                 if !id.is_empty()
-                    && let Ok(mut meta) = SessionMeta::load(&id).await {
-                        // Backfill empty preview from session messages
-                        if meta.preview.is_empty()
-                            && let Ok(msgs) = Self::load_messages(&id).await
-                                && let Some(preview) = first_user_preview(&msgs) {
-                                    meta.preview = preview;
-                                    let _ = meta.save().await;
-                                }
-                        sessions.push((meta.created_at, meta));
+                    && let Ok(mut meta) = SessionMeta::load(&id).await
+                {
+                    // Backfill empty preview from session messages
+                    if meta.preview.is_empty()
+                        && let Ok(msgs) = Self::load_messages(&id).await
+                        && let Some(preview) = first_user_preview(&msgs)
+                    {
+                        meta.preview = preview;
+                        let _ = meta.save().await;
                     }
+                    sessions.push((meta.created_at, meta));
+                }
             }
         }
 
@@ -191,9 +209,13 @@ impl Session {
     /// Delete a session (both .jsonl and .meta).
     pub async fn delete(id: &str) -> Result<()> {
         let jsonl = Self::jsonl_path(id);
-        let meta  = SessionMeta::path_for(id);
-        if jsonl.exists() { fs::remove_file(&jsonl).await?; }
-        if meta.exists()  { fs::remove_file(&meta).await?; }
+        let meta = SessionMeta::path_for(id);
+        if jsonl.exists() {
+            fs::remove_file(&jsonl).await?;
+        }
+        if meta.exists() {
+            fs::remove_file(&meta).await?;
+        }
         Ok(())
     }
 
@@ -205,7 +227,10 @@ impl Session {
 
         let mut out = format!("# Session: {name}\n\n");
         for msg in &messages {
-            let role = match msg.role { Role::User => "You", Role::Assistant => "Claude" };
+            let role = match msg.role {
+                Role::User => "You",
+                Role::Assistant => "Claude",
+            };
             for block in &msg.content {
                 match block {
                     ContentBlock::Text { text } => {
@@ -232,7 +257,10 @@ impl Session {
 
         let mut out = format!("# Session: {name}\n\n");
         for msg in &messages {
-            let role = match msg.role { Role::User => "You", Role::Assistant => "Claude" };
+            let role = match msg.role {
+                Role::User => "You",
+                Role::Assistant => "Claude",
+            };
             for block in &msg.content {
                 match block {
                     ContentBlock::Text { text } => {
@@ -261,12 +289,22 @@ pub fn entries_from_messages(messages: &[Message]) -> Vec<ChatEntry> {
                         ContentBlock::Text { text } => {
                             entries.push(ChatEntry::user(text.clone()));
                         }
-                        ContentBlock::ToolResult { content, is_error, .. } => {
-                            let text = content.iter()
-                                .map(|c| { let crate::api::types::ToolResultContent::Text { text } = c; text.as_str() })
+                        ContentBlock::ToolResult {
+                            content, is_error, ..
+                        } => {
+                            let text = content
+                                .iter()
+                                .map(|c| {
+                                    let crate::api::types::ToolResultContent::Text { text } = c;
+                                    text.as_str()
+                                })
                                 .collect::<Vec<_>>()
                                 .join("\n");
-                            let preview = if text.len() > 300 { format!("{}…", &text[..300]) } else { text };
+                            let preview = if text.len() > 300 {
+                                format!("{}…", &text[..300])
+                            } else {
+                                text
+                            };
                             if is_error.unwrap_or(false) {
                                 entries.push(ChatEntry::error(preview));
                             } else {
@@ -315,19 +353,17 @@ fn unix_now() -> u64 {
 /// Used when launching with --tmux so the pane has a recognisable title.
 pub fn generate_tmux_session_name() -> String {
     const ADJECTIVES: &[&str] = &[
-        "bold", "bright", "calm", "crisp", "dawn", "deft", "early", "eager",
-        "fair", "fast", "fierce", "free", "glad", "gold", "grand", "great",
-        "keen", "kind", "light", "lush", "mild", "neat", "nimble", "noble",
-        "prime", "pure", "quick", "quiet", "rapid", "sharp", "sleek", "smart",
-        "soft", "steady", "still", "strong", "swift", "true", "vivid", "warm",
+        "bold", "bright", "calm", "crisp", "dawn", "deft", "early", "eager", "fair", "fast",
+        "fierce", "free", "glad", "gold", "grand", "great", "keen", "kind", "light", "lush",
+        "mild", "neat", "nimble", "noble", "prime", "pure", "quick", "quiet", "rapid", "sharp",
+        "sleek", "smart", "soft", "steady", "still", "strong", "swift", "true", "vivid", "warm",
     ];
     const ANIMALS: &[&str] = &[
-        "badger", "bear", "bison", "boar", "capybara", "cat", "crane", "deer",
-        "dolphin", "dove", "eagle", "elk", "falcon", "finch", "fox", "gecko",
-        "goose", "heron", "ibis", "jaguar", "jay", "kite", "kiwi", "leopard",
-        "lion", "lynx", "mink", "moose", "newt", "orca", "otter", "owl",
-        "panda", "panther", "parrot", "puma", "raven", "seal", "shark", "stag",
-        "swift", "tiger", "toucan", "turtle", "viper", "vole", "wolf", "wren",
+        "badger", "bear", "bison", "boar", "capybara", "cat", "crane", "deer", "dolphin", "dove",
+        "eagle", "elk", "falcon", "finch", "fox", "gecko", "goose", "heron", "ibis", "jaguar",
+        "jay", "kite", "kiwi", "leopard", "lion", "lynx", "mink", "moose", "newt", "orca", "otter",
+        "owl", "panda", "panther", "parrot", "puma", "raven", "seal", "shark", "stag", "swift",
+        "tiger", "toucan", "turtle", "viper", "vole", "wolf", "wren",
     ];
 
     let hostname = std::fs::read_to_string("/etc/hostname")
@@ -336,7 +372,8 @@ pub fn generate_tmux_session_name() -> String {
         .filter(|s| !s.is_empty())
         .or_else(|| {
             std::process::Command::new("hostname")
-                .output().ok()
+                .output()
+                .ok()
                 .and_then(|o| String::from_utf8(o.stdout).ok())
                 .map(|s| s.trim().to_lowercase())
                 .filter(|s| !s.is_empty())
@@ -349,7 +386,7 @@ pub fn generate_tmux_session_name() -> String {
         .map(|d| d.as_nanos() as usize)
         .unwrap_or(42);
 
-    let adj    = ADJECTIVES[seed % ADJECTIVES.len()];
+    let adj = ADJECTIVES[seed % ADJECTIVES.len()];
     let animal = ANIMALS[(seed / ADJECTIVES.len()) % ANIMALS.len()];
 
     format!("{hostname}-{adj}-{animal}")

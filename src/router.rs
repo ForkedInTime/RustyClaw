@@ -5,7 +5,6 @@
 ///
 /// Other tools exist solely to provide this functionality.
 /// We do it natively, in the binary.
-
 use tracing::debug;
 
 // ─── Complexity levels ──────────────────────────────────────────────────────
@@ -87,39 +86,83 @@ impl RouterConfig {
 
 /// Keywords / patterns that signal super-high complexity (needs 1M context / Opus).
 const SUPER_HIGH_SIGNALS: &[&str] = &[
-    "entire codebase", "all files", "every file", "whole project", "whole repo",
-    "full codebase", "full project", "analyze everything", "review everything",
-    "complete rewrite", "full rewrite", "full audit", "codebase-wide",
-    "massive refactor", "large-scale", "cross-cutting",
+    "entire codebase",
+    "all files",
+    "every file",
+    "whole project",
+    "whole repo",
+    "full codebase",
+    "full project",
+    "analyze everything",
+    "review everything",
+    "complete rewrite",
+    "full rewrite",
+    "full audit",
+    "codebase-wide",
+    "massive refactor",
+    "large-scale",
+    "cross-cutting",
 ];
 
 /// Keywords / patterns that signal high complexity.
 const HIGH_SIGNALS: &[&str] = &[
-    "refactor", "rewrite", "architect", "redesign", "migrate",
-    "race condition", "deadlock", "concurrency", "parallel",
-    "security", "vulnerability", "exploit",
-    "optimize", "performance", "benchmark",
-    "implement", "build", "create a", "design",
-    "multi-file", "across files",
-    "debug", "investigate", "diagnose", "root cause",
-    "review", "audit", "analyze",
+    "refactor",
+    "rewrite",
+    "architect",
+    "redesign",
+    "migrate",
+    "race condition",
+    "deadlock",
+    "concurrency",
+    "parallel",
+    "security",
+    "vulnerability",
+    "exploit",
+    "optimize",
+    "performance",
+    "benchmark",
+    "implement",
+    "build",
+    "create a",
+    "design",
+    "multi-file",
+    "across files",
+    "debug",
+    "investigate",
+    "diagnose",
+    "root cause",
+    "review",
+    "audit",
+    "analyze",
 ];
 
 /// Keywords / patterns that signal low complexity.
 /// NOTE: multi-word phrases only to avoid false positives from substring matching.
 /// Single-word signals are checked with word-boundary matching below.
 const LOW_SIGNALS: &[&str] = &[
-    "explain", "what is", "what does", "what's", "how does",
-    "rename", "typo", "spelling", "format", "lint",
-    "add a comment", "add comment", "docstring",
+    "explain",
+    "what is",
+    "what does",
+    "what's",
+    "how does",
+    "rename",
+    "typo",
+    "spelling",
+    "format",
+    "lint",
+    "add a comment",
+    "add comment",
+    "docstring",
     "show me",
-    "go ahead", "do it", "thank you",
+    "go ahead",
+    "do it",
+    "thank you",
 ];
 
 /// Single-word low-complexity signals (matched as whole words).
 const LOW_WORDS: &[&str] = &[
-    "yes", "no", "ok", "sure", "thanks", "hello", "hi", "hey",
-    "help", "version", "list", "print", "proceed", "continue",
+    "yes", "no", "ok", "sure", "thanks", "hello", "hi", "hey", "help", "version", "list", "print",
+    "proceed", "continue",
 ];
 
 /// Analyze a user message and determine its complexity.
@@ -181,15 +224,21 @@ pub fn detect_complexity(input: &str) -> Complexity {
     }
 
     // File paths suggest code work
-    if input.contains(".rs") || input.contains(".ts") || input.contains(".py")
-        || input.contains(".go") || input.contains(".js")
-        || input.contains("src/") || input.contains("./")
+    if input.contains(".rs")
+        || input.contains(".ts")
+        || input.contains(".py")
+        || input.contains(".go")
+        || input.contains(".js")
+        || input.contains("src/")
+        || input.contains("./")
     {
         score += 1;
     }
 
     // Action verbs that suggest implementation (not just reading)
-    for verb in &["add", "write", "fix", "change", "update", "modify", "remove", "delete", "test"] {
+    for verb in &[
+        "add", "write", "fix", "change", "update", "modify", "remove", "delete", "test",
+    ] {
         if lower.starts_with(verb) || lower.contains(&format!(" {verb} ")) {
             score += 1;
             break;
@@ -239,10 +288,10 @@ impl std::fmt::Display for Phase {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Phase::Research => write!(f, "research"),
-            Phase::Plan     => write!(f, "plan"),
-            Phase::Edit     => write!(f, "edit"),
-            Phase::Review   => write!(f, "review"),
-            Phase::Default  => write!(f, "default"),
+            Phase::Plan => write!(f, "plan"),
+            Phase::Edit => write!(f, "edit"),
+            Phase::Review => write!(f, "review"),
+            Phase::Default => write!(f, "default"),
         }
     }
 }
@@ -250,25 +299,53 @@ impl std::fmt::Display for Phase {
 // ─── Phase detection signals ─────────────────────────────────────────────────
 
 const RESEARCH_SIGNALS: &[&str] = &[
-    "what does", "how does", "find", "search", "explain",
-    "show me", "where is", "list", "read", "what is",
+    "what does",
+    "how does",
+    "find",
+    "search",
+    "explain",
+    "show me",
+    "where is",
+    "list",
+    "read",
+    "what is",
 ];
 
 const PLAN_SIGNALS: &[&str] = &[
-    "plan", "design", "approach", "strategy", "how should we",
-    "architecture", "propose", "outline",
+    "plan",
+    "design",
+    "approach",
+    "strategy",
+    "how should we",
+    "architecture",
+    "propose",
+    "outline",
 ];
 
 // NOTE: single words here are matched as whole words (space-delimited) to
 // avoid "implement" matching inside "implementation", etc.
 const EDIT_SIGNALS: &[&str] = &[
-    "implement", "add", "fix", "change", "refactor",
-    "write", "create", "update", "modify", "build",
+    "implement",
+    "add",
+    "fix",
+    "change",
+    "refactor",
+    "write",
+    "create",
+    "update",
+    "modify",
+    "build",
 ];
 
 const REVIEW_SIGNALS: &[&str] = &[
-    "review", "check", "verify", "test", "does this look",
-    "is this correct", "audit", "validate",
+    "review",
+    "check",
+    "verify",
+    "test",
+    "does this look",
+    "is this correct",
+    "audit",
+    "validate",
 ];
 
 /// Match a signal phrase against a lowercased input string.
@@ -285,8 +362,8 @@ fn signal_matches(input: &str, signal: &str) -> bool {
     // Single-word signal: require word boundaries (space, start, or end).
     for (i, _) in input.match_indices(signal) {
         let before_ok = i == 0 || !input.as_bytes()[i - 1].is_ascii_alphanumeric();
-        let after  = i + signal.len();
-        let after_ok  = after >= input.len() || !input.as_bytes()[after].is_ascii_alphanumeric();
+        let after = i + signal.len();
+        let after_ok = after >= input.len() || !input.as_bytes()[after].is_ascii_alphanumeric();
         if before_ok && after_ok {
             return true;
         }
@@ -303,13 +380,16 @@ pub fn detect_phase(input: &str) -> Phase {
     let lower = input.to_lowercase();
 
     let score = |signals: &[&str]| -> usize {
-        signals.iter().filter(|&&s| signal_matches(&lower, s)).count()
+        signals
+            .iter()
+            .filter(|&&s| signal_matches(&lower, s))
+            .count()
     };
 
     let research = score(RESEARCH_SIGNALS);
-    let plan     = score(PLAN_SIGNALS);
-    let edit     = score(EDIT_SIGNALS);
-    let review   = score(REVIEW_SIGNALS);
+    let plan = score(PLAN_SIGNALS);
+    let edit = score(EDIT_SIGNALS);
+    let review = score(REVIEW_SIGNALS);
 
     let max = research.max(plan).max(edit).max(review);
 
@@ -318,15 +398,23 @@ pub fn detect_phase(input: &str) -> Phase {
     }
 
     // Unique winner required — ties yield Default
-    let winners: usize = [research, plan, edit, review].iter().filter(|&&s| s == max).count();
+    let winners: usize = [research, plan, edit, review]
+        .iter()
+        .filter(|&&s| s == max)
+        .count();
     if winners > 1 {
         return Phase::Default;
     }
 
-    if research == max { Phase::Research }
-    else if plan == max { Phase::Plan }
-    else if edit == max { Phase::Edit }
-    else { Phase::Review }
+    if research == max {
+        Phase::Research
+    } else if plan == max {
+        Phase::Plan
+    } else if edit == max {
+        Phase::Edit
+    } else {
+        Phase::Review
+    }
 }
 
 // ─── Phase router configuration ──────────────────────────────────────────────
@@ -348,10 +436,10 @@ impl Default for PhaseRouterConfig {
         Self {
             enabled: false,
             research_model: "claude-haiku-4-5".into(),
-            plan_model:     "claude-sonnet-4-6".into(),
-            edit_model:     "claude-sonnet-4-6".into(),
-            review_model:   "claude-opus-4-6".into(),
-            default_model:  "claude-sonnet-4-6".into(),
+            plan_model: "claude-sonnet-4-6".into(),
+            edit_model: "claude-sonnet-4-6".into(),
+            review_model: "claude-opus-4-6".into(),
+            default_model: "claude-sonnet-4-6".into(),
         }
     }
 }
@@ -361,10 +449,10 @@ impl PhaseRouterConfig {
     pub fn model_for(&self, phase: Phase) -> &str {
         match phase {
             Phase::Research => &self.research_model,
-            Phase::Plan     => &self.plan_model,
-            Phase::Edit     => &self.edit_model,
-            Phase::Review   => &self.review_model,
-            Phase::Default  => &self.default_model,
+            Phase::Plan => &self.plan_model,
+            Phase::Edit => &self.edit_model,
+            Phase::Review => &self.review_model,
+            Phase::Default => &self.default_model,
         }
     }
 }
@@ -384,14 +472,22 @@ mod tests {
 
     #[test]
     fn test_simple_questions_are_low() {
-        assert_eq!(detect_complexity("what does this function do?"), Complexity::Low);
-        assert_eq!(detect_complexity("explain the config module"), Complexity::Low);
+        assert_eq!(
+            detect_complexity("what does this function do?"),
+            Complexity::Low
+        );
+        assert_eq!(
+            detect_complexity("explain the config module"),
+            Complexity::Low
+        );
     }
 
     #[test]
     fn test_refactor_is_high() {
         assert_eq!(
-            detect_complexity("refactor the authentication module to use JWT tokens instead of sessions"),
+            detect_complexity(
+                "refactor the authentication module to use JWT tokens instead of sessions"
+            ),
             Complexity::High
         );
     }
@@ -399,7 +495,9 @@ mod tests {
     #[test]
     fn test_complex_debug_is_high() {
         assert_eq!(
-            detect_complexity("there's a race condition in the connection pool when multiple threads try to acquire a connection simultaneously, can you debug and fix it?"),
+            detect_complexity(
+                "there's a race condition in the connection pool when multiple threads try to acquire a connection simultaneously, can you debug and fix it?"
+            ),
             Complexity::High
         );
     }
@@ -415,7 +513,9 @@ mod tests {
     #[test]
     fn test_super_high_entire_codebase() {
         assert_eq!(
-            detect_complexity("analyze the entire codebase and refactor all error handling to use a consistent pattern"),
+            detect_complexity(
+                "analyze the entire codebase and refactor all error handling to use a consistent pattern"
+            ),
             Complexity::SuperHigh
         );
     }
@@ -423,7 +523,9 @@ mod tests {
     #[test]
     fn test_super_high_full_audit() {
         assert_eq!(
-            detect_complexity("do a full audit of every file in the project for security vulnerabilities"),
+            detect_complexity(
+                "do a full audit of every file in the project for security vulnerabilities"
+            ),
             Complexity::SuperHigh
         );
     }

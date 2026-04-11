@@ -8,12 +8,11 @@
 ///
 /// This is the feature Cursor charges $20/month for.  We do it locally, for free,
 /// in a single binary with zero external dependencies.
-
 pub mod indexer;
 pub mod search;
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
 
@@ -42,14 +41,13 @@ impl RagDb {
             .context("Failed to create .claude directory for RAG index")?;
 
         let db_path = claude_dir.join("rag.db");
-        let conn = Connection::open(&db_path)
-            .context("Failed to open RAG database")?;
+        let conn = Connection::open(&db_path).context("Failed to open RAG database")?;
 
         // Performance: WAL mode + relaxed sync for indexing speed
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
-             PRAGMA cache_size = -8000;",  // 8MB cache
+             PRAGMA cache_size = -8000;", // 8MB cache
         )?;
 
         // Create tables if they don't exist
@@ -139,7 +137,7 @@ impl RagDb {
                 VALUES ('delete', old.id, old.key, old.value);
                 INSERT INTO memory_fts(rowid, key, value)
                 VALUES (new.id, new.key, new.value);
-            END;"
+            END;",
         )?;
 
         // Run migrations if the persisted schema version is behind the
@@ -152,11 +150,9 @@ impl RagDb {
 
     /// Total number of indexed chunks.
     pub fn chunk_count(&self) -> Result<i64> {
-        let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM code_chunks",
-            [],
-            |row| row.get(0),
-        )?;
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM code_chunks", [], |row| row.get(0))?;
         Ok(count)
     }
 
@@ -183,7 +179,8 @@ impl RagDb {
     /// Delete all chunks for a given file (before re-indexing it).
     #[allow(dead_code)] // public API, used in tests, will be called by incremental re-index
     pub fn delete_file_chunks(&self, path: &str) -> Result<()> {
-        self.conn.execute("DELETE FROM code_chunks WHERE file_path = ?1", [path])?;
+        self.conn
+            .execute("DELETE FROM code_chunks WHERE file_path = ?1", [path])?;
         Ok(())
     }
 
@@ -191,7 +188,7 @@ impl RagDb {
     pub fn clear(&self) -> Result<()> {
         self.conn.execute_batch(
             "DELETE FROM code_chunks;
-             INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild');"
+             INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild');",
         )?;
         Ok(())
     }
@@ -363,7 +360,10 @@ mod tests {
     fn fresh_db_records_current_schema_version() {
         let (_tmp, db) = test_db();
         let v = read_schema_version(&db.conn).unwrap();
-        assert_eq!(v, RAG_SCHEMA_VERSION, "fresh DB must record current version");
+        assert_eq!(
+            v, RAG_SCHEMA_VERSION,
+            "fresh DB must record current version"
+        );
     }
 
     /// A DB created by an older RustyClaw build (pre-versioning, so no

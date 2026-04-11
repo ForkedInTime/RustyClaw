@@ -13,11 +13,10 @@
 ///   Ctrl+R          — while voice mode is on: start/stop recording
 ///
 /// The transcribed text is inserted directly into the input buffer.
-
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::path::PathBuf;
-use tokio::process::Command;
 use std::process::Stdio;
+use tokio::process::Command;
 
 // ── Availability checks ───────────────────────────────────────────────────────
 
@@ -29,10 +28,15 @@ pub enum RecorderBackend {
 }
 
 pub fn find_recorder() -> Option<RecorderBackend> {
-    if which("arecord")  { Some(RecorderBackend::Arecord) }
-    else if which("sox") { Some(RecorderBackend::Sox) }
-    else if which("ffmpeg") { Some(RecorderBackend::Ffmpeg) }
-    else { None }
+    if which("arecord") {
+        Some(RecorderBackend::Arecord)
+    } else if which("sox") {
+        Some(RecorderBackend::Sox)
+    } else if which("ffmpeg") {
+        Some(RecorderBackend::Ffmpeg)
+    } else {
+        None
+    }
 }
 
 pub fn local_whisper_available() -> bool {
@@ -40,7 +44,8 @@ pub fn local_whisper_available() -> bool {
 }
 
 pub fn voice_api_key() -> Option<String> {
-    std::env::var("OPENAI_API_KEY").ok()
+    std::env::var("OPENAI_API_KEY")
+        .ok()
         .or_else(|| std::env::var("WHISPER_API_KEY").ok())
 }
 
@@ -78,10 +83,14 @@ pub async fn start_recording(backend: &RecorderBackend) -> Result<tokio::process
         RecorderBackend::Arecord => {
             Command::new("arecord")
                 .args([
-                    "-f", "S16_LE",   // 16-bit signed little-endian
-                    "-r", "16000",    // 16kHz (Whisper optimal)
-                    "-c", "1",        // mono
-                    "-t", "wav",
+                    "-f",
+                    "S16_LE", // 16-bit signed little-endian
+                    "-r",
+                    "16000", // 16kHz (Whisper optimal)
+                    "-c",
+                    "1", // mono
+                    "-t",
+                    "wav",
                     &out.display().to_string(),
                 ])
                 .stdout(Stdio::null())
@@ -91,30 +100,35 @@ pub async fn start_recording(backend: &RecorderBackend) -> Result<tokio::process
         RecorderBackend::Sox => {
             Command::new("sox")
                 .args([
-                    "-d",             // default audio device
-                    "-r", "16000",
-                    "-c", "1",
-                    "-b", "16",
+                    "-d", // default audio device
+                    "-r",
+                    "16000",
+                    "-c",
+                    "1",
+                    "-b",
+                    "16",
                     &out.display().to_string(),
                 ])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()?
         }
-        RecorderBackend::Ffmpeg => {
-            Command::new("ffmpeg")
-                .args([
-                    "-f", "alsa",
-                    "-i", "default",
-                    "-ar", "16000",
-                    "-ac", "1",
-                    "-y",
-                    &out.display().to_string(),
-                ])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()?
-        }
+        RecorderBackend::Ffmpeg => Command::new("ffmpeg")
+            .args([
+                "-f",
+                "alsa",
+                "-i",
+                "default",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                "-y",
+                &out.display().to_string(),
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?,
     };
     Ok(child)
 }
@@ -122,10 +136,7 @@ pub async fn start_recording(backend: &RecorderBackend) -> Result<tokio::process
 // ── Transcription ─────────────────────────────────────────────────────────────
 
 /// Transcribe the recorded WAV file. Returns the transcribed text.
-pub async fn transcribe(
-    api_url: Option<&str>,
-    api_key: Option<&str>,
-) -> Result<String> {
+pub async fn transcribe(api_url: Option<&str>, api_key: Option<&str>) -> Result<String> {
     let wav = temp_wav_path();
     if !wav.exists() {
         return Err(anyhow!("No recording found at {}", wav.display()));
@@ -140,11 +151,13 @@ pub async fn transcribe(
     let key = api_key
         .map(|s| s.to_string())
         .or_else(voice_api_key)
-        .ok_or_else(|| anyhow!(
-            "No transcription available.\n\
+        .ok_or_else(|| {
+            anyhow!(
+                "No transcription available.\n\
              Set OPENAI_API_KEY or WHISPER_API_KEY env var,\n\
              or install whisper: pip install openai-whisper"
-        ))?;
+            )
+        })?;
 
     let url = api_url.unwrap_or("https://api.openai.com/v1/audio/transcriptions");
     transcribe_api(&wav, url, &key).await
@@ -161,10 +174,14 @@ async fn transcribe_local(wav: &std::path::Path) -> Result<String> {
             let out = Command::new(binary)
                 .args([
                     &wav.display().to_string(),
-                    "--model", "base",
-                    "--output_format", "txt",
-                    "--fp16", "False",
-                    "--output_dir", tmp_dir.to_str().unwrap_or("/tmp"),
+                    "--model",
+                    "base",
+                    "--output_format",
+                    "txt",
+                    "--fp16",
+                    "False",
+                    "--output_dir",
+                    tmp_dir.to_str().unwrap_or("/tmp"),
                 ])
                 .output()
                 .await?;
@@ -188,7 +205,8 @@ async fn transcribe_local(wav: &std::path::Path) -> Result<String> {
 
 async fn transcribe_api(wav: &std::path::Path, url: &str, api_key: &str) -> Result<String> {
     let wav_bytes = tokio::fs::read(wav).await?;
-    let filename = wav.file_name()
+    let filename = wav
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("audio.wav")
         .to_string();
@@ -202,7 +220,8 @@ async fn transcribe_api(wav: &std::path::Path, url: &str, api_key: &str) -> Resu
         .text("response_format", "text");
 
     let client = reqwest::Client::new();
-    let resp = client.post(url)
+    let resp = client
+        .post(url)
         .bearer_auth(api_key)
         .multipart(form)
         .send()
@@ -229,13 +248,20 @@ pub fn find_all_voices() -> Vec<(String, String)> {
     let mut voices = Vec::new();
     // Check for voice clone sample
     if let Some(clone_path) = voice_clone_sample_path()
-        && clone_path.exists() {
-            let tier = detect_clone_tier(&clone_path);
-            voices.push((format!("Your voice ({tier} tier)"), clone_path.display().to_string()));
-        }
+        && clone_path.exists()
+    {
+        let tier = detect_clone_tier(&clone_path);
+        voices.push((
+            format!("Your voice ({tier} tier)"),
+            clone_path.display().to_string(),
+        ));
+    }
     // Default XTTS v2 speaker
     if xtts_available() {
-        voices.push((format!("XTTS v2 default ({XTTS_DEFAULT_SPEAKER})"), XTTS_DEFAULT_SPEAKER.to_string()));
+        voices.push((
+            format!("XTTS v2 default ({XTTS_DEFAULT_SPEAKER})"),
+            XTTS_DEFAULT_SPEAKER.to_string(),
+        ));
     }
     voices
 }
@@ -253,20 +279,28 @@ fn strip_for_speech(text: &str) -> String {
             in_code_block = !in_code_block;
             continue;
         }
-        if in_code_block { continue; }
+        if in_code_block {
+            continue;
+        }
 
         // Strip heading markers
-        let line = trimmed
-            .trim_start_matches('#')
-            .trim_start();
+        let line = trimmed.trim_start_matches('#').trim_start();
 
         // Strip leading list markers (-, *, +, or "1. 2." etc.)
-        let line = if let Some(rest) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")).or_else(|| line.strip_prefix("+ ")) {
+        let line = if let Some(rest) = line
+            .strip_prefix("- ")
+            .or_else(|| line.strip_prefix("* "))
+            .or_else(|| line.strip_prefix("+ "))
+        {
             rest
         } else {
             // numbered list: "1. " "12. "
             let maybe = line.trim_start_matches(|c: char| c.is_ascii_digit());
-            if maybe.starts_with(". ") { maybe.trim_start_matches(". ") } else { line }
+            if maybe.starts_with(". ") {
+                maybe.trim_start_matches(". ")
+            } else {
+                line
+            }
         };
 
         // Strip block quotes
@@ -291,7 +325,9 @@ fn strip_inline_md(s: &str) -> String {
             '`' => {
                 // Skip inline code
                 i += 1;
-                while i < chars.len() && chars[i] != '`' { i += 1; }
+                while i < chars.len() && chars[i] != '`' {
+                    i += 1;
+                }
             }
             '*' if i + 1 < chars.len() && chars[i + 1] == '*' => {
                 i += 1; // skip second *
@@ -360,7 +396,9 @@ fn tts_python() -> Option<String> {
         }
     }
     // Fallback: python3.11 in PATH
-    if which("python3.11") { return Some("python3.11".into()); }
+    if which("python3.11") {
+        return Some("python3.11".into());
+    }
     None
 }
 
@@ -377,15 +415,13 @@ pub async fn ensure_xtts_server() -> Result<u16> {
         return Ok(XTTS_SERVER_PORT);
     }
 
-    let script = xtts_server_script()
-        .ok_or_else(|| anyhow!("xtts-server.py not found. Rebuild RustyClaw or check scripts/ dir."))?;
+    let script = xtts_server_script().ok_or_else(|| {
+        anyhow!("xtts-server.py not found. Rebuild RustyClaw or check scripts/ dir.")
+    })?;
     let python = tts_python()
         .ok_or_else(|| anyhow!("No Python for TTS venv. Run: uv tool install TTS --python 3.11"))?;
 
-    let mut args = vec![
-        script.display().to_string(),
-        XTTS_SERVER_PORT.to_string(),
-    ];
+    let mut args = vec![script.display().to_string(), XTTS_SERVER_PORT.to_string()];
     if !cuda_available() {
         args.push("--cpu".into());
     }
@@ -412,19 +448,21 @@ pub async fn ensure_xtts_server() -> Result<u16> {
 /// Stop the XTTS v2 server if running.
 pub fn stop_xtts_server() {
     let _ = std::process::Command::new("sh")
-        .args(["-c", &format!("kill $(lsof -ti:{XTTS_SERVER_PORT}) 2>/dev/null")])
+        .args([
+            "-c",
+            &format!("kill $(lsof -ti:{XTTS_SERVER_PORT}) 2>/dev/null"),
+        ])
         .output();
 }
 
 // ── Server-based synthesis ───────────────────────────────────────────────────
 
 /// Synthesise via the XTTS v2 server (fast — model stays loaded in GPU VRAM).
-async fn speak_via_server(
-    text: &str,
-    stop_rx: tokio::sync::oneshot::Receiver<()>,
-) -> Result<bool> {
+async fn speak_via_server(text: &str, stop_rx: tokio::sync::oneshot::Receiver<()>) -> Result<bool> {
     let clean = strip_for_speech(text);
-    if clean.is_empty() { return Ok(false); }
+    if clean.is_empty() {
+        return Ok(false);
+    }
 
     let words: Vec<&str> = clean.split_whitespace().collect();
     let truncated = words.len() > TTS_WORD_LIMIT;
@@ -440,7 +478,10 @@ async fn speak_via_server(
         format!(
             r#"{{"text":"{}","speaker_wav":"{}","language":"en"}}"#,
             speech_text.replace('\\', "\\\\").replace('"', "\\\""),
-            wav.display().to_string().replace('\\', "\\\\").replace('"', "\\\""),
+            wav.display()
+                .to_string()
+                .replace('\\', "\\\\")
+                .replace('"', "\\\""),
         )
     } else {
         format!(
@@ -456,12 +497,18 @@ async fn speak_via_server(
     // HTTP POST to server
     let mut curl = Command::new("curl")
         .args([
-            "-s", "-X", "POST",
+            "-s",
+            "-X",
+            "POST",
             &format!("http://127.0.0.1:{XTTS_SERVER_PORT}/tts"),
-            "-H", "Content-Type: application/json",
-            "-d", &body,
-            "--output", &wav_out.display().to_string(),
-            "--max-time", "30",
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            &body,
+            "--output",
+            &wav_out.display().to_string(),
+            "--max-time",
+            "30",
         ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -498,7 +545,9 @@ async fn speak_via_server_default(
     stop_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<bool> {
     let clean = strip_for_speech(text);
-    if clean.is_empty() { return Ok(false); }
+    if clean.is_empty() {
+        return Ok(false);
+    }
 
     let words: Vec<&str> = clean.split_whitespace().collect();
     let truncated = words.len() > TTS_WORD_LIMIT;
@@ -519,12 +568,18 @@ async fn speak_via_server_default(
 
     let mut curl = Command::new("curl")
         .args([
-            "-s", "-X", "POST",
+            "-s",
+            "-X",
+            "POST",
             &format!("http://127.0.0.1:{XTTS_SERVER_PORT}/tts"),
-            "-H", "Content-Type: application/json",
-            "-d", &body,
-            "--output", &wav_out.display().to_string(),
-            "--max-time", "30",
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            &body,
+            "--output",
+            &wav_out.display().to_string(),
+            "--max-time",
+            "30",
         ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -572,9 +627,10 @@ pub async fn speak(
     // ── XTTS v2 CLI fallback (cold start each call) ───────────────────────
     if xtts_available() {
         if let Some(clone_path) = voice_clone_sample_path()
-            && clone_path.exists() {
-                return speak_cloned(text, &clone_path, stop_rx).await;
-            }
+            && clone_path.exists()
+        {
+            return speak_cloned(text, &clone_path, stop_rx).await;
+        }
         return speak_xtts_default(text, stop_rx).await;
     }
 
@@ -612,7 +668,9 @@ async fn speak_xtts_default(
     stop_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<bool> {
     let clean = strip_for_speech(text);
-    if clean.is_empty() { return Ok(false); }
+    if clean.is_empty() {
+        return Ok(false);
+    }
 
     let words: Vec<&str> = clean.split_whitespace().collect();
     let truncated = words.len() > TTS_WORD_LIMIT;
@@ -627,11 +685,16 @@ async fn speak_xtts_default(
     tokio::pin!(stop_rx);
 
     let mut cli_args = vec![
-        "--model_name", "tts_models/multilingual/multi-dataset/xtts_v2",
-        "--speaker_idx", XTTS_DEFAULT_SPEAKER,
-        "--language_idx", "en",
-        "--out_path", &wav_out_str,
-        "--text", &speech_text,
+        "--model_name",
+        "tts_models/multilingual/multi-dataset/xtts_v2",
+        "--speaker_idx",
+        XTTS_DEFAULT_SPEAKER,
+        "--language_idx",
+        "en",
+        "--out_path",
+        &wav_out_str,
+        "--text",
+        &speech_text,
     ];
     if cuda_available() {
         cli_args.extend(["--use_cuda", "true"]);
@@ -670,11 +733,11 @@ async fn play_wav(
 ) -> Result<()> {
     let path_str = wav_path.display().to_string();
     let players: &[(&str, &[&str])] = &[
-        ("aplay",  &["-q"]),
+        ("aplay", &["-q"]),
         ("paplay", &[]),
-        ("mpv",    &["--really-quiet", "--no-video"]),
+        ("mpv", &["--really-quiet", "--no-video"]),
         ("ffplay", &["-nodisp", "-autoexit", "-loglevel", "quiet"]),
-        ("play",   &["-q"]),
+        ("play", &["-q"]),
     ];
     let mut played = false;
     for (player, args) in players {
@@ -712,8 +775,8 @@ pub fn voice_status(enabled: bool, tts_enabled: bool) -> String {
     let recorder = find_recorder();
     let rec_status = match &recorder {
         Some(RecorderBackend::Arecord) => "✓ arecord",
-        Some(RecorderBackend::Sox)     => "✓ sox",
-        Some(RecorderBackend::Ffmpeg)  => "✓ ffmpeg",
+        Some(RecorderBackend::Sox) => "✓ sox",
+        Some(RecorderBackend::Ffmpeg) => "✓ ffmpeg",
         None => "✗ no recorder (install: sudo pacman -S alsa-utils)",
     };
 
@@ -725,7 +788,7 @@ pub fn voice_status(enabled: bool, tts_enabled: bool) -> String {
 
     let api_key_status = match voice_api_key() {
         Some(_) => "✓ API key found".to_string(),
-        None    => "✗ no API key — add OPENAI_API_KEY=sk-... to ~/.env".to_string(),
+        None => "✗ no API key — add OPENAI_API_KEY=sk-... to ~/.env".to_string(),
     };
 
     let transcription_ok = local_whisper_available() || voice_api_key().is_some();
@@ -749,7 +812,11 @@ pub fn voice_status(enabled: bool, tts_enabled: bool) -> String {
     let server_up = xtts_server_running();
     let gpu = cuda_available();
     let tts_engine = if xtts_ok && server_up {
-        if gpu { "✓ XTTS v2 server running (GPU — fast)" } else { "✓ XTTS v2 server running (CPU)" }
+        if gpu {
+            "✓ XTTS v2 server running (GPU — fast)"
+        } else {
+            "✓ XTTS v2 server running (CPU)"
+        }
     } else if xtts_ok {
         "✓ XTTS v2 available (server will auto-start on use)"
     } else {
@@ -793,7 +860,11 @@ pub fn voice_status(enabled: bool, tts_enabled: bool) -> String {
            /voice clone          — record a custom voice for TTS\n\
            /voice clone remove   — revert to default speaker\n\
            Ctrl+R                — start/stop recording (when enabled)",
-        if player_ok { "✓ available" } else { "✗ no player (install: sudo pacman -S mpv)" },
+        if player_ok {
+            "✓ available"
+        } else {
+            "✗ no player (install: sudo pacman -S mpv)"
+        },
     );
 
     // Install instructions for missing components
@@ -801,13 +872,17 @@ pub fn voice_status(enabled: bool, tts_enabled: bool) -> String {
         out.push_str("\n\n  ✓ All set — voice input and TTS fully configured.");
     } else {
         if !recorder_ok {
-            out.push_str("\n\n  Setup needed — audio capture:\n\
-                           \n    sudo pacman -S alsa-utils");
+            out.push_str(
+                "\n\n  Setup needed — audio capture:\n\
+                           \n    sudo pacman -S alsa-utils",
+            );
         }
         if !transcription_ok {
-            out.push_str("\n\n  Setup needed — transcription:\n\
+            out.push_str(
+                "\n\n  Setup needed — transcription:\n\
                            \n    pipx install openai-whisper    # offline\n\
-                           \n    — or: echo 'OPENAI_API_KEY=sk-...' >> ~/.env");
+                           \n    — or: echo 'OPENAI_API_KEY=sk-...' >> ~/.env",
+            );
         }
         if !xtts_ok {
             out.push_str("\n\n  Setup needed — XTTS v2:\n\
@@ -815,8 +890,10 @@ pub fn voice_status(enabled: bool, tts_enabled: bool) -> String {
                              \x20     --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'");
         }
         if !player_ok {
-            out.push_str("\n\n  Setup needed — audio player:\n\
-                           \n    sudo pacman -S mpv             # or alsa-utils for aplay");
+            out.push_str(
+                "\n\n  Setup needed — audio player:\n\
+                           \n    sudo pacman -S mpv             # or alsa-utils for aplay",
+            );
         }
     }
 
@@ -839,33 +916,33 @@ pub enum CloneTier {
 impl CloneTier {
     pub fn label(&self) -> &'static str {
         match self {
-            CloneTier::Quick       => "quick",
+            CloneTier::Quick => "quick",
             CloneTier::Recommended => "recommended",
-            CloneTier::Premium     => "premium",
+            CloneTier::Premium => "premium",
         }
     }
 
     pub fn duration_secs(&self) -> u64 {
         match self {
-            CloneTier::Quick       => 10,
+            CloneTier::Quick => 10,
             CloneTier::Recommended => 60,
-            CloneTier::Premium     => 300,
+            CloneTier::Premium => 300,
         }
     }
 
     pub fn description(&self) -> &'static str {
         match self {
-            CloneTier::Quick       => "10 seconds — recognizable you, but clearly synthetic",
+            CloneTier::Quick => "10 seconds — recognizable you, but clearly synthetic",
             CloneTier::Recommended => "60 seconds — natural rhythm, good quality (guided prompts)",
-            CloneTier::Premium     => "5+ minutes — near-perfect voice clone",
+            CloneTier::Premium => "5+ minutes — near-perfect voice clone",
         }
     }
 
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim().to_lowercase().as_str() {
-            "quick" | "1" | "10s"      => Some(CloneTier::Quick),
+            "quick" | "1" | "10s" => Some(CloneTier::Quick),
             "recommended" | "2" | "60s" => Some(CloneTier::Recommended),
-            "premium" | "3" | "5m"      => Some(CloneTier::Premium),
+            "premium" | "3" | "5m" => Some(CloneTier::Premium),
             _ => None,
         }
     }
@@ -897,9 +974,13 @@ fn detect_clone_tier(wav_path: &std::path::Path) -> &'static str {
     // Estimate duration from file size: 16-bit mono 22050 Hz ≈ 44100 bytes/sec
     let size = std::fs::metadata(wav_path).map(|m| m.len()).unwrap_or(0);
     let est_secs = size / 44100;
-    if est_secs >= 240 { "premium" }
-    else if est_secs >= 40 { "recommended" }
-    else { "quick" }
+    if est_secs >= 240 {
+        "premium"
+    } else if est_secs >= 40 {
+        "recommended"
+    } else {
+        "quick"
+    }
 }
 
 /// Guided reading prompts for the recommended tier.
@@ -975,19 +1056,20 @@ pub async fn save_voice_clone(tier: CloneTier) -> Result<String> {
     let size = tokio::fs::metadata(&src).await?.len();
     let est_secs = size / 44100; // rough estimate for 16-bit mono 22050Hz
     let min_secs = match tier {
-        CloneTier::Quick       => 3,
+        CloneTier::Quick => 3,
         CloneTier::Recommended => 20,
-        CloneTier::Premium     => 120,
+        CloneTier::Premium => 120,
     };
     if est_secs < min_secs {
         return Err(anyhow!(
             "Recording too short (~{}s). {} tier needs at least {}s. Try again.",
-            est_secs, tier.label(), min_secs,
+            est_secs,
+            tier.label(),
+            min_secs,
         ));
     }
 
-    let dest_dir = voice_clone_dir()
-        .ok_or_else(|| anyhow!("Cannot determine home directory"))?;
+    let dest_dir = voice_clone_dir().ok_or_else(|| anyhow!("Cannot determine home directory"))?;
     tokio::fs::create_dir_all(&dest_dir).await?;
 
     let dest = dest_dir.join("my-voice.wav");
@@ -1002,20 +1084,23 @@ pub async fn save_voice_clone(tier: CloneTier) -> Result<String> {
          Location: {}\n\n\
          TTS will now use XTTS v2 with your voice.\n\
          Use /voice clone remove to revert to the default XTTS v2 speaker.",
-        tier.label(), est_secs, dest.display(),
+        tier.label(),
+        est_secs,
+        dest.display(),
     ))
 }
 
 /// Remove the voice clone sample, reverting to XTTS v2 default speaker.
 pub async fn remove_voice_clone() -> Result<String> {
-    let dir = voice_clone_dir()
-        .ok_or_else(|| anyhow!("Cannot determine home directory"))?;
+    let dir = voice_clone_dir().ok_or_else(|| anyhow!("Cannot determine home directory"))?;
     let sample = dir.join("my-voice.wav");
     if sample.exists() {
         tokio::fs::remove_file(&sample).await?;
         let meta = dir.join("meta.txt");
         let _ = tokio::fs::remove_file(&meta).await;
-        Ok(format!("Voice clone removed. TTS reverted to XTTS v2 default speaker ({XTTS_DEFAULT_SPEAKER})."))
+        Ok(format!(
+            "Voice clone removed. TTS reverted to XTTS v2 default speaker ({XTTS_DEFAULT_SPEAKER})."
+        ))
     } else {
         Ok("No voice clone configured.".into())
     }
@@ -1028,7 +1113,9 @@ pub async fn speak_cloned(
     stop_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<bool> {
     let clean = strip_for_speech(text);
-    if clean.is_empty() { return Ok(false); }
+    if clean.is_empty() {
+        return Ok(false);
+    }
 
     let words: Vec<&str> = clean.split_whitespace().collect();
     let truncated = words.len() > TTS_WORD_LIMIT;
@@ -1044,11 +1131,16 @@ pub async fn speak_cloned(
 
     let clone_str = clone_wav.display().to_string();
     let mut cli_args = vec![
-        "--model_name", "tts_models/multilingual/multi-dataset/xtts_v2",
-        "--speaker_wav", &clone_str,
-        "--language_idx", "en",
-        "--out_path", &wav_out_str,
-        "--text", &speech_text,
+        "--model_name",
+        "tts_models/multilingual/multi-dataset/xtts_v2",
+        "--speaker_wav",
+        &clone_str,
+        "--language_idx",
+        "en",
+        "--out_path",
+        &wav_out_str,
+        "--text",
+        &speech_text,
     ];
     if cuda_available() {
         cli_args.extend(["--use_cuda", "true"]);

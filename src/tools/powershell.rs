@@ -1,7 +1,6 @@
 /// PowerShellTool — port of powershell.ts
 /// Runs a PowerShell command via `pwsh` and returns stdout + stderr.
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
@@ -15,11 +14,15 @@ struct Input {
     timeout_ms: u64,
 }
 
-fn default_timeout() -> u64 { 30_000 }
+fn default_timeout() -> u64 {
+    30_000
+}
 
 #[async_trait]
 impl Tool for PowerShellTool {
-    fn name(&self) -> &str { "PowerShell" }
+    fn name(&self) -> &str {
+        "PowerShell"
+    }
 
     fn description(&self) -> &str {
         "Execute a PowerShell command using `pwsh`. Returns combined stdout and stderr. \
@@ -51,7 +54,7 @@ impl Tool for PowerShellTool {
         let timeout_ms = input.timeout_ms.min(120_000);
 
         use tokio::process::Command;
-        use tokio::time::{timeout, Duration};
+        use tokio::time::{Duration, timeout};
 
         let fut = Command::new("pwsh")
             .args(["-NoProfile", "-NonInteractive", "-Command", &input.command])
@@ -67,7 +70,7 @@ impl Tool for PowerShellTool {
             Ok(Err(e)) => {
                 if e.kind() == std::io::ErrorKind::NotFound {
                     Ok(ToolOutput::error(
-                        "pwsh not found. Install PowerShell Core to use this tool."
+                        "pwsh not found. Install PowerShell Core to use this tool.",
                     ))
                 } else {
                     Ok(ToolOutput::error(format!("Failed to run pwsh: {e}")))
@@ -82,7 +85,9 @@ impl Tool for PowerShellTool {
                     out.push_str(&stdout);
                 }
                 if !stderr.is_empty() {
-                    if !out.is_empty() { out.push('\n'); }
+                    if !out.is_empty() {
+                        out.push('\n');
+                    }
                     out.push_str("[stderr]\n");
                     out.push_str(&stderr);
                 }

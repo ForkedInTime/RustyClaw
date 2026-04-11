@@ -53,11 +53,15 @@ pub enum AutoFixTrigger {
 #[derive(Debug)]
 pub enum CommandResult {
     Pass,
-    Fail { stderr: String },
+    Fail {
+        stderr: String,
+    },
     /// No command detected and none configured.
     NoTestRunner,
     /// Skipped due to trigger rules, git errors, etc.
-    Skipped { reason: String },
+    Skipped {
+        reason: String,
+    },
     Timeout,
 }
 
@@ -284,9 +288,7 @@ pub fn run_checks(
             }
             CommandResult::Timeout => {
                 lint_failed = true;
-                lint_stderr = Some(format!(
-                    "(lint timed out after {timeout_secs}s)"
-                ));
+                lint_stderr = Some(format!("(lint timed out after {timeout_secs}s)"));
             }
             CommandResult::Skipped { reason } => {
                 return CheckOutcome::Skipped { reason };
@@ -318,9 +320,7 @@ pub fn run_checks(
             }
             CommandResult::Timeout => {
                 test_failed = true;
-                test_stderr = Some(format!(
-                    "(tests timed out after {timeout_secs}s)"
-                ));
+                test_stderr = Some(format!("(tests timed out after {timeout_secs}s)"));
             }
             CommandResult::Skipped { reason } => {
                 return CheckOutcome::Skipped { reason };
@@ -457,7 +457,10 @@ pub fn run_auto_fix_check(
         CheckOutcome::Skipped { reason } => AutoFixAction::Continue {
             status: Some(format!("[auto-fix] skipped: {reason}")),
         },
-        CheckOutcome::Fail { lint_stderr, test_stderr } => {
+        CheckOutcome::Fail {
+            lint_stderr,
+            test_stderr,
+        } => {
             if retries_used >= config.max_retries {
                 let lint_tail = lint_stderr
                     .as_deref()
@@ -505,7 +508,11 @@ mod tests {
     #[test]
     fn detect_lint_command_cargo() {
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"x\"\nversion = \"0.1.0\"\n").unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"x\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
         assert_eq!(
             detect_lint_command(dir.path(), &None),
             Some("cargo clippy --all-targets -- -D warnings".to_string())
@@ -525,7 +532,11 @@ mod tests {
     #[test]
     fn detect_lint_command_python_pyproject() {
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("pyproject.toml"), "[project]\nname = \"x\"\n").unwrap();
+        fs::write(
+            dir.path().join("pyproject.toml"),
+            "[project]\nname = \"x\"\n",
+        )
+        .unwrap();
         assert_eq!(
             detect_lint_command(dir.path(), &None),
             Some("ruff check .".to_string())
@@ -535,7 +546,11 @@ mod tests {
     #[test]
     fn detect_lint_command_python_setuppy() {
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("setup.py"), "from setuptools import setup; setup()").unwrap();
+        fs::write(
+            dir.path().join("setup.py"),
+            "from setuptools import setup; setup()",
+        )
+        .unwrap();
         assert_eq!(
             detect_lint_command(dir.path(), &None),
             Some("ruff check .".to_string())
@@ -573,8 +588,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let outcome = run_checks(
             dir.path(),
-            Some("true"),  // lint: unix `true` exits 0
-            Some("true"),  // tests: same
+            Some("true"), // lint: unix `true` exits 0
+            Some("true"), // tests: same
             5,
         );
         assert!(matches!(outcome, CheckOutcome::Pass), "got {outcome:?}");
@@ -587,19 +602,23 @@ mod tests {
         let sentinel = dir.path().join("tests_ran");
         let sentinel_str = sentinel.display().to_string();
         let test_cmd = format!("sh -c 'touch {sentinel_str}'");
-        let outcome = run_checks(
-            dir.path(),
-            Some("false"),
-            Some(&test_cmd),
-            5,
-        );
+        let outcome = run_checks(dir.path(), Some("false"), Some(&test_cmd), 5);
         match outcome {
-            CheckOutcome::Fail { lint_stderr: _, test_stderr } => {
-                assert!(test_stderr.is_none(), "tests must be skipped when lint fails");
+            CheckOutcome::Fail {
+                lint_stderr: _,
+                test_stderr,
+            } => {
+                assert!(
+                    test_stderr.is_none(),
+                    "tests must be skipped when lint fails"
+                );
             }
             other => panic!("expected Fail, got {other:?}"),
         }
-        assert!(!sentinel.exists(), "sentinel file should not exist — tests must not have run");
+        assert!(
+            !sentinel.exists(),
+            "sentinel file should not exist — tests must not have run"
+        );
     }
 
     #[test]
@@ -607,7 +626,10 @@ mod tests {
         let dir = tempdir().unwrap();
         let outcome = run_checks(dir.path(), Some("true"), Some("false"), 5);
         match outcome {
-            CheckOutcome::Fail { lint_stderr, test_stderr } => {
+            CheckOutcome::Fail {
+                lint_stderr,
+                test_stderr,
+            } => {
                 assert!(lint_stderr.is_none());
                 assert!(test_stderr.is_some());
             }
@@ -619,7 +641,10 @@ mod tests {
     fn run_checks_no_runners() {
         let dir = tempdir().unwrap();
         let outcome = run_checks(dir.path(), None, None, 5);
-        assert!(matches!(outcome, CheckOutcome::NoRunners), "got {outcome:?}");
+        assert!(
+            matches!(outcome, CheckOutcome::NoRunners),
+            "got {outcome:?}"
+        );
     }
 
     #[test]
@@ -634,7 +659,10 @@ mod tests {
         let dir = tempdir().unwrap();
         let outcome = run_checks(dir.path(), None, Some("false"), 5);
         match outcome {
-            CheckOutcome::Fail { lint_stderr, test_stderr } => {
+            CheckOutcome::Fail {
+                lint_stderr,
+                test_stderr,
+            } => {
                 assert!(lint_stderr.is_none());
                 assert!(test_stderr.is_some());
             }
@@ -687,17 +715,16 @@ mod tests {
     #[test]
     fn format_feedback_message_truncates_lint() {
         let big = "x".repeat(5000);
-        let msg = format_feedback_message(
-            Some("cargo clippy"),
-            Some("cargo test"),
-            Some(&big),
-            None,
-        );
+        let msg =
+            format_feedback_message(Some("cargo clippy"), Some("cargo test"), Some(&big), None);
         // Should contain the truncation marker
         assert!(msg.contains("(output trimmed)"));
         // Should not contain all 5000 x's
         let x_count = msg.matches('x').count();
-        assert!(x_count <= MAX_FEEDBACK_SECTION_BYTES + 10, "x_count = {x_count}");
+        assert!(
+            x_count <= MAX_FEEDBACK_SECTION_BYTES + 10,
+            "x_count = {x_count}"
+        );
     }
 
     #[test]
@@ -735,7 +762,10 @@ mod tests {
             timeout_secs: 5,
         };
         let action = run_auto_fix_check(dir.path(), &cfg, "auto-edit", 0);
-        assert!(matches!(action, AutoFixAction::Continue { .. }), "got {action:?}");
+        assert!(
+            matches!(action, AutoFixAction::Continue { .. }),
+            "got {action:?}"
+        );
     }
 
     #[test]
@@ -836,10 +866,7 @@ mod tests {
             timeout_secs: 5,
         };
         let action = run_auto_fix_check(dir.path(), &cfg, "suggest", 0);
-        assert!(matches!(
-            action,
-            AutoFixAction::Continue { status: None }
-        ));
+        assert!(matches!(action, AutoFixAction::Continue { status: None }));
     }
 
     #[test]
@@ -854,9 +881,6 @@ mod tests {
             timeout_secs: 5,
         };
         let action = run_auto_fix_check(dir.path(), &cfg, "auto-edit", 0);
-        assert!(matches!(
-            action,
-            AutoFixAction::Continue { status: None }
-        ));
+        assert!(matches!(action, AutoFixAction::Continue { status: None }));
     }
 }

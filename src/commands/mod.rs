@@ -4,38 +4,114 @@
 /// `CommandAction` telling the run-loop what to do.  The run-loop owns all
 /// mutable state (App, Config, messages) so commands that need to mutate
 /// state return a variant instead of doing it directly.
-
 use crate::config::Config;
 use crate::mcp::types::McpServerStatus;
 use crate::skills::Skill;
-use crate::tools::todo::{TodoState, TodoStatus, TodoPriority};
+use crate::tools::todo::{TodoPriority, TodoState, TodoStatus};
 use std::collections::HashMap;
 
 // ── Slash command list (used for Tab completion) ──────────────────────────────
 
 pub const SLASH_COMMANDS: &[&str] = &[
-    "add-dir", "advisor", "agents", "banner", "branch", "brief", "btw", "budget",
-    "clear", "compact", "commit", "commit-push-pr", "config", "context", "copy",
-    "cost", "ctx-viz", "diff", "doctor", "edit-claude-md", "effort", "env", "exit", "export",
+    "add-dir",
+    "advisor",
+    "agents",
+    "banner",
+    "branch",
+    "brief",
+    "btw",
+    "budget",
+    "clear",
+    "compact",
+    "commit",
+    "commit-push-pr",
+    "config",
+    "context",
+    "copy",
+    "cost",
+    "ctx-viz",
+    "diff",
+    "doctor",
+    "edit-claude-md",
+    "effort",
+    "env",
+    "exit",
+    "export",
     "install-missing",
-    "fast", "feedback", "files", "help", "hooks", "ide", "image", "index", "init", "init-verifiers",
-    "insights", "keybindings", "login", "logout", "mcp", "memory", "model",
-    "notifications", "output-style", "permissions", "plan", "plugin", "pr_comments", "quit",
-    "release-notes", "reload-plugins", "rename", "resume", "rewind", "review", "sandbox",
-    "security-review", "session", "share", "skills", "stats", "status", "statusline", "summary",
-    "tasks", "teleport", "terminal-setup", "theme", "thinkback", "ultraplan", "upgrade",
-    "rag", "remember", "router", "usage", "version", "vim", "voice", "autofix-pr", "issue",
-    "color", "forget", "powerup", "undo", "redo", "autocommit",
+    "fast",
+    "feedback",
+    "files",
+    "help",
+    "hooks",
+    "ide",
+    "image",
+    "index",
+    "init",
+    "init-verifiers",
+    "insights",
+    "keybindings",
+    "login",
+    "logout",
+    "mcp",
+    "memory",
+    "model",
+    "notifications",
+    "output-style",
+    "permissions",
+    "plan",
+    "plugin",
+    "pr_comments",
+    "quit",
+    "release-notes",
+    "reload-plugins",
+    "rename",
+    "resume",
+    "rewind",
+    "review",
+    "sandbox",
+    "security-review",
+    "session",
+    "share",
+    "skills",
+    "stats",
+    "status",
+    "statusline",
+    "summary",
+    "tasks",
+    "teleport",
+    "terminal-setup",
+    "theme",
+    "thinkback",
+    "ultraplan",
+    "upgrade",
+    "rag",
+    "remember",
+    "router",
+    "usage",
+    "version",
+    "vim",
+    "voice",
+    "autofix-pr",
+    "issue",
+    "color",
+    "forget",
+    "powerup",
+    "undo",
+    "redo",
+    "autocommit",
 ];
 
 // ── Model catalogue ───────────────────────────────────────────────────────────
 
 pub const KNOWN_MODELS: &[(&str, &str)] = &[
-    ("claude-opus-4-6",          "Most capable — best for complex tasks"),
-    ("claude-sonnet-4-6",        "Smart & fast — recommended (default)"),
-    ("claude-haiku-4-5-20251001","Fastest & cheapest — great for simple tasks"),
-    ("claude-opus-4-5",          "Previous Opus generation"),
-    ("claude-sonnet-4-5",        "Previous Sonnet generation"),
+    ("claude-opus-4-6", "Most capable — best for complex tasks"),
+    ("claude-sonnet-4-6", "Smart & fast — recommended (default)"),
+    (
+        "claude-haiku-4-5-20251001",
+        "Fastest & cheapest — great for simple tasks",
+    ),
+    ("claude-opus-4-5", "Previous Opus generation"),
+    ("claude-sonnet-4-5", "Previous Sonnet generation"),
 ];
 
 // Cost per million tokens (input, output) in USD
@@ -255,82 +331,84 @@ pub fn dispatch(input: &str, ctx: &CommandContext) -> CommandAction {
 
     match name {
         // ── Already handled in run.rs for special reasons, but also here ──
-        "exit" | "quit"  => CommandAction::Quit,
-        "clear"          => CommandAction::Clear,
-        "compact"        => CommandAction::Compact,
+        "exit" | "quit" => CommandAction::Quit,
+        "clear" => CommandAction::Clear,
+        "compact" => CommandAction::Compact,
 
         // ── New commands ──────────────────────────────────────────────────
-        "banner"         => cmd_banner(args),
-        "version"        => cmd_version(),
-        "status"         => cmd_status(ctx),
-        "cost"           => cmd_cost(ctx),
-        "context"        => cmd_context(ctx),
-        "config"         => cmd_config(ctx),
-        "files"          => cmd_files(ctx),
-        "model"          => cmd_model(args, ctx),
-        "vim"            => CommandAction::ToggleVim,
-        "keybindings"    => cmd_keybindings(),
-        "doctor"         => cmd_doctor(ctx),
-        "install-missing"=> cmd_install_missing(),
-        "init"           => cmd_init(ctx),
-        "diff"           => cmd_diff(args, ctx),
-        "permissions"    => cmd_permissions(ctx),
-        "skills"         => cmd_skills(ctx),
-        "review"         => cmd_review(args),
-        "tasks"          => cmd_tasks(ctx),
-        "copy"           => cmd_copy(ctx),
-        "rewind"       => CommandAction::Rewind(args.parse::<usize>().unwrap_or(1)),
-        "undo"         => cmd_undo(args),
-        "redo"         => cmd_redo(args),
-        "autocommit"   => cmd_autocommit(args),
-        "branch"         => cmd_branch(ctx),
-        "summary"        => CommandAction::SendPrompt(
+        "banner" => cmd_banner(args),
+        "version" => cmd_version(),
+        "status" => cmd_status(ctx),
+        "cost" => cmd_cost(ctx),
+        "context" => cmd_context(ctx),
+        "config" => cmd_config(ctx),
+        "files" => cmd_files(ctx),
+        "model" => cmd_model(args, ctx),
+        "vim" => CommandAction::ToggleVim,
+        "keybindings" => cmd_keybindings(),
+        "doctor" => cmd_doctor(ctx),
+        "install-missing" => cmd_install_missing(),
+        "init" => cmd_init(ctx),
+        "diff" => cmd_diff(args, ctx),
+        "permissions" => cmd_permissions(ctx),
+        "skills" => cmd_skills(ctx),
+        "review" => cmd_review(args),
+        "tasks" => cmd_tasks(ctx),
+        "copy" => cmd_copy(ctx),
+        "rewind" => CommandAction::Rewind(args.parse::<usize>().unwrap_or(1)),
+        "undo" => cmd_undo(args),
+        "redo" => cmd_redo(args),
+        "autocommit" => cmd_autocommit(args),
+        "branch" => cmd_branch(ctx),
+        "summary" => CommandAction::SendPrompt(
             "Please give a brief summary of our conversation so far — what we've discussed, \
-             decisions made, and current state of any work in progress. Keep it concise.".into()
+             decisions made, and current state of any work in progress. Keep it concise."
+                .into(),
         ),
-        "checkpoint"     => CommandAction::GitCheckpoint(if args.is_empty() { None } else { Some(args.to_string()) }),
-        "lint"           => cmd_lint(ctx),
-        "autonomy"       => cmd_autonomy(args),
-        "add-dir"        => cmd_add_dir(args, ctx),
-        "pr_comments"    => cmd_pr_comments(args, ctx),
-        "usage"          => cmd_usage(ctx),
-        "help"           => cmd_help(args),
+        "checkpoint" => CommandAction::GitCheckpoint(if args.is_empty() {
+            None
+        } else {
+            Some(args.to_string())
+        }),
+        "lint" => cmd_lint(ctx),
+        "autonomy" => cmd_autonomy(args),
+        "add-dir" => cmd_add_dir(args, ctx),
+        "pr_comments" => cmd_pr_comments(args, ctx),
+        "usage" => cmd_usage(ctx),
+        "help" => cmd_help(args),
 
         // ── RAG codebase indexing ────────────────────────────────────────
-        "index"          => cmd_index(args),
-        "rag"            => cmd_rag(args),
+        "index" => cmd_index(args),
+        "rag" => cmd_rag(args),
 
         // ── Smart model router + cost ───────────────────────────────────
-        "budget"         => cmd_budget(args),
-        "router"         => cmd_router(args),
+        "budget" => cmd_budget(args),
+        "router" => cmd_router(args),
 
         // ── Session commands ──────────────────────────────────────────────
-        "session"        => cmd_session(args, ctx),
-        "sessions"       => cmd_session(args, ctx),
-        "resume"         => cmd_resume(args),
-        "rename"         => {
+        "session" => cmd_session(args, ctx),
+        "sessions" => cmd_session(args, ctx),
+        "resume" => cmd_resume(args),
+        "rename" => {
             if args.is_empty() {
                 CommandAction::Message("Usage: /rename <new-name>".into())
             } else {
                 CommandAction::RenameSession(args.to_string())
             }
         }
-        "export"         => cmd_export(ctx),
+        "export" => cmd_export(ctx),
         "mcp" => cmd_mcp(args, ctx),
-        "login" | "logout" =>
-            CommandAction::Message("Auth management not needed — API key is read from ANTHROPIC_API_KEY.".into()),
-        "theme" =>
-            cmd_theme(args, ctx),
-        "fast" =>
-            CommandAction::Message("Fast mode is not applicable in rustyclaw (streaming is always on).".into()),
-        "plan" =>
-            CommandAction::TogglePlanMode,
-        "hooks" =>
-            cmd_hooks(ctx),
-        "image" =>
-            cmd_image(args),
-        "memory" =>
-            cmd_memory_dispatch(args, ctx),
+        "login" | "logout" => CommandAction::Message(
+            "Auth management not needed — API key is read from ANTHROPIC_API_KEY.".into(),
+        ),
+        "theme" => cmd_theme(args, ctx),
+        "fast" => CommandAction::Message(
+            "Fast mode is not applicable in rustyclaw (streaming is always on).".into(),
+        ),
+        "plan" => CommandAction::TogglePlanMode,
+        "hooks" => cmd_hooks(ctx),
+        "image" => cmd_image(args),
+        "memory" => cmd_memory_dispatch(args, ctx),
         "remember" => {
             if args.is_empty() {
                 CommandAction::Message("Usage: /remember <text to remember>".into())
@@ -347,45 +425,45 @@ pub fn dispatch(input: &str, ctx: &CommandContext) -> CommandAction {
         }
 
         // ── New commands (gap fill) ───────────────────────────────────────
-        "commit"           => cmd_commit(args, ctx),
-        "commit-push-pr"   => cmd_commit_push_pr(args, ctx),
-        "effort"           => cmd_effort(args, ctx),
-        "insights"         => cmd_insights(ctx),
-        "security-review"  => cmd_security_review(),
-        "ide"              => cmd_ide(ctx),
-        "env"              => cmd_env(ctx),
-        "output-style"     => cmd_output_style(args, ctx),
-        "upgrade"          => cmd_upgrade(),
-        "advisor"          => cmd_advisor(args),
-        "brief"            => cmd_brief(ctx),
-        "btw"              => cmd_btw(args),
+        "commit" => cmd_commit(args, ctx),
+        "commit-push-pr" => cmd_commit_push_pr(args, ctx),
+        "effort" => cmd_effort(args, ctx),
+        "insights" => cmd_insights(ctx),
+        "security-review" => cmd_security_review(),
+        "ide" => cmd_ide(ctx),
+        "env" => cmd_env(ctx),
+        "output-style" => cmd_output_style(args, ctx),
+        "upgrade" => cmd_upgrade(),
+        "advisor" => cmd_advisor(args),
+        "brief" => cmd_brief(ctx),
+        "btw" => cmd_btw(args),
         "ctx-viz" | "ctx_viz" => cmd_ctx_viz(ctx),
-        "init-verifiers"   => cmd_init_verifiers(),
-        "agents"           => cmd_agents(ctx),
-        "stats"            => cmd_stats(ctx),
-        "statusline"       => cmd_statusline(args),
+        "init-verifiers" => cmd_init_verifiers(),
+        "agents" => cmd_agents(ctx),
+        "stats" => cmd_stats(ctx),
+        "statusline" => cmd_statusline(args),
 
         // ── New features (voice, sandbox, thinkback, teleport, share, etc.) ─────
-        "voice"           => cmd_voice(args, ctx),
-        "sandbox"         => cmd_sandbox(args, ctx),
-        "thinkback"       => CommandAction::ShowThinkback,
-        "teleport"        => cmd_teleport(args),
-        "share"           => cmd_share(args),
-        "notifications"   => cmd_notifications(args, ctx),
-        "feedback"        => cmd_feedback(),
-        "terminal-setup"  => cmd_terminal_setup(),
-        "release-notes"   => cmd_release_notes(args),
-        "edit-claude-md"  => CommandAction::EditClaudeMd,
-        "plugin"          => cmd_plugin(args),
-        "reload"          => CommandAction::ReloadSettings,
+        "voice" => cmd_voice(args, ctx),
+        "sandbox" => cmd_sandbox(args, ctx),
+        "thinkback" => CommandAction::ShowThinkback,
+        "teleport" => cmd_teleport(args),
+        "share" => cmd_share(args),
+        "notifications" => cmd_notifications(args, ctx),
+        "feedback" => cmd_feedback(),
+        "terminal-setup" => cmd_terminal_setup(),
+        "release-notes" => cmd_release_notes(args),
+        "edit-claude-md" => CommandAction::EditClaudeMd,
+        "plugin" => cmd_plugin(args),
+        "reload" => CommandAction::ReloadSettings,
         "reload-settings" => CommandAction::ReloadSettings,
-        "reload-plugins"  => CommandAction::ReloadPlugins,
-        "spawn"           => cmd_spawn(args),
-        "ultraplan"       => cmd_ultraplan(args),
-        "autofix-pr"      => cmd_autofix_pr(args),
-        "issue"           => cmd_issue(args),
-        "color"           => cmd_color(args),
-        "powerup"         => cmd_powerup(args),
+        "reload-plugins" => CommandAction::ReloadPlugins,
+        "spawn" => cmd_spawn(args),
+        "ultraplan" => cmd_ultraplan(args),
+        "autofix-pr" => cmd_autofix_pr(args),
+        "issue" => cmd_issue(args),
+        "color" => cmd_color(args),
+        "powerup" => cmd_powerup(args),
 
         other => {
             // Plugin slash commands: /context-mode:ctx-doctor etc.
@@ -407,7 +485,7 @@ fn split_first_word(s: &str) -> (&str, &str) {
     let s = s.trim();
     match s.find(char::is_whitespace) {
         Some(i) => (&s[..i], s[i..].trim()),
-        None    => (s, ""),
+        None => (s, ""),
     }
 }
 
@@ -423,7 +501,8 @@ fn cmd_banner(args: &str) -> CommandAction {
         let msg = match &current {
             None => "Banner label: none\n\
                  Usage: /banner <text>   — show custom text (e.g. \"Penguin Corp\")\n\
-                 /banner none            — hide extra label (default)".to_string(),
+                 /banner none            — hide extra label (default)"
+                .to_string(),
             Some(v) => format!(
                 "Banner label: {v}\n\
                  Use /banner none to clear, or /banner <text> to change it."
@@ -432,20 +511,25 @@ fn cmd_banner(args: &str) -> CommandAction {
         return CommandAction::Message(msg);
     }
 
-    let value = if arg == "none" || arg == "default" { "none" } else { arg };
+    let value = if arg == "none" || arg == "default" {
+        "none"
+    } else {
+        arg
+    };
 
     match Config::set_banner_label(value) {
         Ok(()) => {
             if value == "none" {
                 CommandAction::Message("Banner label cleared. Restart to see the change.".into())
             } else {
-                CommandAction::Message(format!("Banner label set to: {value}\nRestart to see the change."))
+                CommandAction::Message(format!(
+                    "Banner label set to: {value}\nRestart to see the change."
+                ))
             }
         }
         Err(e) => CommandAction::Message(format!("Failed to save banner label: {e}")),
     }
 }
-
 
 fn cmd_version() -> CommandAction {
     CommandAction::Message(format!("RustyClaw v{}", env!("CARGO_PKG_VERSION")))
@@ -481,13 +565,17 @@ fn cmd_status(ctx: &CommandContext) -> CommandAction {
          API key:    {api}\n\
          Vim mode:   {vim}\n\
          Auto-compact: {compact}",
-        ver     = env!("CARGO_PKG_VERSION"),
-        model   = ctx.config.model,
+        ver = env!("CARGO_PKG_VERSION"),
+        model = ctx.config.model,
         max_tok = ctx.config.max_tokens,
-        branch  = git_branch,
-        api     = api_key_status,
-        vim     = if ctx.vim_mode { "on" } else { "off" },
-        compact = if ctx.config.auto_compact_enabled { "on" } else { "off" },
+        branch = git_branch,
+        api = api_key_status,
+        vim = if ctx.vim_mode { "on" } else { "off" },
+        compact = if ctx.config.auto_compact_enabled {
+            "on"
+        } else {
+            "off"
+        },
     );
     CommandAction::Message(text)
 }
@@ -497,16 +585,18 @@ fn cmd_cost(ctx: &CommandContext) -> CommandAction {
         return CommandAction::Message("No tokens used in this session yet.".into());
     }
     let (price_in, price_out) = model_pricing(&ctx.config.model);
-    let cost_in  = ctx.tokens_in  as f64 * price_in  / 1_000_000.0;
+    let cost_in = ctx.tokens_in as f64 * price_in / 1_000_000.0;
     let cost_out = ctx.tokens_out as f64 * price_out / 1_000_000.0;
-    let total    = cost_in + cost_out;
+    let total = cost_in + cost_out;
 
     // Cache pricing: read = 10% of input price, write = 125% of input price (Anthropic prompt cache)
-    let cache_read_cost  = ctx.cache_read_tokens  as f64 * (price_in * 0.10) / 1_000_000.0;
+    let cache_read_cost = ctx.cache_read_tokens as f64 * (price_in * 0.10) / 1_000_000.0;
     let cache_write_cost = ctx.cache_write_tokens as f64 * (price_in * 1.25) / 1_000_000.0;
     let cache_hit_pct = if ctx.tokens_in > 0 {
         ctx.cache_read_tokens as f64 * 100.0 / ctx.tokens_in as f64
-    } else { 0.0 };
+    } else {
+        0.0
+    };
 
     let cache_section = if ctx.cache_read_tokens > 0 || ctx.cache_write_tokens > 0 {
         format!(
@@ -514,8 +604,11 @@ fn cmd_cost(ctx: &CommandContext) -> CommandAction {
              Cache read:   {} tokens (${:.4}, {:.1}% hit rate)\n\
              Cache write:  {} tokens (${:.4})\n\
              Cache savings: ${:.4}",
-            ctx.cache_read_tokens, cache_read_cost, cache_hit_pct,
-            ctx.cache_write_tokens, cache_write_cost,
+            ctx.cache_read_tokens,
+            cache_read_cost,
+            cache_hit_pct,
+            ctx.cache_write_tokens,
+            cache_write_cost,
             // savings = what it would have cost at full price minus what was actually charged
             ctx.cache_read_tokens as f64 * price_in / 1_000_000.0 - cache_read_cost,
         )
@@ -533,22 +626,22 @@ fn cmd_cost(ctx: &CommandContext) -> CommandAction {
          \n\
          Prices: ${pin}/1M input, ${pout}/1M output{cache}",
         model = ctx.config.model,
-        tin   = ctx.tokens_in,
-        cin   = cost_in,
-        tout  = ctx.tokens_out,
-        cout  = cost_out,
-        pin   = price_in,
-        pout  = price_out,
+        tin = ctx.tokens_in,
+        cin = cost_in,
+        tout = ctx.tokens_out,
+        cout = cost_out,
+        pin = price_in,
+        pout = price_out,
         cache = cache_section,
     ))
 }
 
 fn cmd_context(ctx: &CommandContext) -> CommandAction {
     let limit: u64 = 200_000;
-    let used  = ctx.tokens_in;
-    let pct   = if limit > 0 { used * 100 / limit } else { 0 };
+    let used = ctx.tokens_in;
+    let pct = if limit > 0 { used * 100 / limit } else { 0 };
     let bar_len = 30usize;
-    let filled  = (pct as usize * bar_len / 100).min(bar_len);
+    let filled = (pct as usize * bar_len / 100).min(bar_len);
     let bar: String = "█".repeat(filled) + &"░".repeat(bar_len - filled);
 
     CommandAction::Message(format!(
@@ -560,7 +653,7 @@ fn cmd_context(ctx: &CommandContext) -> CommandAction {
          Limit:     {limit} tokens\n\
          \n\
          Run /compact to free context space.",
-        rem   = limit.saturating_sub(used),
+        rem = limit.saturating_sub(used),
     ))
 }
 
@@ -569,7 +662,11 @@ fn cmd_config(ctx: &CommandContext) -> CommandAction {
     let settings_line = if settings_paths.is_empty() {
         "  (none found)".to_string()
     } else {
-        settings_paths.iter().map(|p| format!("  {p}")).collect::<Vec<_>>().join("\n")
+        settings_paths
+            .iter()
+            .map(|p| format!("  {p}"))
+            .collect::<Vec<_>>()
+            .join("\n")
     };
 
     let allow_line = if ctx.config.permissions_allow.is_empty() {
@@ -599,15 +696,15 @@ fn cmd_config(ctx: &CommandContext) -> CommandAction {
          \n\
          permissions.allow:  {allow}\n\
          permissions.deny:   {deny}",
-        model      = ctx.config.model,
-        max_tok    = ctx.config.max_tokens,
-        cwd        = ctx.config.cwd.display(),
-        compact    = ctx.config.auto_compact_enabled,
+        model = ctx.config.model,
+        max_tok = ctx.config.max_tokens,
+        cwd = ctx.config.cwd.display(),
+        compact = ctx.config.auto_compact_enabled,
         skip_perms = ctx.config.dangerously_skip_permissions,
-        verbose    = ctx.config.verbose,
-        vim        = if ctx.vim_mode { "on" } else { "off" },
-        allow      = allow_line,
-        deny       = deny_line,
+        verbose = ctx.config.verbose,
+        vim = if ctx.vim_mode { "on" } else { "off" },
+        allow = allow_line,
+        deny = deny_line,
     ))
 }
 
@@ -710,68 +807,71 @@ pub fn resolve_model_alias(model: &str) -> String {
 }
 
 fn cmd_keybindings() -> CommandAction {
-    CommandAction::Message(concat!(
-        "Keyboard shortcuts\n",
-        "\n",
-        "Input editing\n",
-        "  Enter         Send message\n",
-        "  Shift+Enter   Insert newline (multi-line prompt)\n",
-        "  Backspace     Delete char before cursor\n",
-        "  Delete        Delete char after cursor\n",
-        "  ←/→           Move cursor left/right\n",
-        "  Home/End      Move to start/end of line\n",
-        "  Tab           Complete /command or plugin:command\n",
-        "  ↑/↓           Input history\n",
-        "  Esc           Cancel current request\n",
-        "\n",
-        "Readline shortcuts\n",
-        "  Ctrl+A        Move to start of line\n",
-        "  Ctrl+E        Move to end of line\n",
-        "  Ctrl+U        Clear entire input line\n",
-        "  Ctrl+W        Delete word before cursor\n",
-        "  Ctrl+K        Delete from cursor to end\n",
-        "  Alt+B         Move word left\n",
-        "  Alt+F         Move word right\n",
-        "  Alt+D         Delete word forward\n",
-        "\n",
-        "Vim mode (/vim to toggle)\n",
-        "  Esc           Enter normal mode\n",
-        "  i / a / A / I Insert/append modes\n",
-        "  h / l         Move left / right\n",
-        "  w / b / e     Word forward / back / end\n",
-        "  0 / $         Start / end of line\n",
-        "  x             Delete char under cursor\n",
-        "  dd            Clear entire line\n",
-        "  j / k         Scroll chat down / up\n",
-        "  G             Scroll to bottom\n",
-        "\n",
-        "Chat & scrolling\n",
-        "  PageUp/Down   Scroll chat\n",
-        "  Mouse scroll  Scroll chat\n",
-        "  Ctrl+R        Start/stop voice recording\n",
-        "\n",
-        "Session picker (/session)\n",
-        "  ↑/↓           Select session\n",
-        "  Enter         Resume selected session\n",
-        "  1-9           Quick pick by number\n",
-        "  d / Delete    Delete selected session\n",
-        "  Esc / q       Close\n",
-        "\n",
-        "Permission dialog\n",
-        "  y             Allow once\n",
-        "  a             Always allow\n",
-        "  n / Esc       Deny\n",
-        "\n",
-        "Text selection & copy\n",
-        "  Shift+click   Select text (bypass TUI mouse capture)\n",
-        "  Ctrl+Shift+C  Copy selected text\n",
-        "  Ctrl+Shift+V  Paste\n",
-        "\n",
-        "Application\n",
-        "  Ctrl+C        Quit\n",
-        "  ?             Show this help (when input is empty)\n",
-        "  /help         Show all commands",
-    ).into())
+    CommandAction::Message(
+        concat!(
+            "Keyboard shortcuts\n",
+            "\n",
+            "Input editing\n",
+            "  Enter         Send message\n",
+            "  Shift+Enter   Insert newline (multi-line prompt)\n",
+            "  Backspace     Delete char before cursor\n",
+            "  Delete        Delete char after cursor\n",
+            "  ←/→           Move cursor left/right\n",
+            "  Home/End      Move to start/end of line\n",
+            "  Tab           Complete /command or plugin:command\n",
+            "  ↑/↓           Input history\n",
+            "  Esc           Cancel current request\n",
+            "\n",
+            "Readline shortcuts\n",
+            "  Ctrl+A        Move to start of line\n",
+            "  Ctrl+E        Move to end of line\n",
+            "  Ctrl+U        Clear entire input line\n",
+            "  Ctrl+W        Delete word before cursor\n",
+            "  Ctrl+K        Delete from cursor to end\n",
+            "  Alt+B         Move word left\n",
+            "  Alt+F         Move word right\n",
+            "  Alt+D         Delete word forward\n",
+            "\n",
+            "Vim mode (/vim to toggle)\n",
+            "  Esc           Enter normal mode\n",
+            "  i / a / A / I Insert/append modes\n",
+            "  h / l         Move left / right\n",
+            "  w / b / e     Word forward / back / end\n",
+            "  0 / $         Start / end of line\n",
+            "  x             Delete char under cursor\n",
+            "  dd            Clear entire line\n",
+            "  j / k         Scroll chat down / up\n",
+            "  G             Scroll to bottom\n",
+            "\n",
+            "Chat & scrolling\n",
+            "  PageUp/Down   Scroll chat\n",
+            "  Mouse scroll  Scroll chat\n",
+            "  Ctrl+R        Start/stop voice recording\n",
+            "\n",
+            "Session picker (/session)\n",
+            "  ↑/↓           Select session\n",
+            "  Enter         Resume selected session\n",
+            "  1-9           Quick pick by number\n",
+            "  d / Delete    Delete selected session\n",
+            "  Esc / q       Close\n",
+            "\n",
+            "Permission dialog\n",
+            "  y             Allow once\n",
+            "  a             Always allow\n",
+            "  n / Esc       Deny\n",
+            "\n",
+            "Text selection & copy\n",
+            "  Shift+click   Select text (bypass TUI mouse capture)\n",
+            "  Ctrl+Shift+C  Copy selected text\n",
+            "  Ctrl+Shift+V  Paste\n",
+            "\n",
+            "Application\n",
+            "  Ctrl+C        Quit\n",
+            "  ?             Show this help (when input is empty)\n",
+            "  /help         Show all commands",
+        )
+        .into(),
+    )
 }
 
 // ─── RAG codebase indexing ────────────────────────────────────────────────────
@@ -843,19 +943,39 @@ fn cmd_router(args: &str) -> CommandAction {
         "off" | "disable" => CommandAction::RouterToggle,
         _ if args.starts_with("low ") => {
             let model = args["low ".len()..].trim().to_string();
-            CommandAction::RouterSetTier { tier: "low".into(), model }
+            CommandAction::RouterSetTier {
+                tier: "low".into(),
+                model,
+            }
         }
         _ if args.starts_with("medium ") || args.starts_with("mid ") => {
-            let model = args.split_whitespace().skip(1).collect::<Vec<_>>().join(" ");
-            CommandAction::RouterSetTier { tier: "medium".into(), model }
+            let model = args
+                .split_whitespace()
+                .skip(1)
+                .collect::<Vec<_>>()
+                .join(" ");
+            CommandAction::RouterSetTier {
+                tier: "medium".into(),
+                model,
+            }
         }
         _ if args.starts_with("high ") => {
             let model = args["high ".len()..].trim().to_string();
-            CommandAction::RouterSetTier { tier: "high".into(), model }
+            CommandAction::RouterSetTier {
+                tier: "high".into(),
+                model,
+            }
         }
         _ if args.starts_with("super-high ") || args.starts_with("superhigh ") => {
-            let model = args.split_whitespace().skip(1).collect::<Vec<_>>().join(" ");
-            CommandAction::RouterSetTier { tier: "super-high".into(), model }
+            let model = args
+                .split_whitespace()
+                .skip(1)
+                .collect::<Vec<_>>()
+                .join(" ");
+            CommandAction::RouterSetTier {
+                tier: "super-high".into(),
+                model,
+            }
         }
         _ => CommandAction::Message(
             "Usage: /router [on|off|status]\n\
@@ -874,7 +994,7 @@ fn cmd_router(args: &str) -> CommandAction {
 }
 
 fn cmd_doctor(ctx: &CommandContext) -> CommandAction {
-    use crate::distro::{Distro, find_missing, build_install_command};
+    use crate::distro::{Distro, build_install_command, find_missing};
 
     let distro = Distro::detect();
     let mut checks: Vec<String> = Vec::new();
@@ -893,7 +1013,10 @@ fn cmd_doctor(ctx: &CommandContext) -> CommandAction {
 
     // API key
     if ctx.config.api_key.len() >= 4 {
-        checks.push(format!("✓ ANTHROPIC_API_KEY set ({}...)", &ctx.config.api_key[..4]));
+        checks.push(format!(
+            "✓ ANTHROPIC_API_KEY set ({}...)",
+            &ctx.config.api_key[..4]
+        ));
     } else {
         checks.push("✗ ANTHROPIC_API_KEY not set — run: export ANTHROPIC_API_KEY=sk-...".into());
     }
@@ -902,13 +1025,20 @@ fn cmd_doctor(ctx: &CommandContext) -> CommandAction {
     if ctx.config.cwd.exists() {
         checks.push(format!("✓ Working directory: {}", ctx.config.cwd.display()));
     } else {
-        checks.push(format!("✗ Working directory missing: {}", ctx.config.cwd.display()));
+        checks.push(format!(
+            "✗ Working directory missing: {}",
+            ctx.config.cwd.display()
+        ));
     }
     let is_git = std::process::Command::new("git")
         .args(["rev-parse", "--is-inside-work-tree"])
         .current_dir(&ctx.config.cwd)
-        .output().map(|o| o.status.success()).unwrap_or(false);
-    if is_git { checks.push("✓ Git repository".into()); }
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if is_git {
+        checks.push("✓ Git repository".into());
+    }
 
     if ctx.config.cwd.join("CLAUDE.md").exists() {
         checks.push("✓ CLAUDE.md present".into());
@@ -924,18 +1054,29 @@ fn cmd_doctor(ctx: &CommandContext) -> CommandAction {
     let env_paths = [
         ctx.config.cwd.join(".env"),
         dirs::home_dir().unwrap_or_default().join(".env"),
-        dirs::home_dir().unwrap_or_default().join(".config").join("rustyclaw").join(".env"),
+        dirs::home_dir()
+            .unwrap_or_default()
+            .join(".config")
+            .join("rustyclaw")
+            .join(".env"),
     ];
     for p in env_paths.iter().filter(|p| p.exists()) {
         checks.push(format!("✓ .env loaded: {}", p.display()));
     }
 
     // Node.js / plugins
-    let node_ok = std::process::Command::new("node").arg("--version")
-        .output().map(|o| o.status.success()).unwrap_or(false);
+    let node_ok = std::process::Command::new("node")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
     if node_ok {
-        let v = std::process::Command::new("node").arg("--version").output().ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok()).unwrap_or_default();
+        let v = std::process::Command::new("node")
+            .arg("--version")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .unwrap_or_default();
         checks.push(format!("✓ Node.js {} (plugins supported)", v.trim()));
     } else {
         checks.push("  ✗ Node.js not found — plugins need Node.js".to_string());
@@ -945,13 +1086,22 @@ fn cmd_doctor(ctx: &CommandContext) -> CommandAction {
     // MCP
     if !ctx.mcp_statuses.is_empty() {
         let tc: usize = ctx.mcp_statuses.iter().map(|s| s.tool_count).sum();
-        checks.push(format!("✓ {} MCP server(s) ({} tools)", ctx.mcp_statuses.len(), tc));
+        checks.push(format!(
+            "✓ {} MCP server(s) ({} tools)",
+            ctx.mcp_statuses.len(),
+            tc
+        ));
     }
 
     // Whisper
-    let whisper_ok = std::process::Command::new("whisper").args(["--help"])
-        .output().map(|o| o.status.success() || o.status.code() == Some(1)).unwrap_or(false);
-    let openai_key = std::env::var("OPENAI_API_KEY").or_else(|_| std::env::var("WHISPER_API_KEY")).is_ok();
+    let whisper_ok = std::process::Command::new("whisper")
+        .args(["--help"])
+        .output()
+        .map(|o| o.status.success() || o.status.code() == Some(1))
+        .unwrap_or(false);
+    let openai_key = std::env::var("OPENAI_API_KEY")
+        .or_else(|_| std::env::var("WHISPER_API_KEY"))
+        .is_ok();
     if whisper_ok {
         checks.push("✓ whisper (offline STT transcription)".into());
     } else if openai_key {
@@ -976,14 +1126,18 @@ fn cmd_doctor(ctx: &CommandContext) -> CommandAction {
             if clone_path.exists() {
                 checks.push(format!("✓ Voice clone: {}", clone_path.display()));
             } else {
-                checks.push(format!("  Using default speaker ({}) — /voice clone to set a custom voice",
-                    crate::voice::XTTS_DEFAULT_SPEAKER));
+                checks.push(format!(
+                    "  Using default speaker ({}) — /voice clone to set a custom voice",
+                    crate::voice::XTTS_DEFAULT_SPEAKER
+                ));
             }
         }
     } else {
         checks.push("  ✗ XTTS v2 not found — required for TTS".into());
         checks.push("      uv tool install TTS --python 3.11 \\".into());
-        checks.push("        --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'".into());
+        checks.push(
+            "        --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'".into(),
+        );
     }
 
     // System tool check
@@ -996,10 +1150,18 @@ fn cmd_doctor(ctx: &CommandContext) -> CommandAction {
     } else {
         for m in &missing {
             if let Some(pkg) = m.package {
-                checks.push(format!("  ✗ {} — {}", m.tool.binary(), m.tool.description()));
+                checks.push(format!(
+                    "  ✗ {} — {}",
+                    m.tool.binary(),
+                    m.tool.description()
+                ));
                 checks.push(format!("      {}", install_one_liner(&distro, pkg)));
             } else if let Some(note) = &m.manual_note {
-                checks.push(format!("  ✗ {} — {}", m.tool.binary(), m.tool.description()));
+                checks.push(format!(
+                    "  ✗ {} — {}",
+                    m.tool.binary(),
+                    m.tool.description()
+                ));
                 checks.push(format!("      {note}"));
             }
         }
@@ -1022,14 +1184,14 @@ fn install_one_liner(distro: &crate::distro::Distro, pkg: &str) -> String {
 }
 
 fn cmd_install_missing() -> CommandAction {
-    use crate::distro::{Distro, find_missing, build_install_command};
+    use crate::distro::{Distro, build_install_command, find_missing};
 
     let distro = Distro::detect();
     let missing = find_missing(&distro);
 
     if missing.is_empty() {
         return CommandAction::Message(
-            "✓ All system tools are already installed. Nothing to do.".into()
+            "✓ All system tools are already installed. Nothing to do.".into(),
         );
     }
 
@@ -1037,7 +1199,8 @@ fn cmd_install_missing() -> CommandAction {
         Some(cmd) => CommandAction::RunInstall(cmd),
         None => {
             // Only pip/manual installs missing — no package manager command to run
-            let notes: Vec<String> = missing.iter()
+            let notes: Vec<String> = missing
+                .iter()
                 .filter_map(|m| m.manual_note.as_ref().map(|n| format!("  • {n}")))
                 .collect();
             CommandAction::Message(format!(
@@ -1056,7 +1219,10 @@ fn cmd_init(ctx: &CommandContext) -> CommandAction {
     // This mirrors the real source's behavior: Claude explores the codebase
     // and writes a minimal, accurate CLAUDE.md rather than a generic template.
     let action_desc = if exists {
-        format!("CLAUDE.md already exists at {}. Suggest improvements to it.", path.display())
+        format!(
+            "CLAUDE.md already exists at {}. Suggest improvements to it.",
+            path.display()
+        )
     } else {
         format!("Create a new CLAUDE.md at {}.", path.display())
     };
@@ -1145,20 +1311,23 @@ fn cmd_diff(args: &str, ctx: &CommandContext) -> CommandAction {
 
 fn cmd_permissions(ctx: &CommandContext) -> CommandAction {
     let _ = ctx; // permissions state lives in PermissionState, not config
-    CommandAction::Message(concat!(
-        "Permission system\n",
-        "\n",
-        "When Claude wants to run a sensitive tool, a permission dialog appears:\n",
-        "  y — allow this call once\n",
-        "  a — always allow this tool (no more prompts for this tool)\n",
-        "  n — deny this call\n",
-        "\n",
-        "Tools that always require permission:\n",
-        "  Bash, Write, Edit\n",
-        "\n",
-        "Tools that never require permission:\n",
-        "  Read, Glob, Grep, WebFetch, WebSearch",
-    ).into())
+    CommandAction::Message(
+        concat!(
+            "Permission system\n",
+            "\n",
+            "When Claude wants to run a sensitive tool, a permission dialog appears:\n",
+            "  y — allow this call once\n",
+            "  a — always allow this tool (no more prompts for this tool)\n",
+            "  n — deny this call\n",
+            "\n",
+            "Tools that always require permission:\n",
+            "  Bash, Write, Edit\n",
+            "\n",
+            "Tools that never require permission:\n",
+            "  Read, Glob, Grep, WebFetch, WebSearch",
+        )
+        .into(),
+    )
 }
 
 fn cmd_skills(ctx: &CommandContext) -> CommandAction {
@@ -1170,13 +1339,12 @@ fn cmd_skills(ctx: &CommandContext) -> CommandAction {
              Each file becomes a /skill-name command.\n\
              \n\
              Example: ~/.claude/skills/review.md\n\
-             Then type /review [args] to expand it.".into()
+             Then type /review [args] to expand it."
+                .into(),
         );
     }
 
-    let mut lines = vec![
-        format!("Loaded skills ({})\n", ctx.skills.len()),
-    ];
+    let mut lines = vec![format!("Loaded skills ({})\n", ctx.skills.len())];
     let mut names: Vec<_> = ctx.skills.keys().collect();
     names.sort();
     for name in names {
@@ -1226,14 +1394,13 @@ fn cmd_review(args: &str) -> CommandAction {
 fn cmd_autonomy(args: &str) -> CommandAction {
     let level = args.trim().to_lowercase();
     match level.as_str() {
-        "suggest" | "auto-edit" | "full-auto" => {
-            CommandAction::SetAutonomy(level)
-        }
+        "suggest" | "auto-edit" | "full-auto" => CommandAction::SetAutonomy(level),
         "" => CommandAction::Message(
             "Autonomy levels:\n  suggest   — show diff + ask before every Write/Edit\n  \
              auto-edit — auto-apply edits, ask for new files (default)\n  \
              full-auto — apply all changes without asking\n\n\
-             Usage: /autonomy <level>".into()
+             Usage: /autonomy <level>"
+                .into(),
         ),
         _ => CommandAction::Message(format!(
             "Unknown autonomy level: '{level}'. Use: suggest, auto-edit, or full-auto"
@@ -1265,7 +1432,8 @@ fn cmd_lint(ctx: &CommandContext) -> CommandAction {
 
     if checks.is_empty() {
         return CommandAction::Message(
-            "No recognized project type found (Cargo.toml, package.json, pyproject.toml, go.mod).".into()
+            "No recognized project type found (Cargo.toml, package.json, pyproject.toml, go.mod)."
+                .into(),
         );
     }
 
@@ -1294,17 +1462,16 @@ fn cmd_mcp(args: &str, ctx: &CommandContext) -> CommandAction {
                     Add one: /mcp add <name> <command> [args...]\n\
                     Or for HTTP:  /mcp add <name> <url>\n\n\
                     Example: /mcp add github npx -y @modelcontextprotocol/server-github\n\
-                    Restart rustyclaw after adding servers.".into()
+                    Restart rustyclaw after adding servers."
+                        .into(),
                 );
             }
             let total_tools: usize = ctx.mcp_statuses.iter().map(|s| s.tool_count).sum();
-            let mut lines = vec![
-                format!(
-                    "MCP servers ({} connected, {} tools total)\n",
-                    ctx.mcp_statuses.len(),
-                    total_tools
-                ),
-            ];
+            let mut lines = vec![format!(
+                "MCP servers ({} connected, {} tools total)\n",
+                ctx.mcp_statuses.len(),
+                total_tools
+            )];
 
             for s in ctx.mcp_statuses {
                 lines.push(format!(
@@ -1337,24 +1504,15 @@ fn cmd_mcp(args: &str, ctx: &CommandContext) -> CommandAction {
             }
             CommandAction::Message(lines.join("\n"))
         }
-        "add" => {
-            mcp_add_server(rest)
-        }
-        "remove" | "rm" | "delete" => {
-            mcp_remove_server(rest)
-        }
-        "enable" => {
-            mcp_set_disabled(rest, false)
-        }
-        "disable" => {
-            mcp_set_disabled(rest, true)
-        }
-        "reconnect" => {
-            CommandAction::Message(
-                "MCP reconnection requires restarting rustyclaw.\n\
-                 Exit and relaunch to reconnect all MCP servers.".into()
-            )
-        }
+        "add" => mcp_add_server(rest),
+        "remove" | "rm" | "delete" => mcp_remove_server(rest),
+        "enable" => mcp_set_disabled(rest, false),
+        "disable" => mcp_set_disabled(rest, true),
+        "reconnect" => CommandAction::Message(
+            "MCP reconnection requires restarting rustyclaw.\n\
+                 Exit and relaunch to reconnect all MCP servers."
+                .into(),
+        ),
         "get" => {
             let name = rest.trim();
             if name.is_empty() {
@@ -1362,10 +1520,12 @@ fn cmd_mcp(args: &str, ctx: &CommandContext) -> CommandAction {
             }
             let settings_path = Config::claude_dir().join("settings.json");
             let raw = std::fs::read_to_string(&settings_path).unwrap_or_default();
-            let val: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
+            let val: serde_json::Value =
+                serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
             if let Some(srv) = val.get("mcpServers").and_then(|m| m.get(name)) {
                 CommandAction::Message(format!(
-                    "MCP server '{}'\n{}", name,
+                    "MCP server '{}'\n{}",
+                    name,
                     serde_json::to_string_pretty(srv).unwrap_or_default()
                 ))
             } else {
@@ -1381,7 +1541,8 @@ fn cmd_mcp(args: &str, ctx: &CommandContext) -> CommandAction {
              /mcp enable <n>        — enable disabled server\n  \
              /mcp disable <n>       — disable server\n  \
              /mcp get <n>           — show server config\n  \
-             /mcp reconnect         — restart all (requires app restart)".into()
+             /mcp reconnect         — restart all (requires app restart)"
+                .into(),
         ),
     }
 }
@@ -1395,7 +1556,8 @@ fn mcp_add_server(args: &str) -> CommandAction {
         return CommandAction::Message(
             "Usage: /mcp add <name> <command|url> [args...]\n\
              Examples:\n  /mcp add github npx -y @modelcontextprotocol/server-github\n  \
-             /mcp add remote http://localhost:3000/mcp".into()
+             /mcp add remote http://localhost:3000/mcp"
+                .into(),
         );
     }
     let rest = rest.trim();
@@ -1410,7 +1572,8 @@ fn mcp_add_server(args: &str) -> CommandAction {
     // Check if already exists
     if val.get("mcpServers").and_then(|m| m.get(name)).is_some() {
         return CommandAction::Message(format!(
-            "MCP server '{}' already exists. Remove it first with /mcp remove {}", name, name
+            "MCP server '{}' already exists. Remove it first with /mcp remove {}",
+            name, name
         ));
     }
 
@@ -1433,15 +1596,23 @@ fn mcp_add_server(args: &str) -> CommandAction {
     };
 
     // Upsert into mcpServers
-    if !val.is_object() { val = serde_json::json!({}); }
+    if !val.is_object() {
+        val = serde_json::json!({});
+    }
     let root = match val.as_object_mut() {
         Some(o) => o,
         None => return CommandAction::Message("settings.json is not a JSON object".into()),
     };
     let servers = root.entry("mcpServers").or_insert(serde_json::json!({}));
     match servers.as_object_mut() {
-        Some(m) => { m.insert(name.to_string(), server_cfg); }
-        None => return CommandAction::Message("mcpServers is not a JSON object in settings.json".into()),
+        Some(m) => {
+            m.insert(name.to_string(), server_cfg);
+        }
+        None => {
+            return CommandAction::Message(
+                "mcpServers is not a JSON object in settings.json".into(),
+            );
+        }
     }
 
     match serde_json::to_string_pretty(&val) {
@@ -1452,7 +1623,8 @@ fn mcp_add_server(args: &str) -> CommandAction {
             match std::fs::write(&settings_path, s) {
                 Ok(_) => CommandAction::Message(format!(
                     "MCP server '{}' added to {}\nRestart rustyclaw to connect.",
-                    name, settings_path.display()
+                    name,
+                    settings_path.display()
                 )),
                 Err(e) => CommandAction::Message(format!("Failed to write settings: {e}")),
             }
@@ -1472,7 +1644,8 @@ fn mcp_remove_server(args: &str) -> CommandAction {
     let raw = std::fs::read_to_string(&settings_path).unwrap_or_else(|_| "{}".to_string());
     let mut val: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
 
-    let removed = val.get_mut("mcpServers")
+    let removed = val
+        .get_mut("mcpServers")
         .and_then(|m| m.as_object_mut())
         .and_then(|m| m.remove(name));
 
@@ -1507,7 +1680,8 @@ fn mcp_set_disabled(args: &str, disabled: bool) -> CommandAction {
     let raw = std::fs::read_to_string(&settings_path).unwrap_or_else(|_| "{}".to_string());
     let mut val: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
 
-    let server = val.get_mut("mcpServers")
+    let server = val
+        .get_mut("mcpServers")
         .and_then(|m| m.as_object_mut())
         .and_then(|m| m.get_mut(name));
 
@@ -1525,7 +1699,8 @@ fn mcp_set_disabled(args: &str, disabled: bool) -> CommandAction {
                 Ok(text) => match std::fs::write(&settings_path, text) {
                     Ok(_) => CommandAction::Message(format!(
                         "MCP server '{}' {}. Restart rustyclaw to apply.",
-                        name, if disabled { "disabled" } else { "enabled" }
+                        name,
+                        if disabled { "disabled" } else { "enabled" }
                     )),
                     Err(e) => CommandAction::Message(format!("Failed to write settings: {e}")),
                 },
@@ -1538,7 +1713,7 @@ fn mcp_set_disabled(args: &str, disabled: bool) -> CommandAction {
 #[allow(dead_code)]
 fn cmd_memory(ctx: &CommandContext) -> CommandAction {
     let global_claude_md = Config::claude_dir().join("CLAUDE.md");
-    let local_claude_md  = ctx.config.cwd.join("CLAUDE.md");
+    let local_claude_md = ctx.config.cwd.join("CLAUDE.md");
 
     let mut lines = vec!["Memory (CLAUDE.md files)\n".to_string()];
 
@@ -1547,7 +1722,10 @@ fn cmd_memory(ctx: &CommandContext) -> CommandAction {
         lines.push("No CLAUDE.md files loaded — Claude has no custom instructions.".into());
         lines.push("Run /init to create a project CLAUDE.md.".into());
     } else {
-        lines.push(format!("Merged CLAUDE.md loaded ({} chars total)", ctx.config.claudemd.len()));
+        lines.push(format!(
+            "Merged CLAUDE.md loaded ({} chars total)",
+            ctx.config.claudemd.len()
+        ));
         lines.push("This content is included in every system prompt.".into());
     }
 
@@ -1562,7 +1740,10 @@ fn cmd_memory(ctx: &CommandContext) -> CommandAction {
                     lines.push(format!("  {line}"));
                 }
                 if content.lines().count() > 15 {
-                    lines.push(format!("  ... ({} more lines)", content.lines().count() - 15));
+                    lines.push(format!(
+                        "  ... ({} more lines)",
+                        content.lines().count() - 15
+                    ));
                 }
             }
             Err(e) => lines.push(format!("~/.claude/CLAUDE.md: error reading — {e}")),
@@ -1582,7 +1763,10 @@ fn cmd_memory(ctx: &CommandContext) -> CommandAction {
                     lines.push(format!("  {line}"));
                 }
                 if content.lines().count() > 15 {
-                    lines.push(format!("  ... ({} more lines)", content.lines().count() - 15));
+                    lines.push(format!(
+                        "  ... ({} more lines)",
+                        content.lines().count() - 15
+                    ));
                 }
             }
             Err(e) => lines.push(format!("CLAUDE.md: error reading — {e}")),
@@ -1608,19 +1792,19 @@ fn cmd_memory_dispatch(args: &str, ctx: &CommandContext) -> CommandAction {
         }
         "clear" => CommandAction::MemoryClear,
         "inject" => CommandAction::MemoryInject,
-        "auto" => {
-            match rest {
-                "on"  => CommandAction::MemoryAutoToggle(true),
-                "off" => CommandAction::MemoryAutoToggle(false),
-                _ => CommandAction::Message(
-                    format!(
-                        "Memory auto-capture is currently {}.\n\
+        "auto" => match rest {
+            "on" => CommandAction::MemoryAutoToggle(true),
+            "off" => CommandAction::MemoryAutoToggle(false),
+            _ => CommandAction::Message(format!(
+                "Memory auto-capture is currently {}.\n\
                          Usage: /memory auto on|off",
-                        if ctx.config.memory_auto_capture { "ON" } else { "OFF" }
-                    )
-                ),
-            }
-        }
+                if ctx.config.memory_auto_capture {
+                    "ON"
+                } else {
+                    "OFF"
+                }
+            )),
+        },
         "add" => {
             if rest.is_empty() {
                 CommandAction::Message("Usage: /memory add <text>".into())
@@ -1646,21 +1830,21 @@ fn cmd_tasks(ctx: &CommandContext) -> CommandAction {
     let state = ctx.todo_state.lock().unwrap_or_else(|e| e.into_inner());
     if state.is_empty() {
         return CommandAction::Message(
-            "No tasks. Claude will create tasks automatically for complex multi-step work.".into()
+            "No tasks. Claude will create tasks automatically for complex multi-step work.".into(),
         );
     }
 
     let mut lines = vec![format!("Tasks ({})\n", state.len())];
     for item in state.iter() {
         let icon = match item.status {
-            TodoStatus::Completed  => "✓",
+            TodoStatus::Completed => "✓",
             TodoStatus::InProgress => "▶",
-            TodoStatus::Pending    => "○",
+            TodoStatus::Pending => "○",
         };
         let pri = match item.priority {
-            TodoPriority::High   => " [high]",
+            TodoPriority::High => " [high]",
             TodoPriority::Medium => "",
-            TodoPriority::Low    => " [low]",
+            TodoPriority::Low => " [low]",
         };
         lines.push(format!("  {icon} {}{pri}", item.content));
     }
@@ -1723,15 +1907,13 @@ fn cmd_branch(ctx: &CommandContext) -> CommandAction {
             .filter(|s| !s.is_empty())
     };
 
-    let current = run(&["rev-parse", "--abbrev-ref", "HEAD"])
-        .unwrap_or_else(|| "not a git repo".into());
+    let current =
+        run(&["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_else(|| "not a git repo".into());
     if current == "not a git repo" {
         return CommandAction::Message("Not a git repository.".into());
     }
 
-    let mut lines = vec![
-        format!("Current branch: {current}\n"),
-    ];
+    let mut lines = vec![format!("Current branch: {current}\n")];
 
     if let Some(log) = run(&["log", "--oneline", "-5"]) {
         lines.push("Recent commits:".into());
@@ -1753,7 +1935,8 @@ fn cmd_branch(ctx: &CommandContext) -> CommandAction {
     }
 
     if let Some(branches) = run(&["branch", "-a", "--format=%(refname:short)"]) {
-        let all: Vec<_> = branches.lines()
+        let all: Vec<_> = branches
+            .lines()
             .filter(|b| !b.contains("HEAD"))
             .take(10)
             .collect();
@@ -1773,7 +1956,10 @@ fn cmd_branch(ctx: &CommandContext) -> CommandAction {
 fn cmd_add_dir(args: &str, ctx: &CommandContext) -> CommandAction {
     let dir = args.trim();
     if dir.is_empty() {
-        return CommandAction::Message("Usage: /add-dir <path>\nAdds a directory to your context for Claude to reference.".into());
+        return CommandAction::Message(
+            "Usage: /add-dir <path>\nAdds a directory to your context for Claude to reference."
+                .into(),
+        );
     }
     let path = std::path::Path::new(dir);
     let path = if path.is_absolute() {
@@ -1807,7 +1993,7 @@ fn cmd_pr_comments(args: &str, ctx: &CommandContext) -> CommandAction {
 
     match cmd.output() {
         Err(_) => CommandAction::Message(
-            "gh CLI not found. Install the GitHub CLI (gh) to use /pr_comments.".into()
+            "gh CLI not found. Install the GitHub CLI (gh) to use /pr_comments.".into(),
         ),
         Ok(o) if !o.status.success() => {
             let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
@@ -1869,9 +2055,10 @@ fn cmd_export(_ctx: &CommandContext) -> CommandAction {
 }
 
 fn cmd_hooks(ctx: &CommandContext) -> CommandAction {
-    let hooks = match &ctx.config.hooks {
-        None => {
-            return CommandAction::Message(concat!(
+    let hooks =
+        match &ctx.config.hooks {
+            None => {
+                return CommandAction::Message(concat!(
                 "Hooks\n\nNo hooks configured.\n\n",
                 "Add hooks to ~/.claude/settings.json or .claude/settings.json:\n\n",
                 "{\n  \"hooks\": {\n",
@@ -1885,9 +2072,9 @@ fn cmd_hooks(ctx: &CommandContext) -> CommandAction {
                 "Env vars: TOOL_NAME, TOOL_INPUT (pre), TOOL_RESULT (post).\n",
                 "Empty matcher or \"*\" matches all tools."
             ).into());
-        }
-        Some(h) => h.clone(),
-    };
+            }
+            Some(h) => h.clone(),
+        };
 
     let mut lines = vec!["Hooks\n".to_string()];
 
@@ -1933,12 +2120,15 @@ fn cmd_image(args: &str) -> CommandAction {
         return CommandAction::Message(
             "Usage: /image <path>\n\nAttaches an image to your next message.\n\
              Supported formats: PNG, JPEG, GIF, WebP\n\n\
-             Example: /image /home/user/screenshot.png".into()
+             Example: /image /home/user/screenshot.png"
+                .into(),
         );
     }
     let expanded = if path.starts_with('~') {
         if let Some(home) = dirs::home_dir() {
-            home.join(path.trim_start_matches("~/")).to_string_lossy().into_owned()
+            home.join(path.trim_start_matches("~/"))
+                .to_string_lossy()
+                .into_owned()
         } else {
             path.to_string()
         }
@@ -1957,91 +2147,141 @@ pub type HelpCommand = (&'static str, &'static str);
 /// Help categories — each entry is (category_name, short_description, commands).
 /// Used by both the interactive picker and `/help <category>`.
 pub const HELP_CATEGORIES: &[(&str, &str, &[HelpCommand])] = &[
-    ("General", "Basic session commands", &[
-        ("/help",    "show this help"),
-        ("/status",  "show session status"),
-        ("/cost",    "show token usage & costs"),
-        ("/stats",   "detailed session statistics"),
-        ("/clear",   "clear chat history"),
-        ("/compact", "summarize & compress context"),
-        ("/exit",    "quit rustyclaw"),
-    ]),
-    ("Model & behavior", "Switch models, effort, output style", &[
-        ("/model",        "interactive model picker"),
-        ("/effort",       "set thinking effort (low, medium, high)"),
-        ("/brief",        "toggle concise responses"),
-        ("/output-style", "set output style preference"),
-        ("/plan",         "toggle plan mode (read-only)"),
-        ("/advisor",      "ask Claude for strategic advice"),
-    ]),
-    ("Session", "Save, resume, manage sessions", &[
-        ("/session",    "interactive session picker (↑↓ Enter d)"),
-        ("/resume",     "resume a saved session"),
-        ("/rename",     "rename current session"),
-        ("/export",     "export session to markdown"),
-        ("/rewind",     "undo last n exchanges (default 1)"),
-        ("/summary",    "summarize conversation so far"),
-        ("/copy",       "copy last response to clipboard"),
-        ("/undo",       "Rewind working tree to an earlier auto-commit turn ([N] or picker)"),
-        ("/redo",       "Advance working tree to a later auto-commit turn ([N] or picker)"),
-        ("/autocommit", "Show auto-commit status (enabled, session ID, turns recorded)"),
-    ]),
-    ("Code & git", "Commits, PRs, reviews, diffs", &[
-        ("/diff",            "git diff"),
-        ("/branch",          "show/switch branches"),
-        ("/commit",          "generate & run a git commit"),
-        ("/commit-push-pr",  "commit, push, and create PR"),
-        ("/review",          "code review"),
-        ("/security-review", "security audit"),
-        ("/checkpoint",      "git checkpoint commit (snapshot current changes)"),
-        ("/lint",            "auto-detect and run lint + tests, fix errors in loop"),
-        ("/pr_comments",     "show PR comments"),
-        ("/issue",           "work on a GitHub issue"),
-        ("/autofix-pr",      "auto-fix PR review comments"),
-    ]),
-    ("Project", "Config, context, environment", &[
-        ("/init",        "create CLAUDE.md for this project"),
-        ("/doctor",      "check system health"),
-        ("/config",      "show configuration"),
-        ("/context",     "show context window usage"),
-        ("/files",       "list project files"),
-        ("/add-dir",     "add directory to context"),
-        ("/permissions", "show permission settings"),
-        ("/env",         "show environment info"),
-        ("/hooks",       "show configured hooks"),
-        ("/memory",      "show saved memories"),
-        ("/tasks",       "show todo items"),
-        ("/skills",      "list available skills"),
-        ("/insights",    "show codebase insights"),
-    ]),
-    ("Spawn agents", "Background parallel agents in git worktrees", &[
-        ("/spawn <task>",        "spawn a background agent"),
-        ("/spawn list",          "list spawned agents"),
-        ("/spawn review <id>",   "review agent's changes"),
-        ("/spawn merge <id>",    "merge agent's changes"),
-        ("/spawn kill <id>",     "cancel a running agent"),
-        ("/spawn discard <id>",  "discard agent's worktree"),
-    ]),
-    ("Plugins & tools", "MCP servers, plugins, viz", &[
-        ("/mcp",            "show MCP server status"),
-        ("/plugin",         "install/manage plugins"),
-        ("/reload",         "hot-reload settings.json + CLAUDE.md"),
-        ("/reload-plugins", "reload all MCP plugins"),
-        ("/ctx-viz",        "context usage visualization"),
-    ]),
-    ("Other", "Voice, vim, themes, upgrades", &[
-        ("/image",         "attach an image to next message"),
-        ("/voice",         "voice input/output status"),
-        ("/voice clone",   "record a custom voice for TTS"),
-        ("/vim",           "toggle vim editing mode"),
-        ("/autonomy",      "set file change oversight (suggest/auto-edit/full-auto)"),
-        ("/theme",         "switch theme (dark, light, solarized)"),
-        ("/btw",           "prepend a note to next message"),
-        ("/upgrade",       "check for updates"),
-        ("/release-notes", "open upstream release notes"),
-        ("/keybindings",   "show keyboard shortcuts"),
-        ("/ide",           "show IDE integration info"),
-    ]),
+    (
+        "General",
+        "Basic session commands",
+        &[
+            ("/help", "show this help"),
+            ("/status", "show session status"),
+            ("/cost", "show token usage & costs"),
+            ("/stats", "detailed session statistics"),
+            ("/clear", "clear chat history"),
+            ("/compact", "summarize & compress context"),
+            ("/exit", "quit rustyclaw"),
+        ],
+    ),
+    (
+        "Model & behavior",
+        "Switch models, effort, output style",
+        &[
+            ("/model", "interactive model picker"),
+            ("/effort", "set thinking effort (low, medium, high)"),
+            ("/brief", "toggle concise responses"),
+            ("/output-style", "set output style preference"),
+            ("/plan", "toggle plan mode (read-only)"),
+            ("/advisor", "ask Claude for strategic advice"),
+        ],
+    ),
+    (
+        "Session",
+        "Save, resume, manage sessions",
+        &[
+            ("/session", "interactive session picker (↑↓ Enter d)"),
+            ("/resume", "resume a saved session"),
+            ("/rename", "rename current session"),
+            ("/export", "export session to markdown"),
+            ("/rewind", "undo last n exchanges (default 1)"),
+            ("/summary", "summarize conversation so far"),
+            ("/copy", "copy last response to clipboard"),
+            (
+                "/undo",
+                "Rewind working tree to an earlier auto-commit turn ([N] or picker)",
+            ),
+            (
+                "/redo",
+                "Advance working tree to a later auto-commit turn ([N] or picker)",
+            ),
+            (
+                "/autocommit",
+                "Show auto-commit status (enabled, session ID, turns recorded)",
+            ),
+        ],
+    ),
+    (
+        "Code & git",
+        "Commits, PRs, reviews, diffs",
+        &[
+            ("/diff", "git diff"),
+            ("/branch", "show/switch branches"),
+            ("/commit", "generate & run a git commit"),
+            ("/commit-push-pr", "commit, push, and create PR"),
+            ("/review", "code review"),
+            ("/security-review", "security audit"),
+            (
+                "/checkpoint",
+                "git checkpoint commit (snapshot current changes)",
+            ),
+            (
+                "/lint",
+                "auto-detect and run lint + tests, fix errors in loop",
+            ),
+            ("/pr_comments", "show PR comments"),
+            ("/issue", "work on a GitHub issue"),
+            ("/autofix-pr", "auto-fix PR review comments"),
+        ],
+    ),
+    (
+        "Project",
+        "Config, context, environment",
+        &[
+            ("/init", "create CLAUDE.md for this project"),
+            ("/doctor", "check system health"),
+            ("/config", "show configuration"),
+            ("/context", "show context window usage"),
+            ("/files", "list project files"),
+            ("/add-dir", "add directory to context"),
+            ("/permissions", "show permission settings"),
+            ("/env", "show environment info"),
+            ("/hooks", "show configured hooks"),
+            ("/memory", "show saved memories"),
+            ("/tasks", "show todo items"),
+            ("/skills", "list available skills"),
+            ("/insights", "show codebase insights"),
+        ],
+    ),
+    (
+        "Spawn agents",
+        "Background parallel agents in git worktrees",
+        &[
+            ("/spawn <task>", "spawn a background agent"),
+            ("/spawn list", "list spawned agents"),
+            ("/spawn review <id>", "review agent's changes"),
+            ("/spawn merge <id>", "merge agent's changes"),
+            ("/spawn kill <id>", "cancel a running agent"),
+            ("/spawn discard <id>", "discard agent's worktree"),
+        ],
+    ),
+    (
+        "Plugins & tools",
+        "MCP servers, plugins, viz",
+        &[
+            ("/mcp", "show MCP server status"),
+            ("/plugin", "install/manage plugins"),
+            ("/reload", "hot-reload settings.json + CLAUDE.md"),
+            ("/reload-plugins", "reload all MCP plugins"),
+            ("/ctx-viz", "context usage visualization"),
+        ],
+    ),
+    (
+        "Other",
+        "Voice, vim, themes, upgrades",
+        &[
+            ("/image", "attach an image to next message"),
+            ("/voice", "voice input/output status"),
+            ("/voice clone", "record a custom voice for TTS"),
+            ("/vim", "toggle vim editing mode"),
+            (
+                "/autonomy",
+                "set file change oversight (suggest/auto-edit/full-auto)",
+            ),
+            ("/theme", "switch theme (dark, light, solarized)"),
+            ("/btw", "prepend a note to next message"),
+            ("/upgrade", "check for updates"),
+            ("/release-notes", "open upstream release notes"),
+            ("/keybindings", "show keyboard shortcuts"),
+            ("/ide", "show IDE integration info"),
+        ],
+    ),
 ];
 
 fn cmd_help(args: &str) -> CommandAction {
@@ -2051,9 +2291,11 @@ fn cmd_help(args: &str) -> CommandAction {
     }
     // Match category by name prefix or number
     if let Ok(n) = q.parse::<usize>()
-        && n >= 1 && n <= HELP_CATEGORIES.len() {
-            return CommandAction::ShowHelpCategory(n - 1);
-        }
+        && n >= 1
+        && n <= HELP_CATEGORIES.len()
+    {
+        return CommandAction::ShowHelpCategory(n - 1);
+    }
     for (i, (name, _, _)) in HELP_CATEGORIES.iter().enumerate() {
         if name.to_lowercase().starts_with(&q) {
             return CommandAction::ShowHelpCategory(i);
@@ -2072,7 +2314,8 @@ fn cmd_commit(args: &str, _ctx: &CommandContext) -> CommandAction {
         CommandAction::SendPrompt(
             "Please review the git diff and staged changes, then create an appropriate git commit \
              with a clear, concise commit message. Use conventional commit format if applicable. \
-             Run `git add -A && git commit -m <message>` to commit.".into()
+             Run `git add -A && git commit -m <message>` to commit."
+                .into(),
         )
     } else {
         // User provided the message — just run it
@@ -2140,7 +2383,7 @@ fn cmd_insights(ctx: &CommandContext) -> CommandAction {
          5. Test coverage gaps \
          6. Technical debt items \
          Be specific with file paths and line numbers where relevant."
-            .into()
+            .into(),
     )
 }
 
@@ -2214,9 +2457,20 @@ fn cmd_env(ctx: &CommandContext) -> CommandAction {
 
     lines.push(format!("CWD:     {}", ctx.config.cwd.display()));
     lines.push(format!("Model:   {}", ctx.config.model));
-    lines.push(format!("Shell:   {}", std::env::var("SHELL").unwrap_or_else(|_| "unknown".into())));
-    lines.push(format!("User:    {}", std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_else(|_| "unknown".into())));
-    lines.push(format!("HOME:    {}", std::env::var("HOME").unwrap_or_else(|_| "unknown".into())));
+    lines.push(format!(
+        "Shell:   {}",
+        std::env::var("SHELL").unwrap_or_else(|_| "unknown".into())
+    ));
+    lines.push(format!(
+        "User:    {}",
+        std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_else(|_| "unknown".into())
+    ));
+    lines.push(format!(
+        "HOME:    {}",
+        std::env::var("HOME").unwrap_or_else(|_| "unknown".into())
+    ));
 
     if let Ok(path) = std::env::var("PATH") {
         let entries: Vec<&str> = path.split(':').take(5).collect();
@@ -2224,11 +2478,17 @@ fn cmd_env(ctx: &CommandContext) -> CommandAction {
     }
 
     lines.push(String::new());
-    lines.push(format!("ANTHROPIC_API_KEY: {}", if ctx.config.api_key.is_empty() {
-        "not set".to_string()
-    } else {
-        format!("{}...", &ctx.config.api_key[..4.min(ctx.config.api_key.len())])
-    }));
+    lines.push(format!(
+        "ANTHROPIC_API_KEY: {}",
+        if ctx.config.api_key.is_empty() {
+            "not set".to_string()
+        } else {
+            format!(
+                "{}...",
+                &ctx.config.api_key[..4.min(ctx.config.api_key.len())]
+            )
+        }
+    ));
 
     CommandAction::Message(lines.join("\n"))
 }
@@ -2249,8 +2509,15 @@ fn cmd_output_style(args: &str, ctx: &CommandContext) -> CommandAction {
             "  default         — normal Claude responses (no style override)\n".into(),
         ];
         for s in &styles {
-            let marker = if active.eq_ignore_ascii_case(&s.name) { " ◀" } else { "" };
-            lines.push(format!("  {:<16} — {} [{}]{}\n", s.name, s.description, s.source, marker));
+            let marker = if active.eq_ignore_ascii_case(&s.name) {
+                " ◀"
+            } else {
+                ""
+            };
+            lines.push(format!(
+                "  {:<16} — {} [{}]{}\n",
+                s.name, s.description, s.source, marker
+            ));
         }
         lines.push("\nUsage: /output-style <name>  (e.g. /output-style Explanatory)\n".into());
         lines.push("       /output-style default  — clear active style\n".into());
@@ -2272,12 +2539,12 @@ fn cmd_theme(args: &str, ctx: &CommandContext) -> CommandAction {
     }
     if !valid.contains(&theme.as_str()) {
         return CommandAction::Message(format!(
-            "Unknown theme '{}'. Available: dark, light, solarized", theme
+            "Unknown theme '{}'. Available: dark, light, solarized",
+            theme
         ));
     }
     CommandAction::SetTheme(theme)
 }
-
 
 fn cmd_upgrade() -> CommandAction {
     CommandAction::CheckUpgrade
@@ -2312,7 +2579,8 @@ fn cmd_btw(args: &str) -> CommandAction {
              Prepends a note to your next message. Useful for providing context \
              without making it the main focus of your prompt.\n\n\
              Example: /btw I'm using Python 3.11 on macOS\n\
-             Then your next message will include that context automatically.".into()
+             Then your next message will include that context automatically."
+                .into(),
         )
     } else {
         CommandAction::SetBtwNote(note.to_string())
@@ -2329,20 +2597,11 @@ fn cmd_ctx_viz(ctx: &CommandContext) -> CommandAction {
     let filled = (pct as usize * bar_width / 100).min(bar_width);
 
     let color_bar = if pct >= 90 {
-        format!("{}{}",
-            "▓".repeat(filled),
-            "░".repeat(bar_width - filled)
-        )
+        format!("{}{}", "▓".repeat(filled), "░".repeat(bar_width - filled))
     } else if pct >= 70 {
-        format!("{}{}",
-            "▒".repeat(filled),
-            "░".repeat(bar_width - filled)
-        )
+        format!("{}{}", "▒".repeat(filled), "░".repeat(bar_width - filled))
     } else {
-        format!("{}{}",
-            "█".repeat(filled),
-            "░".repeat(bar_width - filled)
-        )
+        format!("{}{}", "█".repeat(filled), "░".repeat(bar_width - filled))
     };
 
     let thresholds = [
@@ -2362,7 +2621,10 @@ fn cmd_ctx_viz(ctx: &CommandContext) -> CommandAction {
     for (threshold, label) in &thresholds {
         let t_pct = threshold * 100 / limit;
         let marker_pos = (t_pct as usize * bar_width / 100).min(bar_width);
-        lines.push(format!("  {threshold:>7} ({t_pct}%) — auto-{label}  {}", " ".repeat(marker_pos) + "^"));
+        lines.push(format!(
+            "  {threshold:>7} ({t_pct}%) — auto-{label}  {}",
+            " ".repeat(marker_pos) + "^"
+        ));
     }
 
     lines.push(String::new());
@@ -2510,9 +2772,7 @@ After writing the skill file(s), inform the user:
 
 fn cmd_agents(ctx: &CommandContext) -> CommandAction {
     // List agents defined in .claude/agents/ directories
-    let mut search_dirs = vec![
-        ctx.config.cwd.join(".claude").join("agents"),
-    ];
+    let mut search_dirs = vec![ctx.config.cwd.join(".claude").join("agents")];
     if let Some(home) = dirs::home_dir() {
         search_dirs.push(home.join(".claude").join("agents"));
     }
@@ -2540,7 +2800,8 @@ fn cmd_agents(ctx: &CommandContext) -> CommandAction {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                let name = path.file_name()
+                let name = path
+                    .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("")
                     .to_string();
@@ -2550,8 +2811,13 @@ fn cmd_agents(ctx: &CommandContext) -> CommandAction {
                     std::fs::read_to_string(&agent_md)
                         .ok()
                         .and_then(|content| {
-                            content.lines()
-                                .find(|l| !l.trim().is_empty() && !l.starts_with("---") && !l.starts_with('#'))
+                            content
+                                .lines()
+                                .find(|l| {
+                                    !l.trim().is_empty()
+                                        && !l.starts_with("---")
+                                        && !l.starts_with('#')
+                                })
                                 .map(|l| l.trim().to_string())
                         })
                         .unwrap_or_default()
@@ -2566,7 +2832,8 @@ fn cmd_agents(ctx: &CommandContext) -> CommandAction {
                 total += 1;
                 found = true;
             } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
-                let name = path.file_stem()
+                let name = path
+                    .file_stem()
                     .and_then(|n| n.to_str())
                     .unwrap_or("")
                     .to_string();
@@ -2582,7 +2849,10 @@ fn cmd_agents(ctx: &CommandContext) -> CommandAction {
     }
 
     if total == 0 {
-        lines.push("No agents found. Create agent definitions in .claude/agents/ or ~/.claude/agents/.".into());
+        lines.push(
+            "No agents found. Create agent definitions in .claude/agents/ or ~/.claude/agents/."
+                .into(),
+        );
     } else {
         lines.insert(1, format!("{total} agent(s) found\n"));
     }
@@ -2601,19 +2871,21 @@ fn cmd_stats(ctx: &CommandContext) -> CommandAction {
     let mut total_tokens_out: u64 = 0;
 
     if sessions_dir.exists()
-        && let Ok(entries) = std::fs::read_dir(&sessions_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("meta") {
-                    total_sessions += 1;
-                    if let Ok(data) = std::fs::read_to_string(&path)
-                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
-                            total_tokens_in += json["tokens_in"].as_u64().unwrap_or(0);
-                            total_tokens_out += json["tokens_out"].as_u64().unwrap_or(0);
-                        }
+        && let Ok(entries) = std::fs::read_dir(&sessions_dir)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("meta") {
+                total_sessions += 1;
+                if let Ok(data) = std::fs::read_to_string(&path)
+                    && let Ok(json) = serde_json::from_str::<serde_json::Value>(&data)
+                {
+                    total_tokens_in += json["tokens_in"].as_u64().unwrap_or(0);
+                    total_tokens_out += json["tokens_out"].as_u64().unwrap_or(0);
                 }
             }
         }
+    }
 
     let (price_in, price_out) = {
         let m = &ctx.config.model;
@@ -2669,12 +2941,12 @@ fn cmd_statusline(args: &str) -> CommandAction {
 fn cmd_voice(args: &str, ctx: &CommandContext) -> CommandAction {
     let trimmed = args.trim();
     match trimmed {
-        "enable"       => CommandAction::SetVoiceEnabled(true),
-        "disable"      => CommandAction::SetVoiceEnabled(false),
-        "speak on"     => CommandAction::SetTtsEnabled(true),
-        "speak off"    => CommandAction::SetTtsEnabled(false),
-        "model"        => CommandAction::ListVoiceModels,
-        "test"         => CommandAction::VoiceTest,
+        "enable" => CommandAction::SetVoiceEnabled(true),
+        "disable" => CommandAction::SetVoiceEnabled(false),
+        "speak on" => CommandAction::SetTtsEnabled(true),
+        "speak off" => CommandAction::SetTtsEnabled(false),
+        "model" => CommandAction::ListVoiceModels,
+        "test" => CommandAction::VoiceTest,
         "clone remove" => CommandAction::VoiceCloneRemove,
         _ if trimmed.starts_with("clone save") => {
             let tier = trimmed.strip_prefix("clone save").unwrap_or("").trim();
@@ -2707,27 +2979,40 @@ fn cmd_sandbox(args: &str, ctx: &CommandContext) -> CommandAction {
             } else {
                 match rest {
                     "strict" | "bwrap" | "firejail" => rest.to_string(),
-                    other => return CommandAction::Message(format!(
-                        "Unknown sandbox mode '{other}'. Valid: strict, bwrap, firejail"
-                    )),
+                    other => {
+                        return CommandAction::Message(format!(
+                            "Unknown sandbox mode '{other}'. Valid: strict, bwrap, firejail"
+                        ));
+                    }
                 }
             };
-            CommandAction::SetSandboxEnabled { enabled: true, mode }
+            CommandAction::SetSandboxEnabled {
+                enabled: true,
+                mode,
+            }
         }
-        "disable" => CommandAction::SetSandboxEnabled { enabled: false, mode: String::new() },
+        "disable" => CommandAction::SetSandboxEnabled {
+            enabled: false,
+            mode: String::new(),
+        },
         "network" => match rest {
-            "on"  | "allow"  => CommandAction::SetSandboxNetwork(true),
-            "off" | "block"  => CommandAction::SetSandboxNetwork(false),
+            "on" | "allow" => CommandAction::SetSandboxNetwork(true),
+            "off" | "block" => CommandAction::SetSandboxNetwork(false),
             _ => CommandAction::Message(format!(
                 "Network is currently: {}\n\n\
                  /sandbox network on   — allow outbound network (bwrap mode)\n\
                  /sandbox network off  — block outbound network (bwrap mode)",
-                if ctx.config.sandbox_allow_network { "on (allowed)" } else { "off (blocked)" }
+                if ctx.config.sandbox_allow_network {
+                    "on (allowed)"
+                } else {
+                    "off (blocked)"
+                }
             )),
         },
-        _ => CommandAction::Message(
-            crate::sandbox::sandbox_status(ctx.config.sandbox_enabled, &ctx.config.sandbox_mode)
-        ),
+        _ => CommandAction::Message(crate::sandbox::sandbox_status(
+            ctx.config.sandbox_enabled,
+            &ctx.config.sandbox_mode,
+        )),
     }
 }
 
@@ -2742,7 +3027,7 @@ fn cmd_teleport(args: &str) -> CommandAction {
              /teleport export   — save session context to ~/.claude/teleport.json\n\
              /teleport import   — load session context from ~/.claude/teleport.json\n\n\
              Use this to transfer a conversation to another terminal or instance."
-            .into()
+                .into(),
         ),
     }
 }
@@ -2756,10 +3041,10 @@ fn cmd_feedback() -> CommandAction {
 // ── Terminal Setup ─────────────────────────────────────────────────────────────
 
 fn cmd_terminal_setup() -> CommandAction {
-    let term     = std::env::var("TERM").unwrap_or_else(|_| "unknown".into());
+    let term = std::env::var("TERM").unwrap_or_else(|_| "unknown".into());
     let colorterm = std::env::var("COLORTERM").unwrap_or_default();
     let term_prog = std::env::var("TERM_PROGRAM").unwrap_or_default();
-    let term_ver  = std::env::var("TERM_PROGRAM_VERSION").unwrap_or_default();
+    let term_ver = std::env::var("TERM_PROGRAM_VERSION").unwrap_or_default();
 
     // Detect color depth
     let color_support = if colorterm == "truecolor" || colorterm == "24bit" {
@@ -2772,16 +3057,29 @@ fn cmd_terminal_setup() -> CommandAction {
 
     // Identify terminal
     let terminal_name = if !term_prog.is_empty() {
-        if term_ver.is_empty() { term_prog.clone() } else { format!("{} {}", term_prog, term_ver) }
-    } else if term.contains("kitty") { "kitty".into() }
-      else if term.contains("alacritty") { "alacritty".into() }
-      else if term.contains("xterm") { "xterm".into() }
-      else { term.clone() };
+        if term_ver.is_empty() {
+            term_prog.clone()
+        } else {
+            format!("{} {}", term_prog, term_ver)
+        }
+    } else if term.contains("kitty") {
+        "kitty".into()
+    } else if term.contains("alacritty") {
+        "alacritty".into()
+    } else if term.contains("xterm") {
+        "xterm".into()
+    } else {
+        term.clone()
+    };
 
     // Unicode check (basic — if LANG includes UTF-8 we're probably fine)
     let lang = std::env::var("LANG").unwrap_or_default();
     let unicode_ok = lang.to_lowercase().contains("utf") || lang.to_lowercase().contains("utf-8");
-    let unicode_status = if unicode_ok { "✓ UTF-8 locale detected" } else { "  LANG not UTF-8 — set LANG=en_US.UTF-8 for best display" };
+    let unicode_status = if unicode_ok {
+        "✓ UTF-8 locale detected"
+    } else {
+        "  LANG not UTF-8 — set LANG=en_US.UTF-8 for best display"
+    };
 
     let msg = format!(
         "Terminal Setup\n\n\
@@ -2819,7 +3117,7 @@ fn cmd_share(args: &str) -> CommandAction {
             "Share session\n\n\
              /share          — export session to a markdown file in the current directory\n\
              /share clip     — copy session markdown to clipboard (requires xclip or wl-copy)"
-            .into()
+                .into(),
         ),
     }
 }
@@ -2828,14 +3126,18 @@ fn cmd_share(args: &str) -> CommandAction {
 
 fn cmd_notifications(args: &str, ctx: &CommandContext) -> CommandAction {
     match args.trim() {
-        "enable" | "on"   => CommandAction::SetNotificationsEnabled(true),
+        "enable" | "on" => CommandAction::SetNotificationsEnabled(true),
         "disable" | "off" => CommandAction::SetNotificationsEnabled(false),
         _ => CommandAction::Message(format!(
             "Notifications  {}\n\n\
              /notifications enable   — fire terminal bell + notify-send on task completion\n\
              /notifications disable  — disable notifications\n\n\
              Requires: notify-send (sudo apt install libnotify-bin)",
-            if ctx.config.notifications_enabled { "ENABLED" } else { "DISABLED" }
+            if ctx.config.notifications_enabled {
+                "ENABLED"
+            } else {
+                "DISABLED"
+            }
         )),
     }
 }
@@ -2861,7 +3163,7 @@ fn cmd_release_notes(_args: &str) -> CommandAction {
            • Themes (/theme) — dark, light, solarized\n\n\
          See CHANGELOG.md for full history.\n\
          See https://github.com/ForkedInTime/RustyClaw/releases for downloads."
-            .into()
+            .into(),
     )
 }
 
@@ -2882,46 +3184,37 @@ fn cmd_plugin(args: &str) -> CommandAction {
                     // Re-install to update
                     CommandAction::PluginInstall(format!("marketplace:{}", target))
                 }
-                "list" | "" => {
-                    plugin_marketplace_list()
-                }
+                "list" | "" => plugin_marketplace_list(),
                 _ => CommandAction::Message(
                     "Usage: /plugin marketplace <add|remove|update|list> [target]\n\
-                     Example: /plugin marketplace add mksglu/context-mode".into()
-                )
+                     Example: /plugin marketplace add mksglu/context-mode"
+                        .into(),
+                ),
             }
         }
-        "install" | "i" if !rest.is_empty() => {
-            CommandAction::PluginInstall(rest.to_string())
-        }
-        "install" | "i" => {
-            CommandAction::Message(
-                "Usage: /plugin install <package[@version]>\n\
-                 Example: /plugin install @modelcontextprotocol/server-github".into()
-            )
-        }
+        "install" | "i" if !rest.is_empty() => CommandAction::PluginInstall(rest.to_string()),
+        "install" | "i" => CommandAction::Message(
+            "Usage: /plugin install <package[@version]>\n\
+                 Example: /plugin install @modelcontextprotocol/server-github"
+                .into(),
+        ),
         "remove" | "uninstall" | "rm" if !rest.is_empty() => {
             CommandAction::PluginRemove(rest.to_string())
         }
         "remove" | "uninstall" | "rm" => {
             CommandAction::Message("Usage: /plugin remove <name>".into())
         }
-        "enable" if !rest.is_empty() => {
-            plugin_set_enabled(rest, true)
-        }
-        "disable" if !rest.is_empty() => {
-            plugin_set_enabled(rest, false)
-        }
-        "enable" | "disable" => {
-            CommandAction::Message(format!("Usage: /plugin {sub} <name>"))
-        }
+        "enable" if !rest.is_empty() => plugin_set_enabled(rest, true),
+        "disable" if !rest.is_empty() => plugin_set_enabled(rest, false),
+        "enable" | "disable" => CommandAction::Message(format!("Usage: /plugin {sub} <name>")),
         "validate" => {
             let path = rest.trim();
             if path.is_empty() {
                 CommandAction::Message(
                     "Usage: /plugin validate [path]\n\
                      Validates a plugin's package.json and MCP server configuration.\n\
-                     Without a path, validates all installed plugins.".into()
+                     Without a path, validates all installed plugins."
+                        .into(),
                 )
             } else {
                 plugin_validate(path)
@@ -2932,23 +3225,26 @@ fn cmd_plugin(args: &str) -> CommandAction {
             plugin_manage_list()
         }
         "" | "list" | "status" => CommandAction::PluginList,
-        "help" | "--help" | "-h" => CommandAction::Message(concat!(
-            "Plugin management\n\n",
-            "  /plugin list                         — list installed plugins\n",
-            "  /plugin install <pkg>                — install npm package as MCP server\n",
-            "  /plugin remove <name>                — uninstall plugin\n",
-            "  /plugin enable <name>                — enable a disabled plugin\n",
-            "  /plugin disable <name>               — disable a plugin\n",
-            "  /plugin validate [path]              — validate plugin configuration\n",
-            "  /plugin manage                       — show all plugins with status\n",
-            "  /plugin marketplace add <repo>       — install from GitHub marketplace\n",
-            "  /plugin marketplace remove <name>    — remove marketplace plugin\n",
-            "  /plugin marketplace list             — list marketplace sources\n\n",
-            "Examples:\n",
-            "  /plugin install @modelcontextprotocol/server-github\n",
-            "  /plugin marketplace add mksglu/context-mode\n",
-            "  /plugin disable context-mode"
-        ).into()),
+        "help" | "--help" | "-h" => CommandAction::Message(
+            concat!(
+                "Plugin management\n\n",
+                "  /plugin list                         — list installed plugins\n",
+                "  /plugin install <pkg>                — install npm package as MCP server\n",
+                "  /plugin remove <name>                — uninstall plugin\n",
+                "  /plugin enable <name>                — enable a disabled plugin\n",
+                "  /plugin disable <name>               — disable a plugin\n",
+                "  /plugin validate [path]              — validate plugin configuration\n",
+                "  /plugin manage                       — show all plugins with status\n",
+                "  /plugin marketplace add <repo>       — install from GitHub marketplace\n",
+                "  /plugin marketplace remove <name>    — remove marketplace plugin\n",
+                "  /plugin marketplace list             — list marketplace sources\n\n",
+                "Examples:\n",
+                "  /plugin install @modelcontextprotocol/server-github\n",
+                "  /plugin marketplace add mksglu/context-mode\n",
+                "  /plugin disable context-mode"
+            )
+            .into(),
+        ),
         _ => CommandAction::Message(format!(
             "Unknown plugin subcommand '{sub}'. Try /plugin help."
         )),
@@ -2958,21 +3254,32 @@ fn cmd_plugin(args: &str) -> CommandAction {
 fn plugin_marketplace_list() -> CommandAction {
     let plugins_path = Config::claude_dir().join("plugins.json");
     let content = std::fs::read_to_string(&plugins_path).unwrap_or_default();
-    let plugins: serde_json::Value = serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
+    let plugins: serde_json::Value =
+        serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
 
     if let Some(obj) = plugins.as_object() {
-        let marketplace_plugins: Vec<_> = obj.iter()
-            .filter(|(_, v)| v.get("source").and_then(|s| s.as_str()).is_some_and(|s| s.contains("marketplace") || s.contains("github")))
+        let marketplace_plugins: Vec<_> = obj
+            .iter()
+            .filter(|(_, v)| {
+                v.get("source")
+                    .and_then(|s| s.as_str())
+                    .is_some_and(|s| s.contains("marketplace") || s.contains("github"))
+            })
             .collect();
         if marketplace_plugins.is_empty() {
             CommandAction::Message(
                 "No marketplace plugins installed.\n\
-                 Install one: /plugin marketplace add <github-user/repo>".into()
+                 Install one: /plugin marketplace add <github-user/repo>"
+                    .into(),
             )
         } else {
-            let lines: Vec<String> = marketplace_plugins.iter()
+            let lines: Vec<String> = marketplace_plugins
+                .iter()
                 .map(|(name, v)| {
-                    let src = v.get("source").and_then(|s| s.as_str()).unwrap_or("unknown");
+                    let src = v
+                        .get("source")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("unknown");
                     format!("  {name}  (from {src})")
                 })
                 .collect();
@@ -2987,16 +3294,19 @@ fn plugin_set_enabled(name: &str, enabled: bool) -> CommandAction {
     // Toggle disabled flag in settings.json mcpServers entry
     let settings_path = Config::claude_dir().join("settings.json");
     let content = std::fs::read_to_string(&settings_path).unwrap_or_else(|_| "{}".to_string());
-    let mut val: serde_json::Value = serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
+    let mut val: serde_json::Value =
+        serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
 
-    let server = val.get_mut("mcpServers")
+    let server = val
+        .get_mut("mcpServers")
         .and_then(|m| m.as_object_mut())
         .and_then(|m| m.get_mut(name));
 
     match server {
         None => CommandAction::Message(format!(
             "Plugin/MCP server '{}' not found in settings.json.\n\
-             List installed plugins: /plugin list", name
+             List installed plugins: /plugin list",
+            name
         )),
         Some(s) => {
             if let Some(obj) = s.as_object_mut() {
@@ -3012,7 +3322,8 @@ fn plugin_set_enabled(name: &str, enabled: bool) -> CommandAction {
             {
                 Some(_) => CommandAction::Message(format!(
                     "Plugin '{}' {}. Restart rustyclaw to apply.",
-                    name, if enabled { "enabled" } else { "disabled" }
+                    name,
+                    if enabled { "enabled" } else { "disabled" }
                 )),
                 None => CommandAction::Message("Failed to write settings.json".into()),
             }
@@ -3023,13 +3334,20 @@ fn plugin_set_enabled(name: &str, enabled: bool) -> CommandAction {
 fn plugin_validate(path: &str) -> CommandAction {
     use std::path::Path;
     let p = Path::new(path);
-    let pkg_json = if p.is_dir() { p.join("package.json") } else { p.to_path_buf() };
+    let pkg_json = if p.is_dir() {
+        p.join("package.json")
+    } else {
+        p.to_path_buf()
+    };
 
     let content = match std::fs::read_to_string(&pkg_json) {
         Ok(c) => c,
-        Err(e) => return CommandAction::Message(format!(
-            "Cannot read {}: {e}\nMake sure the path points to a plugin directory or package.json", pkg_json.display()
-        )),
+        Err(e) => {
+            return CommandAction::Message(format!(
+                "Cannot read {}: {e}\nMake sure the path points to a plugin directory or package.json",
+                pkg_json.display()
+            ));
+        }
     };
 
     let pkg: serde_json::Value = match serde_json::from_str(&content) {
@@ -3055,13 +3373,26 @@ fn plugin_validate(path: &str) -> CommandAction {
     let has_bin = pkg.get("bin").is_some();
     let has_main = pkg.get("main").is_some();
     if has_bin || has_main {
-        ok.push(if has_bin { "bin: present (MCP entry point)" } else { "main: present" }.into());
+        ok.push(
+            if has_bin {
+                "bin: present (MCP entry point)"
+            } else {
+                "main: present"
+            }
+            .into(),
+        );
     } else {
-        issues.push("WARNING: No 'bin' or 'main' in package.json — may not work as MCP server".into());
+        issues.push(
+            "WARNING: No 'bin' or 'main' in package.json — may not work as MCP server".into(),
+        );
     }
 
     let result = if issues.is_empty() {
-        format!("Plugin validation OK\n{}\n\n{}", pkg_json.display(), ok.join("\n"))
+        format!(
+            "Plugin validation OK\n{}\n\n{}",
+            pkg_json.display(),
+            ok.join("\n")
+        )
     } else {
         format!(
             "Plugin validation issues in {}\n\nIssues:\n{}\n\nOK:\n{}",
@@ -3080,14 +3411,17 @@ fn plugin_manage_list() -> CommandAction {
 
     let plugins_path = Config::claude_dir().join("plugins.json");
     let plugins_content = std::fs::read_to_string(&plugins_path).unwrap_or_default();
-    let plugins: serde_json::Value = serde_json::from_str(&plugins_content).unwrap_or(serde_json::json!({}));
+    let plugins: serde_json::Value =
+        serde_json::from_str(&plugins_content).unwrap_or(serde_json::json!({}));
 
     let mcp_servers = val.get("mcpServers").and_then(|m| m.as_object());
 
-    if mcp_servers.is_none_or(|m| m.is_empty()) && plugins.as_object().is_none_or(|m| m.is_empty()) {
+    if mcp_servers.is_none_or(|m| m.is_empty()) && plugins.as_object().is_none_or(|m| m.is_empty())
+    {
         return CommandAction::Message(
             "No plugins installed.\n\
-             Install one: /plugin install <package>".into()
+             Install one: /plugin install <package>"
+                .into(),
         );
     }
 
@@ -3095,8 +3429,15 @@ fn plugin_manage_list() -> CommandAction {
 
     if let Some(servers) = mcp_servers {
         for (name, cfg) in servers {
-            let disabled = cfg.get("disabled").and_then(|v| v.as_bool()).unwrap_or(false);
-            let transport = if cfg.get("url").is_some() { "HTTP" } else { "stdio" };
+            let disabled = cfg
+                .get("disabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let transport = if cfg.get("url").is_some() {
+                "HTTP"
+            } else {
+                "stdio"
+            };
             let status = if disabled { "DISABLED" } else { "enabled " };
             lines.push(format!("  [{status}] {name}  ({transport})"));
         }
@@ -3122,35 +3463,35 @@ fn cmd_spawn(args: &str) -> CommandAction {
              /spawn kill <id>        — cancel a running agent\n\
              /spawn discard <id>     — discard an agent's worktree\n\n\
              Example: /spawn refactor the auth module to use JWT tokens"
-            .into(),
+                .into(),
         );
     }
 
     let (sub, rest) = split_first_word(args);
     match sub {
-        "list" | "ls"       => CommandAction::ListSpawns,
-        "review" | "diff"   => {
+        "list" | "ls" => CommandAction::ListSpawns,
+        "review" | "diff" => {
             if rest.is_empty() {
                 CommandAction::Message("Usage: /spawn review <agent-id>".into())
             } else {
                 CommandAction::ReviewSpawn(rest.to_string())
             }
         }
-        "merge"             => {
+        "merge" => {
             if rest.is_empty() {
                 CommandAction::Message("Usage: /spawn merge <agent-id>".into())
             } else {
                 CommandAction::MergeSpawn(rest.to_string())
             }
         }
-        "kill" | "cancel"   => {
+        "kill" | "cancel" => {
             if rest.is_empty() {
                 CommandAction::Message("Usage: /spawn kill <agent-id>".into())
             } else {
                 CommandAction::KillSpawn(rest.to_string())
             }
         }
-        "discard" | "drop"  => {
+        "discard" | "drop" => {
             if rest.is_empty() {
                 CommandAction::Message("Usage: /spawn discard <agent-id>".into())
             } else {
@@ -3194,7 +3535,7 @@ fn cmd_autofix_pr(args: &str) -> CommandAction {
              Example: /autofix-pr 42\n\n\
              Without an argument, fixes comments on the current branch's open PR.\n\
              Requires: gh CLI installed and authenticated."
-            .into()
+                .into(),
         );
     }
     CommandAction::SendPrompt(format!(
@@ -3230,7 +3571,7 @@ fn cmd_issue(args: &str) -> CommandAction {
              Usage: /issue <description>\n\
              Example: /issue login fails when username contains spaces\n\n\
              Requires: gh CLI installed and authenticated (gh auth login)"
-            .into()
+                .into(),
         );
     }
     CommandAction::SendPrompt(format!(
@@ -3260,7 +3601,7 @@ fn cmd_color(args: &str) -> CommandAction {
         }
         other => CommandAction::Message(format!(
             "Unknown option '{other}'.\nUsage: /color  — show color settings\nUse /theme to change the UI theme."
-        ))
+        )),
     }
 }
 
@@ -3287,7 +3628,7 @@ fn cmd_powerup(args: &str) -> CommandAction {
              **Vim mode**\n\
              - /vim toggles vim keybindings (normal/insert mode)\n\
              \n\
-             Type /powerup 2 for the next lesson."
+             Type /powerup 2 for the next lesson.",
         ),
         (
             "lesson 2 — slash commands",
@@ -3306,7 +3647,7 @@ fn cmd_powerup(args: &str) -> CommandAction {
              - /plan         — read-only mode (no destructive tools)\n\
              - /effort       — set thinking depth (low/medium/high/max)\n\
              \n\
-             Type /powerup 3 for the next lesson."
+             Type /powerup 3 for the next lesson.",
         ),
         (
             "lesson 3 — skills",
@@ -3330,7 +3671,7 @@ fn cmd_powerup(args: &str) -> CommandAction {
              ```\n\
              Then invoke it with /my-skill some arguments\n\
              \n\
-             Type /powerup 4 for the next lesson."
+             Type /powerup 4 for the next lesson.",
         ),
         (
             "lesson 4 — context & sessions",
@@ -3349,7 +3690,7 @@ fn cmd_powerup(args: &str) -> CommandAction {
              - rustyclaw -r      — resume most recent on launch\n\
              - /export           — save as markdown\n\
              \n\
-             Type /powerup 5 for the next lesson."
+             Type /powerup 5 for the next lesson.",
         ),
         (
             "lesson 5 — MCP servers",
@@ -3372,7 +3713,7 @@ fn cmd_powerup(args: &str) -> CommandAction {
              - /mcp         — list connected servers and tools\n\
              - rustyclaw mcp list   — from the terminal\n\
              \n\
-             Type /powerup 6 for the next lesson."
+             Type /powerup 6 for the next lesson.",
         ),
         (
             "lesson 6 — voice & TTS",
@@ -3393,7 +3734,7 @@ fn cmd_powerup(args: &str) -> CommandAction {
                  --with 'transformers<4.46' --with 'torch<2.6' --with 'torchaudio<2.6'\n\
              \n\
              You have completed the rustyclaw power-up course!\n\
-             Type /help any time for the full command reference."
+             Type /help any time for the full command reference.",
         ),
     ];
 
@@ -3403,7 +3744,9 @@ fn cmd_powerup(args: &str) -> CommandAction {
 
     let header = format!(
         "**rustyclaw /powerup — {} of {}** — {}\n\n",
-        idx + 1, lessons.len(), title
+        idx + 1,
+        lessons.len(),
+        title
     );
 
     CommandAction::Message(format!("{header}{content}"))

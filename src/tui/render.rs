@@ -14,7 +14,6 @@
 ///   > user message
 /// > ● assistant response
 ///   > _
-
 use crate::tui::app::{App, EntryKind};
 use crate::tui::markdown;
 use ratatui::{
@@ -26,8 +25,8 @@ use ratatui::{
 };
 
 // Orange/amber — rustyclaw accent (dark theme default)
-const ACCENT:   Color = Color::Rgb(255, 165, 0);
-const USER_BG:  Color = Color::Rgb(30, 30, 35);
+const ACCENT: Color = Color::Rgb(255, 165, 0);
+const USER_BG: Color = Color::Rgb(30, 30, 35);
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -35,12 +34,12 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 // Claw = 3 cascading ╲╲╲ rows (each shifted right) — looks like a claw strike,
 // NOT a fork (no tines, no converging, no handle — parallel diagonal slashes).
 const LOGO: &[&str] = &[
-    "████  ╷╷╷  ╲╲╲  ",  // R top  + fork tines + claw strike row 1
-    "█   █ └┼┘   ╲╲╲ ",  // R bowl + fork neck  + claw strike row 2 (shifted →)
-    "████   │ ──► ╲╲╲",  // R mid  + fork + ──► + claw strike row 3 (rightmost)
-    "█  █            ",  // R left + right legs
-    "█   █           ",  // R legs spread
-    "                ",  // base
+    "████  ╷╷╷  ╲╲╲  ", // R top  + fork tines + claw strike row 1
+    "█   █ └┼┘   ╲╲╲ ", // R bowl + fork neck  + claw strike row 2 (shifted →)
+    "████   │ ──► ╲╲╲", // R mid  + fork + ──► + claw strike row 3 (rightmost)
+    "█  █            ", // R left + right legs
+    "█   █           ", // R legs spread
+    "                ", // base
 ];
 const LOGO_COLOR: Color = Color::Rgb(240, 120, 60);
 
@@ -60,25 +59,26 @@ struct ThemeColors {
 fn theme_colors(theme: &str) -> ThemeColors {
     match theme {
         "light" => ThemeColors {
-            accent:    Color::Rgb(180, 100, 0),    // darker orange for light bg
-            user_bg:   Color::Rgb(240, 240, 245),  // near-white tint
-            logo:      Color::Rgb(200, 90, 40),
-            assistant: Color::Rgb(0, 120, 0),      // darker green
-            tool:      Color::Rgb(140, 100, 0),    // darker amber
+            accent: Color::Rgb(180, 100, 0),    // darker orange for light bg
+            user_bg: Color::Rgb(240, 240, 245), // near-white tint
+            logo: Color::Rgb(200, 90, 40),
+            assistant: Color::Rgb(0, 120, 0), // darker green
+            tool: Color::Rgb(140, 100, 0),    // darker amber
         },
         "solarized" => ThemeColors {
-            accent:    Color::Rgb(203, 75, 22),    // solarized orange
-            user_bg:   Color::Rgb(0, 43, 54),      // solarized base03
-            logo:      Color::Rgb(203, 75, 22),
-            assistant: Color::Rgb(133, 153, 0),    // solarized green
-            tool:      Color::Rgb(181, 137, 0),    // solarized yellow
+            accent: Color::Rgb(203, 75, 22), // solarized orange
+            user_bg: Color::Rgb(0, 43, 54),  // solarized base03
+            logo: Color::Rgb(203, 75, 22),
+            assistant: Color::Rgb(133, 153, 0), // solarized green
+            tool: Color::Rgb(181, 137, 0),      // solarized yellow
         },
-        _ => ThemeColors { // dark (default)
-            accent:    ACCENT,
-            user_bg:   USER_BG,
-            logo:      LOGO_COLOR,
+        _ => ThemeColors {
+            // dark (default)
+            accent: ACCENT,
+            user_bg: USER_BG,
+            logo: LOGO_COLOR,
             assistant: Color::Green,
-            tool:      Color::Yellow,
+            tool: Color::Yellow,
         },
     }
 }
@@ -111,9 +111,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // border top+bottom = 2; left col = logo + 4 header/model/cwd lines;
     // right col = 6 fixed lines + 2 per session (max 4 sessions shown).
     let banner_h = if show_banner {
-        let logo_h  = LOGO.len() as u16;
-        let left_h  = logo_h + 7;  // welcome + blank + logo + blank + model + cwd + blank + tagline
-        let sess_h  = (app.recent_sessions.len() as u16).min(4) * 2;
+        let logo_h = LOGO.len() as u16;
+        let left_h = logo_h + 7; // welcome + blank + logo + blank + model + cwd + blank + tagline
+        let sess_h = (app.recent_sessions.len() as u16).min(4) * 2;
         let right_h = 6 + sess_h;
         left_h.max(right_h) + 2
     } else {
@@ -123,10 +123,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(banner_h), // welcome banner (welcome screen only)
-            Constraint::Min(0),           // chat messages
+            Constraint::Length(banner_h),     // welcome banner (welcome screen only)
+            Constraint::Min(0),               // chat messages
             Constraint::Length(input_height), // input line (no border)
-            Constraint::Length(1),        // status bar
+            Constraint::Length(1),            // status bar
         ])
         .split(area);
 
@@ -178,7 +178,10 @@ fn draw_banner(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
 fn draw_banner_left(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
     let max_cwd = area.width.saturating_sub(3) as usize;
     let cwd_display = if app.cached_cwd.len() > max_cwd {
-        format!("…{}", &app.cached_cwd[app.cached_cwd.len().saturating_sub(max_cwd - 1)..])
+        format!(
+            "…{}",
+            &app.cached_cwd[app.cached_cwd.len().saturating_sub(max_cwd - 1)..]
+        )
     } else {
         app.cached_cwd.clone()
     };
@@ -187,7 +190,9 @@ fn draw_banner_left(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
 
     lines.push(Line::from(Span::styled(
         format!("  Welcome back, {}!", app.username),
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::raw(""));
 
@@ -198,7 +203,7 @@ fn draw_banner_left(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
         ]));
     }
 
-    lines.push(Line::raw(""));  // breathing room between fork and model info
+    lines.push(Line::raw("")); // breathing room between fork and model info
 
     // "  ● " prefix = 4 cols; remaining space for model+label text.
     let max_model = area.width.saturating_sub(4) as usize;
@@ -211,7 +216,10 @@ fn draw_banner_left(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
         model_text.push_str(&format!(" · {label}"));
     }
     let model_text: String = if model_text.chars().count() > max_model {
-        let t: String = model_text.chars().take(max_model.saturating_sub(1)).collect();
+        let t: String = model_text
+            .chars()
+            .take(max_model.saturating_sub(1))
+            .collect();
         format!("{t}…")
     } else {
         model_text
@@ -221,23 +229,29 @@ fn draw_banner_left(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
         Span::styled("● ", Style::default().fg(tc.assistant)),
         Span::styled(model_text, Style::default().fg(Color::DarkGray)),
     ]));
-    lines.push(Line::from(
-        Span::styled(format!("  {cwd_display}"), Style::default().fg(Color::DarkGray))
-    ));
-    lines.push(Line::raw(""));  // space before tagline
-    lines.push(Line::from(
-        Span::styled(
-            "  Grip your codebase.",
-            Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
-        )
-    ));
+    lines.push(Line::from(Span::styled(
+        format!("  {cwd_display}"),
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::raw("")); // space before tagline
+    lines.push(Line::from(Span::styled(
+        "  Grip your codebase.",
+        Style::default()
+            .fg(Color::Gray)
+            .add_modifier(Modifier::ITALIC),
+    )));
 
     f.render_widget(Paragraph::new(Text::from(lines)), area);
 }
 
 fn draw_banner_right(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
     // Vertical divider on the left edge of this panel
-    let divider_area = Rect { x: area.x, y: area.y, width: 1, height: area.height };
+    let divider_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: 1,
+        height: area.height,
+    };
     let div_lines: Vec<Line<'static>> = (0..area.height)
         .map(|_| Line::from(Span::styled("│", Style::default().fg(tc.accent))))
         .collect();
@@ -295,11 +309,12 @@ fn draw_banner_right(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
             };
             lines.push(Line::from(vec![
                 Span::styled(" ◆ ", Style::default().fg(tc.accent)),
-                Span::styled(format!("[{}]", id_short),
-                    Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("[{}]", id_short),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::styled(" — ", Style::default().fg(Color::DarkGray)),
-                Span::styled(desc,
-                    Style::default().fg(Color::White)),
+                Span::styled(desc, Style::default().fg(Color::White)),
             ]));
             // Show date below in dim
             lines.push(Line::from(Span::styled(
@@ -320,7 +335,9 @@ fn draw_banner_right(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
 // ── Chat messages ─────────────────────────────────────────────────────────────
 
 fn draw_chat(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
-    if area.height == 0 { return; }
+    if area.height == 0 {
+        return;
+    }
 
     let width = area.width as usize;
     let mut lines: Vec<Line> = Vec::new();
@@ -334,7 +351,10 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
                 let header = format!(" > {}{}", first_line, " ".repeat(pad));
                 lines.push(Line::from(Span::styled(
                     header,
-                    Style::default().fg(Color::White).bg(tc.user_bg).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::White)
+                        .bg(tc.user_bg)
+                        .add_modifier(Modifier::BOLD),
                 )));
                 for extra in entry.text.lines().skip(1) {
                     lines.push(Line::from(Span::styled(
@@ -350,9 +370,12 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
                 let mut first = true;
                 for md_line in md_lines {
                     if first {
-                        let mut spans = vec![
-                            Span::styled("● ", Style::default().fg(tc.assistant).add_modifier(Modifier::BOLD)),
-                        ];
+                        let mut spans = vec![Span::styled(
+                            "● ",
+                            Style::default()
+                                .fg(tc.assistant)
+                                .add_modifier(Modifier::BOLD),
+                        )];
                         spans.extend(md_line.spans);
                         lines.push(Line::from(spans));
                         first = false;
@@ -368,11 +391,14 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
             EntryKind::ToolCall => {
                 let mut parts = entry.text.splitn(2, "  ");
                 let tool_name = parts.next().unwrap_or("");
-                let args      = parts.next().unwrap_or("").trim();
+                let args = parts.next().unwrap_or("").trim();
                 // Use &str directly — Span accepts impl Into<Cow<str>>, no alloc needed
                 lines.push(Line::from(vec![
                     Span::styled("⚙ ", Style::default().fg(tc.tool)),
-                    Span::styled(tool_name.to_owned(), Style::default().fg(tc.tool).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        tool_name.to_owned(),
+                        Style::default().fg(tc.tool).add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw("  "),
                     Span::styled(args.to_owned(), Style::default().fg(Color::DarkGray)),
                 ]));
@@ -397,8 +423,12 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
                 let total = entry.text.lines().count();
                 let owned_trunc: String;
                 let visible_text: &str = if total > MAX_LINES {
-                    owned_trunc = entry.text.lines().take(MAX_LINES)
-                        .collect::<Vec<_>>().join("\n");
+                    owned_trunc = entry
+                        .text
+                        .lines()
+                        .take(MAX_LINES)
+                        .collect::<Vec<_>>()
+                        .join("\n");
                     &owned_trunc
                 } else {
                     &entry.text
@@ -408,7 +438,8 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
                 for md_line in md_lines {
                     let prefix = if first { "  └ " } else { "    " };
                     first = false;
-                    let mut spans = vec![Span::styled(prefix, Style::default().fg(Color::DarkGray))];
+                    let mut spans =
+                        vec![Span::styled(prefix, Style::default().fg(Color::DarkGray))];
                     spans.extend(md_line.spans);
                     lines.push(Line::from(spans));
                 }
@@ -424,12 +455,16 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
             EntryKind::Thinking => {
                 lines.push(Line::from(Span::styled(
                     "  💭 Thinking…",
-                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD | Modifier::ITALIC),
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD | Modifier::ITALIC),
                 )));
                 for raw in entry.text.lines() {
                     lines.push(Line::from(Span::styled(
                         format!("  │ {raw}"),
-                        Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
                     )));
                 }
                 lines.push(Line::raw(""));
@@ -437,7 +472,10 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
 
             EntryKind::Error => {
                 lines.push(Line::from(vec![
-                    Span::styled("✖ ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "✖ ",
+                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(entry.text.to_owned(), Style::default().fg(Color::Red)),
                 ]));
                 lines.push(Line::raw(""));
@@ -448,12 +486,10 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
                     // Use Gray (not DarkGray) so system messages are readable
                     // on dark backgrounds — plugin install, MCP registration,
                     // compaction notices, etc. were nearly invisible before.
-                    lines.push(Line::from(
-                        Span::styled(
-                            format!("  {raw}"),
-                            Style::default().fg(Color::Gray),
-                        )
-                    ));
+                    lines.push(Line::from(Span::styled(
+                        format!("  {raw}"),
+                        Style::default().fg(Color::Gray),
+                    )));
                 }
                 lines.push(Line::raw(""));
             }
@@ -482,13 +518,20 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
                             raw.to_owned(),
                             Style::default().fg(tc.accent).add_modifier(Modifier::BOLD),
                         ))
-                    } else if indent.len() >= 4 || trimmed.starts_with("sudo ")
-                        || trimmed.starts_with("yay ") || trimmed.starts_with("paru ")
-                        || trimmed.starts_with("apt ") || trimmed.starts_with("dnf ")
-                        || trimmed.starts_with("zypper ") || trimmed.starts_with("pacman ")
-                        || trimmed.starts_with("pip ") || trimmed.starts_with("wget ")
-                        || trimmed.starts_with("mkdir ") || trimmed.starts_with("cd ")
-                        || trimmed.starts_with("echo ") || trimmed.starts_with("export ")
+                    } else if indent.len() >= 4
+                        || trimmed.starts_with("sudo ")
+                        || trimmed.starts_with("yay ")
+                        || trimmed.starts_with("paru ")
+                        || trimmed.starts_with("apt ")
+                        || trimmed.starts_with("dnf ")
+                        || trimmed.starts_with("zypper ")
+                        || trimmed.starts_with("pacman ")
+                        || trimmed.starts_with("pip ")
+                        || trimmed.starts_with("wget ")
+                        || trimmed.starts_with("mkdir ")
+                        || trimmed.starts_with("cd ")
+                        || trimmed.starts_with("echo ")
+                        || trimmed.starts_with("export ")
                     {
                         // Indented install command — amber/yellow so it stands out as actionable
                         Line::from(Span::styled(
@@ -515,9 +558,12 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
         let mut first = true;
         for md_line in md_lines {
             if first {
-                let mut spans = vec![
-                    Span::styled("● ", Style::default().fg(tc.assistant).add_modifier(Modifier::BOLD)),
-                ];
+                let mut spans = vec![Span::styled(
+                    "● ",
+                    Style::default()
+                        .fg(tc.assistant)
+                        .add_modifier(Modifier::BOLD),
+                )];
                 spans.extend(md_line.spans);
                 lines.push(Line::from(spans));
                 first = false;
@@ -564,8 +610,7 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
                 height: 1,
             };
             f.render_widget(
-                Paragraph::new(badge)
-                    .style(Style::default().fg(Color::Black).bg(Color::Yellow)),
+                Paragraph::new(badge).style(Style::default().fg(Color::Black).bg(Color::Yellow)),
                 badge_area,
             );
         }
@@ -575,13 +620,15 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
 // ── Input line (no border — matches rustyclaw's plain "> " prompt) ────────────
 
 fn draw_input(f: &mut Frame, area: Rect, app: &App, full_input: &str, tc: ThemeColors) {
-    let text_style       = Style::default().fg(Color::White);
-    let cursor_style     = Style::default().bg(Color::White).fg(Color::Black);
+    let text_style = Style::default().fg(Color::White);
+    let cursor_style = Style::default().bg(Color::White).fg(Color::Black);
     let suggestion_style = Style::default().fg(Color::Rgb(80, 80, 80)); // dim gray
     let prompt_style = if app.vim_enabled && app.vim_normal {
         Style::default().fg(tc.accent).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(tc.assistant).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(tc.assistant)
+            .add_modifier(Modifier::BOLD)
     };
 
     // full_input already computed in draw() — reuse it, collect before_cursor only
@@ -642,10 +689,7 @@ fn draw_input(f: &mut Frame, area: Rect, app: &App, full_input: &str, tc: ThemeC
                     Span::styled(after, text_style),
                 ];
                 if show_placeholder {
-                    spans.push(Span::styled(
-                        "Message rustyclaw…",
-                        suggestion_style,
-                    ));
+                    spans.push(Span::styled("Message rustyclaw…", suggestion_style));
                 } else if let Some(ref sug) = suggestion {
                     spans.push(Span::styled(sug.clone(), suggestion_style));
                 }
@@ -671,9 +715,10 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
     // Use pre-cached model_short — avoids two .replace() allocs every render frame
 
     // Left side: "? for shortcuts" + optional loading/vim indicator
-    let mut left_spans = vec![
-        Span::styled(" ? for shortcuts", Style::default().fg(Color::DarkGray)),
-    ];
+    let mut left_spans = vec![Span::styled(
+        " ? for shortcuts",
+        Style::default().fg(Color::DarkGray),
+    )];
 
     if app.vim_enabled {
         let mode = if app.vim_normal { "NORMAL" } else { "INSERT" };
@@ -686,14 +731,18 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
     if app.plan_mode {
         left_spans.push(Span::styled(
             "  │  PLAN MODE",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ));
     }
 
     if app.brief_mode {
         left_spans.push(Span::styled(
             "  │  BRIEF",
-            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
         ));
     }
 
@@ -724,10 +773,15 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
         let frame_idx = (ms / 80) as usize % BOUNCE.len();
         let glyph = GLYPHS[BOUNCE[frame_idx]];
         // Show elapsed time alongside the spinner verb
-        let elapsed = app.turn_start
+        let elapsed = app
+            .turn_start
             .map(|t| {
                 let secs = t.elapsed().as_secs();
-                if secs > 0 { format!(" ({}s)", secs) } else { String::new() }
+                if secs > 0 {
+                    format!(" ({}s)", secs)
+                } else {
+                    String::new()
+                }
             })
             .unwrap_or_default();
         left_spans.push(Span::styled(
@@ -740,7 +794,9 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
     if app.router.enabled {
         left_spans.push(Span::styled(
             "  │  ROUTER",
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         ));
     }
 
@@ -780,10 +836,20 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
     // Right side: "● model-name" — clean, no token counts (matches rustyclaw)
     let right_text = format!("● {} ", app.model_short);
     let right_width = right_text.len() as u16;
-    let left_width  = area.width.saturating_sub(right_width);
+    let left_width = area.width.saturating_sub(right_width);
 
-    let left_area  = Rect { x: area.x, y: area.y, width: left_width,  height: 1 };
-    let right_area = Rect { x: area.x + left_width, y: area.y, width: right_width, height: 1 };
+    let left_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: left_width,
+        height: 1,
+    };
+    let right_area = Rect {
+        x: area.x + left_width,
+        y: area.y,
+        width: right_width,
+        height: 1,
+    };
 
     f.render_widget(Paragraph::new(Line::from(left_spans)), left_area);
     f.render_widget(
@@ -795,29 +861,47 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
 /// Estimate context window size (tokens) for a model name.
 fn context_window_for_model(model: &str) -> u64 {
     let m = model.to_lowercase();
-    if m.contains("opus") { 200_000 }
-    else if m.contains("sonnet") { 200_000 }
-    else if m.contains("haiku") { 200_000 }
-    else if m.contains("gpt-4o") { 128_000 }
-    else if m.contains("gpt-4") { 128_000 }
-    else if m.contains("deepseek") { 64_000 }
-    else if m.contains("llama") { 128_000 }
-    else if m.contains("mistral") { 32_000 }
-    else if m.contains("gemma") { 8_192 }
-    else { 200_000 } // conservative default for Claude models
+    if m.contains("opus") {
+        200_000
+    } else if m.contains("sonnet") {
+        200_000
+    } else if m.contains("haiku") {
+        200_000
+    } else if m.contains("gpt-4o") {
+        128_000
+    } else if m.contains("gpt-4") {
+        128_000
+    } else if m.contains("deepseek") {
+        64_000
+    } else if m.contains("llama") {
+        128_000
+    } else if m.contains("mistral") {
+        32_000
+    } else if m.contains("gemma") {
+        8_192
+    } else {
+        200_000
+    } // conservative default for Claude models
 }
 
 // ── Permission dialog ─────────────────────────────────────────────────────────
 
 fn draw_permission(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
-    let Some(perm) = &app.pending_permission else { return };
+    let Some(perm) = &app.pending_permission else {
+        return;
+    };
 
     let popup_w = (area.width * 7 / 10).max(50).min(area.width);
     let desc_lines = perm.description.lines().count() as u16 + 5;
     let popup_h = desc_lines.max(8).min(area.height);
     let x = area.x + (area.width.saturating_sub(popup_w)) / 2;
     let y = area.y + (area.height.saturating_sub(popup_h)) / 2;
-    let popup = Rect { x, y, width: popup_w, height: popup_h };
+    let popup = Rect {
+        x,
+        y,
+        width: popup_w,
+        height: popup_h,
+    };
 
     f.render_widget(Clear, popup);
 
@@ -841,11 +925,24 @@ fn draw_permission(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
     lines.push(Line::raw(""));
     lines.push(Line::from(vec![
         Span::styled("  [", Style::default().fg(Color::DarkGray)),
-        Span::styled("y", Style::default().fg(tc.assistant).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "y",
+            Style::default()
+                .fg(tc.assistant)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled("] allow   [", Style::default().fg(Color::DarkGray)),
-        Span::styled("a", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "a",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled("] always   [", Style::default().fg(Color::DarkGray)),
-        Span::styled("n", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "n",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ),
         Span::styled("] deny", Style::default().fg(Color::DarkGray)),
     ]));
 
@@ -858,13 +955,20 @@ fn draw_permission(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
 // ── Overlay panel ─────────────────────────────────────────────────────────────
 
 fn draw_overlay(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
-    let Some(overlay) = &mut app.overlay else { return };
+    let Some(overlay) = &mut app.overlay else {
+        return;
+    };
 
     let popup_w = area.width.saturating_sub(8).max(40).min(area.width);
     let popup_h = (area.height * 4 / 5).max(10).min(area.height);
     let x = area.x + (area.width.saturating_sub(popup_w)) / 2;
     let y = area.y + (area.height.saturating_sub(popup_h)) / 2;
-    let popup = Rect { x, y, width: popup_w, height: popup_h };
+    let popup = Rect {
+        x,
+        y,
+        width: popup_w,
+        height: popup_h,
+    };
 
     f.render_widget(Clear, popup);
 
@@ -881,21 +985,22 @@ fn draw_overlay(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
             title,
             Style::default().fg(tc.accent).add_modifier(Modifier::BOLD),
         ))
-        .title_bottom(Span::styled(
-            hint,
-            Style::default().fg(Color::DarkGray),
-        ))
+        .title_bottom(Span::styled(hint, Style::default().fg(Color::DarkGray)))
         .style(Style::default().bg(Color::Rgb(16, 16, 24)));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
     // Use pre-rendered markdown lines — computed once in Overlay::new(), not every frame
-    let total   = overlay.rendered.len();
+    let total = overlay.rendered.len();
     let visible = inner.height as usize;
 
     // For interactive overlays, highlight the selected item line.
     // Session list lines start with "  N. [" — the Nth item maps to selectable_ids[N-1].
-    let selected_1based = if overlay.is_interactive() { overlay.selected + 1 } else { 0 };
+    let selected_1based = if overlay.is_interactive() {
+        overlay.selected + 1
+    } else {
+        0
+    };
 
     // Auto-scroll to keep the selected item visible
     if selected_1based > 0 {
@@ -916,12 +1021,12 @@ fn draw_overlay(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
     overlay.scroll = overlay.scroll.min(total.saturating_sub(visible));
     let skip = overlay.scroll;
 
-    let display: Vec<Line> = overlay.rendered
+    let display: Vec<Line> = overlay
+        .rendered
         .iter()
         .skip(skip)
         .take(visible)
         .cloned()
-        
         .map(|mut line| {
             // Check if this rendered line starts with a list number matching the selected item
             if selected_1based > 0 {
@@ -931,7 +1036,8 @@ fn draw_overlay(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
                 if trimmed.starts_with(&prefix) {
                     // Highlight the entire line
                     for span in &mut line.spans {
-                        span.style = span.style
+                        span.style = span
+                            .style
                             .bg(Color::Rgb(50, 50, 80))
                             .fg(Color::White)
                             .add_modifier(Modifier::BOLD);
@@ -951,14 +1057,21 @@ fn draw_overlay(f: &mut Frame, area: Rect, app: &mut App, tc: ThemeColors) {
 // ── AskUser dialog ────────────────────────────────────────────────────────────
 
 fn draw_ask_user(f: &mut Frame, area: Rect, app: &App) {
-    let Some(q) = &app.pending_user_question else { return };
+    let Some(q) = &app.pending_user_question else {
+        return;
+    };
 
     let question_lines = q.question.lines().count() as u16;
     let popup_w = (area.width * 7 / 10).max(50).min(area.width);
     let popup_h = (question_lines + 7).max(8).min(area.height);
     let x = area.x + (area.width.saturating_sub(popup_w)) / 2;
     let y = area.y + (area.height.saturating_sub(popup_h)) / 2;
-    let popup = Rect { x, y, width: popup_w, height: popup_h };
+    let popup = Rect {
+        x,
+        y,
+        width: popup_w,
+        height: popup_h,
+    };
 
     f.render_widget(Clear, popup);
 
@@ -967,7 +1080,9 @@ fn draw_ask_user(f: &mut Frame, area: Rect, app: &App) {
         .border_style(Style::default().fg(Color::Cyan))
         .title(Span::styled(
             " Claude is asking ",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
@@ -992,7 +1107,12 @@ fn draw_ask_user(f: &mut Frame, area: Rect, app: &App) {
     };
 
     lines.push(Line::from(vec![
-        Span::styled("  > ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "  > ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(before, Style::default().fg(Color::White)),
         Span::styled(cur_ch, Style::default().bg(Color::White).fg(Color::Black)),
         Span::styled(after_str, Style::default().fg(Color::White)),

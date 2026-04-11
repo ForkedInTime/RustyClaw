@@ -1,3 +1,4 @@
+use crate::api::types::*;
 /// Context compaction — port of services/compact/
 ///
 /// Two strategies, matching the original TypeScript design:
@@ -20,9 +21,7 @@
 ///   160 000  →  warn user that context is getting full
 ///   170 000  →  auto-snip (if auto_compact_enabled)
 ///   180 000  →  auto-summarise (if auto_compact_enabled)
-
 use crate::api::{ApiBackend, MessagesRequest};
-use crate::api::types::*;
 use crate::config::Config;
 use anyhow::Result;
 
@@ -149,8 +148,14 @@ fn render_history(messages: &[Message]) -> String {
                     let args = serde_json::to_string(input).unwrap_or_default();
                     out.push_str(&format!("[Tool call: {name}({args})]\n"));
                 }
-                ContentBlock::ToolResult { content, is_error, .. } => {
-                    let label = if is_error == &Some(true) { "error" } else { "result" };
+                ContentBlock::ToolResult {
+                    content, is_error, ..
+                } => {
+                    let label = if is_error == &Some(true) {
+                        "error"
+                    } else {
+                        "result"
+                    };
                     let text = content
                         .iter()
                         .map(|c| {
@@ -162,7 +167,10 @@ fn render_history(messages: &[Message]) -> String {
                     out.push_str(&format!("[Tool {label}: {text}]\n"));
                 }
                 ContentBlock::Thinking { thinking, .. } => {
-                    out.push_str(&format!("[Thinking: {}]\n", &thinking[..thinking.len().min(200)]));
+                    out.push_str(&format!(
+                        "[Thinking: {}]\n",
+                        &thinking[..thinking.len().min(200)]
+                    ));
                 }
                 ContentBlock::Image { .. } => {
                     out.push_str("[Image attachment]\n");

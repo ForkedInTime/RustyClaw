@@ -4,7 +4,6 @@
 ///
 /// Code blocks get language-aware syntax highlighting via a small built-in
 /// tokenizer (no external crate required).
-
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -12,29 +11,33 @@ use ratatui::{
 
 // ── Base styles ───────────────────────────────────────────────────────────────
 
-const WHITE:  Style = Style::new().fg(Color::White);
+const WHITE: Style = Style::new().fg(Color::White);
 const YELLOW: Style = Style::new().fg(Color::Yellow);
-const CYAN:   Style = Style::new().fg(Color::Cyan);
-const GRAY:   Style = Style::new().fg(Color::DarkGray);
+const CYAN: Style = Style::new().fg(Color::Cyan);
+const GRAY: Style = Style::new().fg(Color::DarkGray);
 
 // ── Syntax highlight styles ───────────────────────────────────────────────────
 
 // Keyword: orange-ish (matches rustyclaw accent)
-const SYN_KW:      Style = Style::new().fg(Color::Rgb(255, 140, 50));
+const SYN_KW: Style = Style::new().fg(Color::Rgb(255, 140, 50));
 // Type / builtin: cyan
-const SYN_TYPE:    Style = Style::new().fg(Color::Rgb(86, 182, 194));
+const SYN_TYPE: Style = Style::new().fg(Color::Rgb(86, 182, 194));
 // String literal: green
-const SYN_STR:     Style = Style::new().fg(Color::Rgb(152, 195, 121));
+const SYN_STR: Style = Style::new().fg(Color::Rgb(152, 195, 121));
 // Number: magenta/purple
-const SYN_NUM:     Style = Style::new().fg(Color::Rgb(198, 120, 221));
+const SYN_NUM: Style = Style::new().fg(Color::Rgb(198, 120, 221));
 // Comment: dark gray / italic
-const SYN_COMMENT: Style = Style::new().fg(Color::Rgb(92, 99, 112)).add_modifier(Modifier::ITALIC);
+const SYN_COMMENT: Style = Style::new()
+    .fg(Color::Rgb(92, 99, 112))
+    .add_modifier(Modifier::ITALIC);
 // Default token (identifiers, operators …)
 const SYN_DEFAULT: Style = Style::new().fg(Color::Rgb(220, 220, 200));
 // Code block border/badge
-const SYN_BORDER:  Style = Style::new().fg(Color::Rgb(80, 80, 100));
+const SYN_BORDER: Style = Style::new().fg(Color::Rgb(80, 80, 100));
 // Code block language badge
-const SYN_BADGE:   Style = Style::new().fg(Color::Rgb(255, 165, 0)).add_modifier(Modifier::BOLD);
+const SYN_BADGE: Style = Style::new()
+    .fg(Color::Rgb(255, 165, 0))
+    .add_modifier(Modifier::BOLD);
 
 // ── Public entry points ───────────────────────────────────────────────────────
 
@@ -68,7 +71,8 @@ fn render_with_base(text: &str, base: Style) -> Vec<Line<'static>> {
                 code_lang.clear();
             } else {
                 in_code_block = true;
-                code_lang = raw.trim_start()
+                code_lang = raw
+                    .trim_start()
                     .trim_start_matches('`')
                     .trim()
                     .to_lowercase();
@@ -153,11 +157,12 @@ fn render_with_base(text: &str, base: Style) -> Vec<Line<'static>> {
         // ── Bullet list ───────────────────────────────────────────────────────
         let ltrim = raw.trim_start();
         let indent = raw.len() - ltrim.len();
-        if let Some(rest) = ltrim.strip_prefix("- ").or_else(|| ltrim.strip_prefix("* ")) {
-            let mut spans: Vec<Span<'static>> = vec![
-                Span::raw(" ".repeat(indent)),
-                Span::styled("• ", GRAY),
-            ];
+        if let Some(rest) = ltrim
+            .strip_prefix("- ")
+            .or_else(|| ltrim.strip_prefix("* "))
+        {
+            let mut spans: Vec<Span<'static>> =
+                vec![Span::raw(" ".repeat(indent)), Span::styled("• ", GRAY)];
             spans.extend(inline_spans(rest, base));
             lines.push(Line::from(spans));
             last_was_blank = false;
@@ -232,11 +237,12 @@ fn tokenize_line(line: &str, lang: &str) -> Vec<Span<'static>> {
             return spans;
         }
         if let Some(lc2) = line_comment2
-            && starts_with_at(&chars, i, lc2) {
-                let rest: String = chars[i..].iter().collect();
-                spans.push(Span::styled(rest, SYN_COMMENT));
-                return spans;
-            }
+            && starts_with_at(&chars, i, lc2)
+        {
+            let rest: String = chars[i..].iter().collect();
+            spans.push(Span::styled(rest, SYN_COMMENT));
+            return spans;
+        }
 
         // ── String literal (double-quoted) ────────────────────────────────────
         if chars[i] == '"' {
@@ -253,17 +259,22 @@ fn tokenize_line(line: &str, lang: &str) -> Vec<Span<'static>> {
             continue;
         }
         // Rust-style char/lifetime: 'a' or 'static — just treat as string if it looks like 'x'
-        if chars[i] == '\'' && matches!(lang, "rust" | "rs")
-            && i + 2 < len && chars[i + 2] == '\'' {
-                // char literal: 'x'
-                let s: String = chars[i..=(i + 2)].iter().collect();
-                spans.push(Span::styled(s, SYN_STR));
-                i += 3;
-                continue;
-            }
+        if chars[i] == '\'' && matches!(lang, "rust" | "rs") && i + 2 < len && chars[i + 2] == '\''
+        {
+            // char literal: 'x'
+            let s: String = chars[i..=(i + 2)].iter().collect();
+            spans.push(Span::styled(s, SYN_STR));
+            i += 3;
+            continue;
+        }
 
         // ── Template literal (JS/TS) ──────────────────────────────────────────
-        if chars[i] == '`' && matches!(lang, "javascript" | "js" | "typescript" | "ts" | "jsx" | "tsx") {
+        if chars[i] == '`'
+            && matches!(
+                lang,
+                "javascript" | "js" | "typescript" | "ts" | "jsx" | "tsx"
+            )
+        {
             let (s, end) = consume_string(&chars, i, '`');
             spans.push(Span::styled(s, SYN_STR));
             i = end;
@@ -272,13 +283,20 @@ fn tokenize_line(line: &str, lang: &str) -> Vec<Span<'static>> {
 
         // ── Number ────────────────────────────────────────────────────────────
         if chars[i].is_ascii_digit()
-            || (chars[i] == '-' && i + 1 < len && chars[i + 1].is_ascii_digit()
+            || (chars[i] == '-'
+                && i + 1 < len
+                && chars[i + 1].is_ascii_digit()
                 && (i == 0 || !chars[i - 1].is_alphanumeric()))
         {
             let mut n = String::new();
             // Allow leading minus only if previous was not alphanumeric
-            if chars[i] == '-' { n.push('-'); i += 1; }
-            while i < len && (chars[i].is_ascii_alphanumeric() || chars[i] == '.' || chars[i] == '_') {
+            if chars[i] == '-' {
+                n.push('-');
+                i += 1;
+            }
+            while i < len
+                && (chars[i].is_ascii_alphanumeric() || chars[i] == '.' || chars[i] == '_')
+            {
                 n.push(chars[i]);
                 i += 1;
             }
@@ -312,10 +330,8 @@ fn tokenize_line(line: &str, lang: &str) -> Vec<Span<'static>> {
             && chars[i] != '\''
             && chars[i] != '`'
             && !chars[i].is_ascii_digit()
-            && !(
-                !line_comment.is_empty() && starts_with_at(&chars, i, line_comment)
-                || line_comment2.is_some_and(|lc| starts_with_at(&chars, i, lc))
-            )
+            && !(!line_comment.is_empty() && starts_with_at(&chars, i, line_comment)
+                || line_comment2.is_some_and(|lc| starts_with_at(&chars, i, lc)))
         {
             buf.push(chars[i]);
             i += 1;
@@ -333,141 +349,448 @@ fn tokenize_line(line: &str, lang: &str) -> Vec<Span<'static>> {
 
 // ── Language definitions ──────────────────────────────────────────────────────
 
-type LangDef = (&'static [&'static str], &'static [&'static str], &'static str, Option<&'static str>);
+type LangDef = (
+    &'static [&'static str],
+    &'static [&'static str],
+    &'static str,
+    Option<&'static str>,
+);
 //              (keywords,                types/builtins,             line_comment,   alt_comment)
 
 fn lang_def(lang: &str) -> LangDef {
     match lang {
         "rust" | "rs" => (
-            &["fn", "let", "mut", "pub", "use", "mod", "struct", "enum", "impl", "trait",
-              "for", "in", "while", "loop", "if", "else", "match", "return", "async", "await",
-              "move", "ref", "self", "super", "crate", "where", "type", "const", "static",
-              "unsafe", "extern", "dyn", "box", "break", "continue", "true", "false",
-              "as", "Some", "None", "Ok", "Err"],
-            &["String", "Vec", "HashMap", "Option", "Result", "Box", "Arc", "Rc", "Mutex",
-              "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128",
-              "usize", "f32", "f64", "bool", "char", "str"],
-            "//", None,
+            &[
+                "fn", "let", "mut", "pub", "use", "mod", "struct", "enum", "impl", "trait", "for",
+                "in", "while", "loop", "if", "else", "match", "return", "async", "await", "move",
+                "ref", "self", "super", "crate", "where", "type", "const", "static", "unsafe",
+                "extern", "dyn", "box", "break", "continue", "true", "false", "as", "Some", "None",
+                "Ok", "Err",
+            ],
+            &[
+                "String", "Vec", "HashMap", "Option", "Result", "Box", "Arc", "Rc", "Mutex", "i8",
+                "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize",
+                "f32", "f64", "bool", "char", "str",
+            ],
+            "//",
+            None,
         ),
         "python" | "py" => (
-            &["def", "class", "return", "import", "from", "as", "if", "elif", "else",
-              "for", "in", "while", "break", "continue", "pass", "try", "except", "finally",
-              "with", "yield", "lambda", "and", "or", "not", "is", "None", "True", "False",
-              "async", "await", "global", "nonlocal", "del", "assert", "raise"],
-            &["str", "int", "float", "bool", "list", "dict", "tuple", "set", "type",
-              "len", "range", "print", "input", "open", "super", "self", "cls",
-              "Any", "Optional", "List", "Dict", "Union", "Tuple", "Callable"],
-            "#", None,
+            &[
+                "def", "class", "return", "import", "from", "as", "if", "elif", "else", "for",
+                "in", "while", "break", "continue", "pass", "try", "except", "finally", "with",
+                "yield", "lambda", "and", "or", "not", "is", "None", "True", "False", "async",
+                "await", "global", "nonlocal", "del", "assert", "raise",
+            ],
+            &[
+                "str", "int", "float", "bool", "list", "dict", "tuple", "set", "type", "len",
+                "range", "print", "input", "open", "super", "self", "cls", "Any", "Optional",
+                "List", "Dict", "Union", "Tuple", "Callable",
+            ],
+            "#",
+            None,
         ),
         "javascript" | "js" | "jsx" => (
-            &["const", "let", "var", "function", "return", "if", "else", "for", "of", "in",
-              "while", "do", "switch", "case", "break", "continue", "class", "extends",
-              "new", "this", "super", "import", "export", "default", "from", "async",
-              "await", "try", "catch", "finally", "throw", "typeof", "instanceof",
-              "null", "undefined", "true", "false", "void", "delete", "yield"],
-            &["console", "Object", "Array", "String", "Number", "Boolean", "Promise",
-              "Error", "Map", "Set", "JSON", "Math", "Date", "RegExp", "Symbol",
-              "parseInt", "parseFloat", "isNaN", "require", "module", "exports"],
-            "//", None,
+            &[
+                "const",
+                "let",
+                "var",
+                "function",
+                "return",
+                "if",
+                "else",
+                "for",
+                "of",
+                "in",
+                "while",
+                "do",
+                "switch",
+                "case",
+                "break",
+                "continue",
+                "class",
+                "extends",
+                "new",
+                "this",
+                "super",
+                "import",
+                "export",
+                "default",
+                "from",
+                "async",
+                "await",
+                "try",
+                "catch",
+                "finally",
+                "throw",
+                "typeof",
+                "instanceof",
+                "null",
+                "undefined",
+                "true",
+                "false",
+                "void",
+                "delete",
+                "yield",
+            ],
+            &[
+                "console",
+                "Object",
+                "Array",
+                "String",
+                "Number",
+                "Boolean",
+                "Promise",
+                "Error",
+                "Map",
+                "Set",
+                "JSON",
+                "Math",
+                "Date",
+                "RegExp",
+                "Symbol",
+                "parseInt",
+                "parseFloat",
+                "isNaN",
+                "require",
+                "module",
+                "exports",
+            ],
+            "//",
+            None,
         ),
         "typescript" | "ts" | "tsx" => (
-            &["const", "let", "var", "function", "return", "if", "else", "for", "of", "in",
-              "while", "do", "switch", "case", "break", "continue", "class", "extends",
-              "implements", "interface", "type", "enum", "namespace", "declare", "abstract",
-              "new", "this", "super", "import", "export", "default", "from", "async",
-              "await", "try", "catch", "finally", "throw", "typeof", "instanceof",
-              "null", "undefined", "true", "false", "void", "never", "any", "unknown",
-              "keyof", "readonly", "as", "satisfies"],
-            &["string", "number", "boolean", "object", "symbol", "bigint",
-              "Array", "Promise", "Record", "Partial", "Required", "Pick", "Omit",
-              "console", "Object", "String", "Number", "Boolean", "Math", "Date", "JSON"],
-            "//", None,
+            &[
+                "const",
+                "let",
+                "var",
+                "function",
+                "return",
+                "if",
+                "else",
+                "for",
+                "of",
+                "in",
+                "while",
+                "do",
+                "switch",
+                "case",
+                "break",
+                "continue",
+                "class",
+                "extends",
+                "implements",
+                "interface",
+                "type",
+                "enum",
+                "namespace",
+                "declare",
+                "abstract",
+                "new",
+                "this",
+                "super",
+                "import",
+                "export",
+                "default",
+                "from",
+                "async",
+                "await",
+                "try",
+                "catch",
+                "finally",
+                "throw",
+                "typeof",
+                "instanceof",
+                "null",
+                "undefined",
+                "true",
+                "false",
+                "void",
+                "never",
+                "any",
+                "unknown",
+                "keyof",
+                "readonly",
+                "as",
+                "satisfies",
+            ],
+            &[
+                "string", "number", "boolean", "object", "symbol", "bigint", "Array", "Promise",
+                "Record", "Partial", "Required", "Pick", "Omit", "console", "Object", "String",
+                "Number", "Boolean", "Math", "Date", "JSON",
+            ],
+            "//",
+            None,
         ),
         "bash" | "sh" | "shell" | "zsh" => (
-            &["if", "then", "else", "elif", "fi", "for", "do", "done", "while",
-              "case", "esac", "in", "function", "return", "exit", "break", "continue",
-              "local", "export", "readonly", "unset", "shift", "source", "exec", "eval"],
-            &["echo", "printf", "read", "cd", "ls", "mkdir", "rm", "cp", "mv",
-              "grep", "sed", "awk", "find", "cat", "head", "tail", "sort", "uniq",
-              "curl", "wget", "git", "cargo", "npm", "python3", "python"],
-            "#", None,
+            &[
+                "if", "then", "else", "elif", "fi", "for", "do", "done", "while", "case", "esac",
+                "in", "function", "return", "exit", "break", "continue", "local", "export",
+                "readonly", "unset", "shift", "source", "exec", "eval",
+            ],
+            &[
+                "echo", "printf", "read", "cd", "ls", "mkdir", "rm", "cp", "mv", "grep", "sed",
+                "awk", "find", "cat", "head", "tail", "sort", "uniq", "curl", "wget", "git",
+                "cargo", "npm", "python3", "python",
+            ],
+            "#",
+            None,
         ),
         "go" => (
-            &["func", "var", "const", "type", "struct", "interface", "map", "chan",
-              "for", "range", "if", "else", "switch", "case", "default", "break",
-              "continue", "return", "goto", "fallthrough", "defer", "go", "select",
-              "import", "package", "nil", "true", "false", "iota"],
-            &["string", "int", "int8", "int16", "int32", "int64", "uint", "uint8",
-              "uint16", "uint32", "uint64", "float32", "float64", "bool", "byte", "rune",
-              "error", "any", "comparable", "append", "make", "new", "len", "cap",
-              "delete", "copy", "close", "panic", "recover", "print", "println"],
-            "//", None,
+            &[
+                "func",
+                "var",
+                "const",
+                "type",
+                "struct",
+                "interface",
+                "map",
+                "chan",
+                "for",
+                "range",
+                "if",
+                "else",
+                "switch",
+                "case",
+                "default",
+                "break",
+                "continue",
+                "return",
+                "goto",
+                "fallthrough",
+                "defer",
+                "go",
+                "select",
+                "import",
+                "package",
+                "nil",
+                "true",
+                "false",
+                "iota",
+            ],
+            &[
+                "string",
+                "int",
+                "int8",
+                "int16",
+                "int32",
+                "int64",
+                "uint",
+                "uint8",
+                "uint16",
+                "uint32",
+                "uint64",
+                "float32",
+                "float64",
+                "bool",
+                "byte",
+                "rune",
+                "error",
+                "any",
+                "comparable",
+                "append",
+                "make",
+                "new",
+                "len",
+                "cap",
+                "delete",
+                "copy",
+                "close",
+                "panic",
+                "recover",
+                "print",
+                "println",
+            ],
+            "//",
+            None,
         ),
         "sql" => (
-            &["SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "FULL",
-              "ON", "AND", "OR", "NOT", "IN", "EXISTS", "LIKE", "BETWEEN", "IS", "NULL",
-              "INSERT", "INTO", "VALUES", "UPDATE", "SET", "DELETE", "CREATE", "DROP",
-              "ALTER", "TABLE", "VIEW", "INDEX", "DATABASE", "SCHEMA",
-              "GROUP", "BY", "ORDER", "HAVING", "LIMIT", "OFFSET", "DISTINCT",
-              "AS", "CASE", "WHEN", "THEN", "ELSE", "END", "WITH",
-              // lowercase variants
-              "select", "from", "where", "join", "left", "right", "inner", "outer", "full",
-              "on", "and", "or", "not", "in", "exists", "like", "between", "is", "null",
-              "insert", "into", "values", "update", "set", "delete", "create", "drop",
-              "alter", "table", "view", "index", "database", "schema",
-              "group", "by", "order", "having", "limit", "offset", "distinct",
-              "as", "case", "when", "then", "else", "end", "with"],
-            &["COUNT", "SUM", "AVG", "MIN", "MAX", "COALESCE", "NULLIF", "CAST",
-              "INTEGER", "VARCHAR", "TEXT", "BOOLEAN", "TIMESTAMP", "DATE", "FLOAT",
-              "count", "sum", "avg", "min", "max", "coalesce", "nullif", "cast"],
-            "--", Some("#"),
+            &[
+                "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "FULL", "ON",
+                "AND", "OR", "NOT", "IN", "EXISTS", "LIKE", "BETWEEN", "IS", "NULL", "INSERT",
+                "INTO", "VALUES", "UPDATE", "SET", "DELETE", "CREATE", "DROP", "ALTER", "TABLE",
+                "VIEW", "INDEX", "DATABASE", "SCHEMA", "GROUP", "BY", "ORDER", "HAVING", "LIMIT",
+                "OFFSET", "DISTINCT", "AS", "CASE", "WHEN", "THEN", "ELSE", "END", "WITH",
+                // lowercase variants
+                "select", "from", "where", "join", "left", "right", "inner", "outer", "full", "on",
+                "and", "or", "not", "in", "exists", "like", "between", "is", "null", "insert",
+                "into", "values", "update", "set", "delete", "create", "drop", "alter", "table",
+                "view", "index", "database", "schema", "group", "by", "order", "having", "limit",
+                "offset", "distinct", "as", "case", "when", "then", "else", "end", "with",
+            ],
+            &[
+                "COUNT",
+                "SUM",
+                "AVG",
+                "MIN",
+                "MAX",
+                "COALESCE",
+                "NULLIF",
+                "CAST",
+                "INTEGER",
+                "VARCHAR",
+                "TEXT",
+                "BOOLEAN",
+                "TIMESTAMP",
+                "DATE",
+                "FLOAT",
+                "count",
+                "sum",
+                "avg",
+                "min",
+                "max",
+                "coalesce",
+                "nullif",
+                "cast",
+            ],
+            "--",
+            Some("#"),
         ),
-        "toml" => (
-            &["true", "false"],
-            &[],
-            "#", None,
-        ),
+        "toml" => (&["true", "false"], &[], "#", None),
         "yaml" | "yml" => (
             &["true", "false", "null", "yes", "no", "on", "off"],
             &[],
-            "#", None,
+            "#",
+            None,
         ),
         "json" => (
             &["true", "false", "null"],
             &[],
-            "", None,  // JSON has no line comments
+            "",
+            None, // JSON has no line comments
         ),
         "html" | "xml" => (
             &[],
-            &["html", "head", "body", "div", "span", "p", "a", "img", "ul", "ol", "li",
-              "table", "tr", "td", "th", "form", "input", "button", "script", "style",
-              "link", "meta", "title"],
-            "", None,
+            &[
+                "html", "head", "body", "div", "span", "p", "a", "img", "ul", "ol", "li", "table",
+                "tr", "td", "th", "form", "input", "button", "script", "style", "link", "meta",
+                "title",
+            ],
+            "",
+            None,
         ),
         "css" | "scss" | "sass" => (
-            &["important", "not", "has", "is", "where", "nth-child", "hover", "focus",
-              "active", "disabled", "checked", "first-child", "last-child"],
-            &["color", "background", "font", "margin", "padding", "border", "display",
-              "flex", "grid", "position", "top", "left", "right", "bottom", "width",
-              "height", "max-width", "min-width", "overflow", "opacity"],
-            "//", Some("/*"),
+            &[
+                "important",
+                "not",
+                "has",
+                "is",
+                "where",
+                "nth-child",
+                "hover",
+                "focus",
+                "active",
+                "disabled",
+                "checked",
+                "first-child",
+                "last-child",
+            ],
+            &[
+                "color",
+                "background",
+                "font",
+                "margin",
+                "padding",
+                "border",
+                "display",
+                "flex",
+                "grid",
+                "position",
+                "top",
+                "left",
+                "right",
+                "bottom",
+                "width",
+                "height",
+                "max-width",
+                "min-width",
+                "overflow",
+                "opacity",
+            ],
+            "//",
+            Some("/*"),
         ),
         "c" | "cpp" | "c++" | "cxx" => (
-            &["int", "char", "float", "double", "long", "short", "unsigned", "signed",
-              "void", "bool", "auto", "const", "static", "extern", "register", "volatile",
-              "if", "else", "for", "while", "do", "switch", "case", "default", "break",
-              "continue", "return", "goto", "sizeof", "typedef", "struct", "union", "enum",
-              "class", "public", "private", "protected", "virtual", "override", "final",
-              "namespace", "using", "new", "delete", "this", "true", "false", "nullptr",
-              "template", "typename", "inline", "explicit", "operator"],
-            &["std", "string", "vector", "map", "set", "list", "array", "pair",
-              "unique_ptr", "shared_ptr", "weak_ptr", "cout", "cin", "endl", "printf",
-              "scanf", "malloc", "free", "NULL"],
-            "//", None,
+            &[
+                "int",
+                "char",
+                "float",
+                "double",
+                "long",
+                "short",
+                "unsigned",
+                "signed",
+                "void",
+                "bool",
+                "auto",
+                "const",
+                "static",
+                "extern",
+                "register",
+                "volatile",
+                "if",
+                "else",
+                "for",
+                "while",
+                "do",
+                "switch",
+                "case",
+                "default",
+                "break",
+                "continue",
+                "return",
+                "goto",
+                "sizeof",
+                "typedef",
+                "struct",
+                "union",
+                "enum",
+                "class",
+                "public",
+                "private",
+                "protected",
+                "virtual",
+                "override",
+                "final",
+                "namespace",
+                "using",
+                "new",
+                "delete",
+                "this",
+                "true",
+                "false",
+                "nullptr",
+                "template",
+                "typename",
+                "inline",
+                "explicit",
+                "operator",
+            ],
+            &[
+                "std",
+                "string",
+                "vector",
+                "map",
+                "set",
+                "list",
+                "array",
+                "pair",
+                "unique_ptr",
+                "shared_ptr",
+                "weak_ptr",
+                "cout",
+                "cin",
+                "endl",
+                "printf",
+                "scanf",
+                "malloc",
+                "free",
+                "NULL",
+            ],
+            "//",
+            None,
         ),
-        _ => (
-            &[] as &[&str], &[] as &[&str], "", None,
-        ),
+        _ => (&[] as &[&str], &[] as &[&str], "", None),
     }
 }
 
@@ -476,7 +799,9 @@ fn lang_def(lang: &str) -> LangDef {
 /// Returns true if `chars[pos..]` starts with the given string.
 /// Compares char-by-char — avoids allocating a Vec<char> for the pattern on every call.
 fn starts_with_at(chars: &[char], pos: usize, s: &str) -> bool {
-    if s.is_empty() { return false; }
+    if s.is_empty() {
+        return false;
+    }
     let mut idx = pos;
     for sc in s.chars() {
         match chars.get(idx) {
@@ -525,11 +850,15 @@ fn split_cells(row: &str) -> Vec<String> {
 }
 
 fn render_table(rows: &[&str], base: Style, lines: &mut Vec<Line<'static>>) {
-    if rows.is_empty() { return; }
+    if rows.is_empty() {
+        return;
+    }
 
     let parsed: Vec<Vec<String>> = rows.iter().map(|r| split_cells(r)).collect();
     let ncols = parsed.iter().map(|r| r.len()).max().unwrap_or(0);
-    if ncols == 0 { return; }
+    if ncols == 0 {
+        return;
+    }
 
     let mut col_widths: Vec<usize> = vec![0; ncols];
     for row in &parsed {
@@ -563,7 +892,9 @@ fn render_table(rows: &[&str], base: Style, lines: &mut Vec<Line<'static>>) {
         let mut sep = String::from("  ");
         for j in 0..ncols {
             sep.push_str(&"─".repeat(col_widths[j] + 2));
-            if j + 1 < ncols { sep.push('┼'); }
+            if j + 1 < ncols {
+                sep.push('┼');
+            }
         }
         lines.push(Line::from(Span::styled(sep, GRAY)));
     }
@@ -634,7 +965,9 @@ fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
                 inner.push(chars[i]);
                 i += 1;
             }
-            if i < len { i += 1; }
+            if i < len {
+                i += 1;
+            }
             spans.push(Span::styled(inner, base.add_modifier(Modifier::ITALIC)));
             continue;
         }
@@ -648,7 +981,9 @@ fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
                 inner.push(chars[i]);
                 i += 1;
             }
-            if i < len { i += 1; }
+            if i < len {
+                i += 1;
+            }
             spans.push(Span::styled(inner, YELLOW));
             continue;
         }
@@ -658,19 +993,20 @@ fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
             let start = i + 1;
             if let Some(close) = chars[start..].iter().position(|&c| c == ']') {
                 let after_bracket = start + close + 1;
-                if after_bracket < len && chars[after_bracket] == '('
+                if after_bracket < len
+                    && chars[after_bracket] == '('
                     && let Some(close_paren) =
                         chars[after_bracket + 1..].iter().position(|&c| c == ')')
-                    {
-                        flush(&mut current, &mut spans, base);
-                        let link_text: String = chars[start..start + close].iter().collect();
-                        spans.push(Span::styled(
-                            link_text,
-                            CYAN.add_modifier(Modifier::UNDERLINED),
-                        ));
-                        i = after_bracket + 1 + close_paren + 1;
-                        continue;
-                    }
+                {
+                    flush(&mut current, &mut spans, base);
+                    let link_text: String = chars[start..start + close].iter().collect();
+                    spans.push(Span::styled(
+                        link_text,
+                        CYAN.add_modifier(Modifier::UNDERLINED),
+                    ));
+                    i = after_bracket + 1 + close_paren + 1;
+                    continue;
+                }
             }
         }
 

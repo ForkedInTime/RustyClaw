@@ -1,7 +1,6 @@
 /// Task tools — port of TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool, TaskStopTool
 /// In-memory task registry shared across all tool instances via Arc<Mutex<>>.
-
-use super::{async_trait, Tool, ToolContext, ToolOutput};
+use super::{Tool, ToolContext, ToolOutput, async_trait};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -53,7 +52,9 @@ struct CreateInput {
 
 #[async_trait]
 impl Tool for TaskCreateTool {
-    fn name(&self) -> &str { "TaskCreate" }
+    fn name(&self) -> &str {
+        "TaskCreate"
+    }
 
     fn description(&self) -> &str {
         "Create a new task in the task list. Returns the task id. \
@@ -84,7 +85,9 @@ impl Tool for TaskCreateTool {
             active_form: input.active_form,
         };
         self.registry.lock().unwrap().insert(id.clone(), task);
-        Ok(ToolOutput::success(json!({ "task": { "id": id } }).to_string()))
+        Ok(ToolOutput::success(
+            json!({ "task": { "id": id } }).to_string(),
+        ))
     }
 }
 
@@ -101,7 +104,9 @@ struct GetInput {
 
 #[async_trait]
 impl Tool for TaskGetTool {
-    fn name(&self) -> &str { "TaskGet" }
+    fn name(&self) -> &str {
+        "TaskGet"
+    }
 
     fn description(&self) -> &str {
         "Get the current status and output of a task by its id."
@@ -122,7 +127,10 @@ impl Tool for TaskGetTool {
         let registry = self.registry.lock().unwrap();
         match registry.get(&input.task_id) {
             Some(task) => Ok(ToolOutput::success(serde_json::to_string(task)?)),
-            None => Ok(ToolOutput::error(format!("Task not found: {}", input.task_id))),
+            None => Ok(ToolOutput::error(format!(
+                "Task not found: {}",
+                input.task_id
+            ))),
         }
     }
 }
@@ -135,7 +143,9 @@ pub struct TaskListTool {
 
 #[async_trait]
 impl Tool for TaskListTool {
-    fn name(&self) -> &str { "TaskList" }
+    fn name(&self) -> &str {
+        "TaskList"
+    }
 
     fn description(&self) -> &str {
         "List all tasks in the current session with their status and subject."
@@ -175,7 +185,9 @@ struct UpdateInput {
 
 #[async_trait]
 impl Tool for TaskUpdateTool {
-    fn name(&self) -> &str { "TaskUpdate" }
+    fn name(&self) -> &str {
+        "TaskUpdate"
+    }
 
     fn description(&self) -> &str {
         "Update the status and/or output of an existing task."
@@ -198,11 +210,21 @@ impl Tool for TaskUpdateTool {
         let mut registry = self.registry.lock().unwrap();
         match registry.get_mut(&input.task_id) {
             Some(task) => {
-                if let Some(s) = input.status { task.status = s; }
-                if let Some(o) = input.output { task.output = Some(o); }
-                Ok(ToolOutput::success(format!("Task {} updated.", input.task_id)))
+                if let Some(s) = input.status {
+                    task.status = s;
+                }
+                if let Some(o) = input.output {
+                    task.output = Some(o);
+                }
+                Ok(ToolOutput::success(format!(
+                    "Task {} updated.",
+                    input.task_id
+                )))
             }
-            None => Ok(ToolOutput::error(format!("Task not found: {}", input.task_id))),
+            None => Ok(ToolOutput::error(format!(
+                "Task not found: {}",
+                input.task_id
+            ))),
         }
     }
 }
@@ -220,7 +242,9 @@ struct StopInput {
 
 #[async_trait]
 impl Tool for TaskStopTool {
-    fn name(&self) -> &str { "TaskStop" }
+    fn name(&self) -> &str {
+        "TaskStop"
+    }
 
     fn description(&self) -> &str {
         "Stop/cancel a running task."
@@ -242,9 +266,15 @@ impl Tool for TaskStopTool {
         match registry.get_mut(&input.task_id) {
             Some(task) => {
                 task.status = TaskStatus::Stopped;
-                Ok(ToolOutput::success(format!("Task {} stopped.", input.task_id)))
+                Ok(ToolOutput::success(format!(
+                    "Task {} stopped.",
+                    input.task_id
+                )))
             }
-            None => Ok(ToolOutput::error(format!("Task not found: {}", input.task_id))),
+            None => Ok(ToolOutput::error(format!(
+                "Task not found: {}",
+                input.task_id
+            ))),
         }
     }
 }
@@ -270,7 +300,9 @@ struct OutputInput {
 
 #[async_trait]
 impl Tool for TaskOutputTool {
-    fn name(&self) -> &str { "TaskOutput" }
+    fn name(&self) -> &str {
+        "TaskOutput"
+    }
 
     fn description(&self) -> &str {
         "Set or append output to a task. Optionally mark it complete or failed. \
@@ -301,9 +333,15 @@ impl Tool for TaskOutputTool {
                 } else if input.complete {
                     task.status = TaskStatus::Completed;
                 }
-                Ok(ToolOutput::success(format!("Task {} output recorded.", input.task_id)))
+                Ok(ToolOutput::success(format!(
+                    "Task {} output recorded.",
+                    input.task_id
+                )))
             }
-            None => Ok(ToolOutput::error(format!("Task not found: {}", input.task_id))),
+            None => Ok(ToolOutput::error(format!(
+                "Task not found: {}",
+                input.task_id
+            ))),
         }
     }
 }

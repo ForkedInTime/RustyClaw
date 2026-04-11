@@ -1,7 +1,7 @@
 /// rustyclaw — Rust-native AI coding CLI
 /// Entry point
-
 mod api;
+mod autofix;
 mod commands;
 mod compact;
 mod config;
@@ -14,14 +14,13 @@ mod memory;
 mod permissions;
 mod query_engine;
 mod rag;
-mod autofix;
 mod router;
 mod sandbox;
 mod sdk;
 mod session;
 mod settings;
-mod spawn;
 mod skills;
+mod spawn;
 mod tools;
 mod tui;
 mod voice;
@@ -43,16 +42,26 @@ struct SyntheticOutputTool {
 
 #[async_trait::async_trait]
 impl tools::Tool for SyntheticOutputTool {
-    fn name(&self) -> &str { "result" }
+    fn name(&self) -> &str {
+        "result"
+    }
     fn description(&self) -> &str {
         "Use this tool to provide the final structured output that matches the required JSON schema. \
         You MUST call this tool to return your result."
     }
-    fn input_schema(&self) -> serde_json::Value { self.schema.clone() }
-    async fn execute(&self, input: serde_json::Value, _ctx: &tools::ToolContext) -> anyhow::Result<tools::ToolOutput> {
+    fn input_schema(&self) -> serde_json::Value {
+        self.schema.clone()
+    }
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        _ctx: &tools::ToolContext,
+    ) -> anyhow::Result<tools::ToolOutput> {
         // Emit the structured result as JSON
         println!("{}", serde_json::to_string(&input).unwrap_or_default());
-        Ok(tools::ToolOutput::success(serde_json::to_string(&input).unwrap_or_default()))
+        Ok(tools::ToolOutput::success(
+            serde_json::to_string(&input).unwrap_or_default(),
+        ))
     }
 }
 
@@ -419,20 +428,23 @@ const FORBIDDEN_ENV_KEYS: &[&str] = &[
 /// Only sets vars from SAFE_ENV_KEYS that are NOT already set.
 /// Skips blank lines and lines starting with #.
 fn load_dotenv(path: &std::path::Path) {
-    let Ok(content) = std::fs::read_to_string(path) else { return };
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return;
+    };
     for line in content.lines() {
         let line = line.trim();
-        if line.is_empty() || line.starts_with('#') { continue; }
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
         let line = line.strip_prefix("export ").unwrap_or(line);
         if let Some((key, val)) = line.split_once('=') {
             let key = key.trim();
             let val = val.trim().trim_matches('"').trim_matches('\'');
-            if !key.is_empty()
-                && SAFE_ENV_KEYS.contains(&key)
-                && std::env::var(key).is_err()
-            {
+            if !key.is_empty() && SAFE_ENV_KEYS.contains(&key) && std::env::var(key).is_err() {
                 // SAFETY: single-threaded at this point — called before tokio runtime starts
-                unsafe { std::env::set_var(key, val); }
+                unsafe {
+                    std::env::set_var(key, val);
+                }
             }
         }
     }
@@ -485,7 +497,9 @@ async fn main() -> Result<()> {
     let filter = if cli.verbose { "debug" } else { "warn" };
     let log_path = std::env::temp_dir().join("rustyclaw.log");
     let log_file = std::fs::OpenOptions::new()
-        .create(true).append(true).open(&log_path)
+        .create(true)
+        .append(true)
+        .open(&log_path)
         .unwrap_or_else(|_| std::fs::File::create(&log_path).expect("Cannot create log file"));
     tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -559,18 +573,32 @@ async fn main() -> Result<()> {
                 // Git
                 let git_ok = std::process::Command::new("git")
                     .args(["rev-parse", "--is-inside-work-tree"])
-                    .output().map(|o| o.status.success()).unwrap_or(false);
-                if git_ok { println!("  \u{2713} Git repository"); }
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                if git_ok {
+                    println!("  \u{2713} Git repository");
+                }
                 // Ollama
                 let ollama_ok = std::process::Command::new("ollama")
-                    .arg("--version").output().is_ok();
-                if ollama_ok { println!("  \u{2713} Ollama available"); }
-                else { println!("  - Ollama not found (optional)"); }
+                    .arg("--version")
+                    .output()
+                    .is_ok();
+                if ollama_ok {
+                    println!("  \u{2713} Ollama available");
+                } else {
+                    println!("  - Ollama not found (optional)");
+                }
                 // XTTS v2
                 let tts_ok = std::process::Command::new("tts")
-                    .arg("--help").output().is_ok();
-                if tts_ok { println!("  \u{2713} XTTS v2 (Coqui TTS) available"); }
-                else { println!("  - XTTS v2 not found (optional — needed for TTS)"); }
+                    .arg("--help")
+                    .output()
+                    .is_ok();
+                if tts_ok {
+                    println!("  \u{2713} XTTS v2 (Coqui TTS) available");
+                } else {
+                    println!("  - XTTS v2 not found (optional — needed for TTS)");
+                }
                 println!("\n  rustyclaw v{VERSION}");
                 return Ok(());
             }
@@ -635,7 +663,7 @@ async fn main() -> Result<()> {
     if let Some(pm) = cli.permission_mode {
         match pm {
             PermissionMode::Bypass => config.dangerously_skip_permissions = true,
-            PermissionMode::Auto   => {} // auto-permission via classifier (not yet implemented)
+            PermissionMode::Auto => {} // auto-permission via classifier (not yet implemented)
             PermissionMode::Default => {}
         }
     }
@@ -650,7 +678,11 @@ async fn main() -> Result<()> {
     }
     for dir in &cli.add_dir {
         let path = std::path::PathBuf::from(dir);
-        let abs = if path.is_absolute() { path } else { config.cwd.join(dir) };
+        let abs = if path.is_absolute() {
+            path
+        } else {
+            config.cwd.join(dir)
+        };
         config.extra_dirs.push(abs);
     }
     if cli.bare {
@@ -702,7 +734,10 @@ async fn main() -> Result<()> {
                 });
             }
             Err(e) => {
-                eprintln!("Error reading --append-system-prompt-file '{}': {}", file, e);
+                eprintln!(
+                    "Error reading --append-system-prompt-file '{}': {}",
+                    file, e
+                );
                 std::process::exit(1);
             }
         }
@@ -731,9 +766,15 @@ async fn main() -> Result<()> {
             };
         if let Some(extra) = extra_settings {
             // Merge: extra wins over already-loaded settings
-            if let Some(m) = extra.model { config.model = crate::commands::resolve_model_alias(&m); }
-            if let Some(mt) = extra.max_tokens { config.max_tokens = mt; }
-            if let Some(ah) = extra.api_key_helper { config.api_key_helper = Some(ah); }
+            if let Some(m) = extra.model {
+                config.model = crate::commands::resolve_model_alias(&m);
+            }
+            if let Some(mt) = extra.max_tokens {
+                config.max_tokens = mt;
+            }
+            if let Some(ah) = extra.api_key_helper {
+                config.api_key_helper = Some(ah);
+            }
             for (k, v) in extra.mcp_servers {
                 config.extra_mcp_servers.insert(k, v);
             }
@@ -758,7 +799,9 @@ async fn main() -> Result<()> {
         for json_str in &cli.mcp_config {
             if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(json_str) {
                 for (name, val) in map {
-                    if let Ok(cfg) = serde_json::from_value::<crate::mcp::types::McpServerConfig>(val) {
+                    if let Ok(cfg) =
+                        serde_json::from_value::<crate::mcp::types::McpServerConfig>(val)
+                    {
                         config.extra_mcp_servers.insert(name, cfg);
                     }
                 }
@@ -782,19 +825,24 @@ async fn main() -> Result<()> {
             let stdin = std::io::stdin();
             for line in stdin.lock().lines() {
                 let line = line.unwrap_or_default();
-                if line.is_empty() { continue; }
+                if line.is_empty() {
+                    continue;
+                }
                 if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line)
                     && event.get("type").and_then(|v| v.as_str()) == Some("user")
-                        && let Some(text) = event
-                            .get("message")
-                            .and_then(|m| m.get("content"))
-                            .and_then(|c| c.as_array())
-                            .and_then(|arr| arr.iter().find(|b| b.get("type").and_then(|t| t.as_str()) == Some("text")))
-                            .and_then(|b| b.get("text"))
-                            .and_then(|t| t.as_str())
-                        {
-                            result = text.to_string();
-                        }
+                    && let Some(text) = event
+                        .get("message")
+                        .and_then(|m| m.get("content"))
+                        .and_then(|c| c.as_array())
+                        .and_then(|arr| {
+                            arr.iter()
+                                .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+                        })
+                        .and_then(|b| b.get("text"))
+                        .and_then(|t| t.as_str())
+                {
+                    result = text.to_string();
+                }
             }
             if result.is_empty() && !cli.prompt.is_empty() {
                 cli.prompt.join(" ")
@@ -815,11 +863,21 @@ async fn main() -> Result<()> {
             if config.allowed_tools.iter().any(|a| a == "__none__") {
                 tools.clear();
             } else {
-                tools.retain(|t| config.allowed_tools.iter().any(|a| a.eq_ignore_ascii_case(t.name())));
+                tools.retain(|t| {
+                    config
+                        .allowed_tools
+                        .iter()
+                        .any(|a| a.eq_ignore_ascii_case(t.name()))
+                });
             }
         }
         if !config.disallowed_tools.is_empty() {
-            tools.retain(|t| !config.disallowed_tools.iter().any(|d| d.eq_ignore_ascii_case(t.name())));
+            tools.retain(|t| {
+                !config
+                    .disallowed_tools
+                    .iter()
+                    .any(|d| d.eq_ignore_ascii_case(t.name()))
+            });
         }
 
         // --json-schema: add a SyntheticOutputTool named "result" with the user's schema
@@ -892,7 +950,7 @@ async fn self_update() -> Result<()> {
         .bin_name("rustyclaw")
         .current_version(VERSION)
         .target(&target)
-        .identifier(&target)  // match artifact name pattern
+        .identifier(&target) // match artifact name pattern
         .show_download_progress(true)
         .no_confirm(false)
         .build()?
@@ -951,14 +1009,18 @@ async fn handle_mcp_subcommand(subcommand: &Option<McpSubcommand>) -> Result<()>
                 println!("Add servers to ~/.claude/settings.json or .claude/settings.json:");
                 println!("  {{");
                 println!("    \"mcpServers\": {{");
-                println!("      \"my-server\": {{\"command\": \"npx\", \"args\": [\"-y\", \"@my/mcp-server\"]}}");
+                println!(
+                    "      \"my-server\": {{\"command\": \"npx\", \"args\": [\"-y\", \"@my/mcp-server\"]}}"
+                );
                 println!("    }}");
                 println!("  }}");
             } else {
                 println!("Configured MCP servers ({}):", settings.mcp_servers.len());
                 for (name, cfg) in &settings.mcp_servers {
                     let kind = match cfg {
-                        crate::mcp::types::McpServerConfig::Stdio(s) => format!("stdio: {}", s.command),
+                        crate::mcp::types::McpServerConfig::Stdio(s) => {
+                            format!("stdio: {}", s.command)
+                        }
                         crate::mcp::types::McpServerConfig::Http(h) => format!("http: {}", h.url),
                     };
                     println!("  {name}  ({kind})");
@@ -996,8 +1058,16 @@ async fn handle_mcp_subcommand(subcommand: &Option<McpSubcommand>) -> Result<()>
                 }
             }
         }
-        Some(McpSubcommand::Add { name, command, args, scope, transport: _, env }) => {
-            let env_map: std::collections::HashMap<String, String> = env.iter()
+        Some(McpSubcommand::Add {
+            name,
+            command,
+            args,
+            scope,
+            transport: _,
+            env,
+        }) => {
+            let env_map: std::collections::HashMap<String, String> = env
+                .iter()
                 .filter_map(|kv| {
                     let mut parts = kv.splitn(2, '=');
                     let k = parts.next()?.to_string();
@@ -1005,17 +1075,18 @@ async fn handle_mcp_subcommand(subcommand: &Option<McpSubcommand>) -> Result<()>
                     Some((k, v))
                 })
                 .collect();
-            let cfg = crate::mcp::types::McpServerConfig::Stdio(crate::mcp::types::StdioServerConfig {
-                command: command.clone(),
-                args: args.clone(),
-                env: env_map,
-            });
+            let cfg =
+                crate::mcp::types::McpServerConfig::Stdio(crate::mcp::types::StdioServerConfig {
+                    command: command.clone(),
+                    args: args.clone(),
+                    env: env_map,
+                });
             mcp_write_server(name, cfg, scope, &config)?;
             println!("Added MCP server '{name}' (scope: {scope})");
         }
         Some(McpSubcommand::AddJson { name, json, scope }) => {
-            let cfg: crate::mcp::types::McpServerConfig = serde_json::from_str(json)
-                .map_err(|e| anyhow::anyhow!("Invalid JSON: {e}"))?;
+            let cfg: crate::mcp::types::McpServerConfig =
+                serde_json::from_str(json).map_err(|e| anyhow::anyhow!("Invalid JSON: {e}"))?;
             mcp_write_server(name, cfg, scope, &config)?;
             println!("Added MCP server '{name}' (scope: {scope})");
         }
@@ -1024,14 +1095,19 @@ async fn handle_mcp_subcommand(subcommand: &Option<McpSubcommand>) -> Result<()>
             match desktop_config {
                 None => {
                     eprintln!("Claude Desktop config not found. Expected locations:");
-                    eprintln!("  macOS: ~/Library/Application Support/Claude/claude_desktop_config.json");
-                    eprintln!("  WSL:   /mnt/c/Users/<user>/AppData/Roaming/Claude/claude_desktop_config.json");
+                    eprintln!(
+                        "  macOS: ~/Library/Application Support/Claude/claude_desktop_config.json"
+                    );
+                    eprintln!(
+                        "  WSL:   /mnt/c/Users/<user>/AppData/Roaming/Claude/claude_desktop_config.json"
+                    );
                     std::process::exit(1);
                 }
                 Some(path) => {
                     let content = std::fs::read_to_string(&path)?;
                     let json: serde_json::Value = serde_json::from_str(&content)?;
-                    let servers = json.get("mcpServers")
+                    let servers = json
+                        .get("mcpServers")
                         .and_then(|v| v.as_object())
                         .cloned()
                         .unwrap_or_default();
@@ -1041,7 +1117,9 @@ async fn handle_mcp_subcommand(subcommand: &Option<McpSubcommand>) -> Result<()>
                     }
                     let mut imported = 0usize;
                     for (name, val) in &servers {
-                        match serde_json::from_value::<crate::mcp::types::McpServerConfig>(val.clone()) {
+                        match serde_json::from_value::<crate::mcp::types::McpServerConfig>(
+                            val.clone(),
+                        ) {
                             Ok(cfg) => {
                                 mcp_write_server(name, cfg, scope, &config)?;
                                 println!("  Imported: {name}");
@@ -1070,8 +1148,8 @@ async fn handle_mcp_subcommand(subcommand: &Option<McpSubcommand>) -> Result<()>
             let project_path = config.cwd.join(".claude").join("settings.json");
             if project_path.exists() {
                 let content = std::fs::read_to_string(&project_path)?;
-                let mut json: serde_json::Value = serde_json::from_str(&content)
-                    .unwrap_or(serde_json::json!({}));
+                let mut json: serde_json::Value =
+                    serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
                 json.as_object_mut().map(|m| {
                     m.remove("approvedMcpjsonServers");
                     m.remove("rejectedMcpjsonServers");
@@ -1099,8 +1177,8 @@ fn mcp_write_server(
     } else {
         "{}".to_string()
     };
-    let mut json: serde_json::Value = serde_json::from_str(&content)
-        .unwrap_or(serde_json::json!({}));
+    let mut json: serde_json::Value =
+        serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
     if json.get("mcpServers").is_none() {
         json["mcpServers"] = serde_json::json!({});
     }
@@ -1125,15 +1203,18 @@ fn mcp_remove_server(name: &str, scope: Option<&str>, config: &Config) -> Result
     };
     let mut removed = false;
     for path in &paths {
-        if !path.exists() { continue; }
+        if !path.exists() {
+            continue;
+        }
         let content = std::fs::read_to_string(path)?;
-        let mut json: serde_json::Value = serde_json::from_str(&content)
-            .unwrap_or(serde_json::json!({}));
+        let mut json: serde_json::Value =
+            serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
         if let Some(servers) = json.get_mut("mcpServers").and_then(|v| v.as_object_mut())
-            && servers.remove(name).is_some() {
-                std::fs::write(path, serde_json::to_string_pretty(&json)?)?;
-                removed = true;
-            }
+            && servers.remove(name).is_some()
+        {
+            std::fs::write(path, serde_json::to_string_pretty(&json)?)?;
+            removed = true;
+        }
     }
     Ok(removed)
 }
@@ -1152,14 +1233,19 @@ fn find_claude_desktop_config() -> Option<std::path::PathBuf> {
     // macOS
     if let Some(home) = dirs::home_dir() {
         let mac = home.join("Library/Application Support/Claude/claude_desktop_config.json");
-        if mac.exists() { return Some(mac); }
+        if mac.exists() {
+            return Some(mac);
+        }
     }
     // WSL: try /mnt/c/Users/<user>/AppData/Roaming/Claude/
     if let Ok(entries) = std::fs::read_dir("/mnt/c/Users") {
         for entry in entries.flatten() {
-            let p = entry.path()
+            let p = entry
+                .path()
                 .join("AppData/Roaming/Claude/claude_desktop_config.json");
-            if p.exists() { return Some(p); }
+            if p.exists() {
+                return Some(p);
+            }
         }
     }
     None
@@ -1167,7 +1253,7 @@ fn find_claude_desktop_config() -> Option<std::path::PathBuf> {
 
 #[cfg(test)]
 mod dotenv_allowlist_tests {
-    use super::{load_dotenv, FORBIDDEN_ENV_KEYS, SAFE_ENV_KEYS};
+    use super::{FORBIDDEN_ENV_KEYS, SAFE_ENV_KEYS, load_dotenv};
     use std::io::Write;
 
     /// Every var the threat model says must be blocked must NOT appear in
@@ -1267,11 +1353,21 @@ mod dotenv_allowlist_tests {
         let _ = std::fs::remove_file(&path);
         unsafe {
             std::env::remove_var("RUSTYCLAW_VERBOSE");
-            if let Some(v) = snap_ck { std::env::set_var("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS", v); }
-            if let Some(v) = snap_cd { std::env::set_var("CLAUDE_CONFIG_DIR", v); }
-            if let Some(v) = snap_xdg { std::env::set_var("XDG_CONFIG_HOME", v); }
-            if let Some(v) = snap_sbox { std::env::set_var("RUSTYCLAW_SANDBOX_COMMAND", v); }
-            if let Some(v) = snap_verb { std::env::set_var("RUSTYCLAW_VERBOSE", v); }
+            if let Some(v) = snap_ck {
+                std::env::set_var("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS", v);
+            }
+            if let Some(v) = snap_cd {
+                std::env::set_var("CLAUDE_CONFIG_DIR", v);
+            }
+            if let Some(v) = snap_xdg {
+                std::env::set_var("XDG_CONFIG_HOME", v);
+            }
+            if let Some(v) = snap_sbox {
+                std::env::set_var("RUSTYCLAW_SANDBOX_COMMAND", v);
+            }
+            if let Some(v) = snap_verb {
+                std::env::set_var("RUSTYCLAW_VERBOSE", v);
+            }
         }
     }
 }
