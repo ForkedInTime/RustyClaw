@@ -17,6 +17,7 @@ pub mod permissions;
 pub mod query_engine;
 pub mod memory;
 pub mod rag;
+pub mod autocommit;
 pub mod autofix;
 pub mod router;
 pub mod sandbox;
