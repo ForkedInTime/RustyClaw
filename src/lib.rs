@@ -25,6 +25,7 @@ pub mod settings;
 pub mod skills;
 pub mod tools;
 pub mod voice;
+pub mod watch;
 
 pub mod sdk;
 
