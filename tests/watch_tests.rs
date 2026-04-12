@@ -1,6 +1,7 @@
+use rustyclaw::watch::scan_markers;
+
 #[test]
 fn scan_ai_markers() {
-    use rustyclaw::watch::scan_markers;
     let content = r#"
 fn main() {
     // AI: add error handling here
@@ -19,7 +20,6 @@ fn main() {
 
 #[test]
 fn scan_no_markers() {
-    use rustyclaw::watch::scan_markers;
     let content = "fn main() { let x = 1; }";
     let markers = scan_markers(content, &["AI:", "AGENT:"]);
     assert!(markers.is_empty());
@@ -27,7 +27,6 @@ fn scan_no_markers() {
 
 #[test]
 fn scan_custom_markers() {
-    use rustyclaw::watch::scan_markers;
     let content = "// FIXME: broken\n// AGENT: implement auth";
     let markers = scan_markers(content, &["AGENT:"]);
     assert_eq!(markers.len(), 1);
@@ -36,7 +35,6 @@ fn scan_custom_markers() {
 
 #[test]
 fn scan_marker_on_first_line() {
-    use rustyclaw::watch::scan_markers;
     let content = "// AI: very first line\nfn main() {}";
     let markers = scan_markers(content, &["AI:"]);
     assert_eq!(markers.len(), 1);
@@ -50,7 +48,6 @@ fn scan_markers_respects_extension_via_patterns_stub() {
     // contract that pattern filtering happens at the `start_watcher` level,
     // not inside `scan_markers`. Kept minimal — we don't spin up a real
     // watcher in unit tests.
-    use rustyclaw::watch::scan_markers;
     let content = "// AI: inside any file extension";
     let markers = scan_markers(content, &["AI:"]);
     assert_eq!(markers.len(), 1, "scan_markers doesn't filter by extension");
