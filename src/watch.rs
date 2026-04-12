@@ -3,7 +3,7 @@
 //! Watches files for changes and scans for action markers (AI:, AGENT:).
 //! Integrates with the TUI event loop via AppEvent.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher, Event as NotifyEvent, EventKind};
 use tokio::sync::mpsc;
@@ -23,14 +23,19 @@ pub fn scan_markers(content: &str, patterns: &[&str]) -> Vec<Marker> {
 
     for (line_idx, line) in content.lines().enumerate() {
         let trimmed = line.trim();
-        // Strip comment prefixes
-        let stripped = trimmed
-            .strip_prefix("//")
-            .or_else(|| trimmed.strip_prefix('#'))
-            .or_else(|| trimmed.strip_prefix("--"))
-            .or_else(|| trimmed.strip_prefix("/*"))
-            .map(|s| s.trim())
-            .unwrap_or("");
+        // Strip comment prefixes. For `/*` comments, also strip a trailing
+        // `*/` so `/* AI: foo */` yields `foo`, not `foo */`.
+        let stripped = if let Some(s) = trimmed.strip_prefix("/*") {
+            s.trim().trim_end_matches("*/").trim()
+        } else if let Some(s) = trimmed.strip_prefix("//") {
+            s.trim()
+        } else if let Some(s) = trimmed.strip_prefix('#') {
+            s.trim()
+        } else if let Some(s) = trimmed.strip_prefix("--") {
+            s.trim()
+        } else {
+            ""
+        };
 
         for pattern in patterns {
             if let Some(rest) = stripped.strip_prefix(pattern) {
@@ -50,8 +55,12 @@ pub fn scan_markers(content: &str, patterns: &[&str]) -> Vec<Marker> {
 /// Configuration for the file watcher.
 pub struct WatchConfig {
     pub paths: Vec<PathBuf>,
-    pub patterns: Vec<String>,     // glob patterns to include
+    /// Glob patterns to include. Wired in Task 12.
+    #[allow(dead_code)]
+    pub patterns: Vec<String>,
     pub markers: Vec<String>,      // marker patterns to scan for (e.g. "AI:", "AGENT:")
+    /// Debounce window. Wired in Task 12.
+    #[allow(dead_code)]
     pub debounce_ms: u64,
     pub rate_limit_ms: u64,
 }
@@ -84,7 +93,11 @@ pub fn start_watcher(
     let rate_limit = Duration::from_millis(config.rate_limit_ms);
     let marker_patterns: Vec<String> = config.markers.clone();
 
-    let mut last_trigger = Instant::now() - rate_limit; // Allow immediate first trigger
+    // `None` means "never triggered" — allows the first event through without
+    // relying on `Instant::now() - rate_limit`, which can underflow on
+    // short-uptime systems where `Duration::from_millis(rate_limit_ms)` is
+    // greater than the time since boot.
+    let mut last_trigger: Option<Instant> = None;
 
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<NotifyEvent>| {
         let Ok(event) = res else { return };
@@ -94,16 +107,20 @@ pub fn start_watcher(
             return;
         }
 
-        // Rate limit
+        // Rate limit. Update `last_trigger` unconditionally once we decide
+        // to handle this event — otherwise a burst where every path is
+        // filtered out (e.g., all under `.git/`) would never suppress the
+        // following burst.
         let now = Instant::now();
-        if now.duration_since(last_trigger) < rate_limit {
+        if last_trigger.is_some_and(|t| now.duration_since(t) < rate_limit) {
             return;
         }
+        last_trigger = Some(now);
 
         for path in &event.paths {
             // Skip non-files and gitignored files
             if !path.is_file() { continue; }
-            if path.to_string_lossy().contains(".git/") { continue; }
+            if path.components().any(|c| c.as_os_str() == ".git") { continue; }
 
             let _ = tx.send(WatchEvent::FileChanged { path: path.clone() });
 
@@ -118,8 +135,6 @@ pub fn start_watcher(
                     let _ = tx.send(WatchEvent::MarkerFound { marker: m });
                 }
             }
-
-            last_trigger = now;
         }
     })?;
 
@@ -130,10 +145,3 @@ pub fn start_watcher(
     Ok(watcher)
 }
 
-// `debounce_ms` and `Path` are part of the public API used in Task 12 (`/watch`
-// command). They're not yet read internally — silence the dead-code warnings
-// without deleting the fields.
-#[allow(dead_code)]
-const _DEBOUNCE_USED_IN_TASK_12: fn(&WatchConfig) -> u64 = |c| c.debounce_ms;
-#[allow(dead_code)]
-const _PATH_USED_IN_API: fn(&Path) -> bool = |p| p.is_file();
