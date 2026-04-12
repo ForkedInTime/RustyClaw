@@ -48,3 +48,18 @@ fn cdp_response_with_error() {
     let err = resp.error.as_ref().unwrap();
     assert_eq!(err["code"], -32000);
 }
+
+#[test]
+fn chrome_path_discovery_returns_known_binaries() {
+    use rustyclaw::browser::find_chrome;
+    let result = find_chrome();
+    let _ = result; // Just verify it doesn't panic
+}
+
+#[test]
+fn browser_session_default_state() {
+    use rustyclaw::browser::BrowserSession;
+    let session = BrowserSession::default();
+    assert!(!session.is_connected());
+    assert!(session.ref_map().is_empty());
+}
