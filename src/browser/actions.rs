@@ -1,14 +1,20 @@
 //! Browser action functions: navigate, click, fill, screenshot, etc.
 //!
-//! Each function takes a BrowserSession and executes a CDP command.
+//! Functions that only need the CDP connection take `&CdpClient` so callers
+//! can clone the client out from under a session lock and drop the lock
+//! before a long-running operation (page load, wait_for polling, etc.).
+//! Functions that need the ref map (click / fill / get_text) still take
+//! `&mut BrowserSession` — those are fast, no long awaits.
+use super::cdp::CdpClient;
 use super::BrowserSession;
 use anyhow::Result;
 use serde_json::json;
 
-/// Navigate to a URL. Returns (title, status).
-pub async fn navigate(session: &mut BrowserSession, url: &str) -> Result<(String, u16)> {
-    let client = session.client()?;
-
+/// Navigate to a URL. Returns (title, status). Does NOT mutate session state —
+/// the caller is responsible for updating `current_url` / `current_title`
+/// after this returns, so the session lock can be released while we wait on
+/// the page load event (up to 30 s).
+pub async fn navigate(client: &CdpClient, url: &str) -> Result<(String, u16)> {
     // Subscribe BEFORE navigating so we don't miss Page.loadEventFired on fast loads.
     let mut events = client.subscribe();
 
@@ -31,12 +37,13 @@ pub async fn navigate(session: &mut BrowserSession, url: &str) -> Result<(String
     }
 
     // Get page title
-    let eval = client.send("Runtime.evaluate", json!({
-        "expression": "document.title"
-    })).await?;
+    let eval = client
+        .send(
+            "Runtime.evaluate",
+            json!({ "expression": "document.title" }),
+        )
+        .await?;
     let title = eval["result"]["value"].as_str().unwrap_or("").to_string();
-    session.current_url = url.to_string();
-    session.current_title = title.clone();
 
     Ok((title, 200))
 }
@@ -118,8 +125,7 @@ pub async fn fill(session: &mut BrowserSession, element_ref: &str, value: &str) 
 }
 
 /// Take a screenshot. Returns base64-encoded PNG.
-pub async fn screenshot(session: &BrowserSession, full_page: bool) -> Result<String> {
-    let client = session.client()?;
+pub async fn screenshot(client: &CdpClient, full_page: bool) -> Result<String> {
     let mut params = json!({"format": "png"});
     if full_page {
         let metrics = client.send("Page.getLayoutMetrics", json!({})).await?;
@@ -137,9 +143,7 @@ pub async fn screenshot(session: &BrowserSession, full_page: bool) -> Result<Str
 }
 
 /// Press a key (e.g. "Enter", "Tab", "Escape", "a").
-pub async fn press_key(session: &BrowserSession, key: &str) -> Result<String> {
-    let client = session.client()?;
-
+pub async fn press_key(client: &CdpClient, key: &str) -> Result<String> {
     let key_lower = key.to_lowercase();
     let (key_code, text) = match key_lower.as_str() {
         "enter" | "return" => ("Enter", "\r"),
@@ -164,8 +168,7 @@ pub async fn press_key(session: &BrowserSession, key: &str) -> Result<String> {
 }
 
 /// Handle a dialog (alert/confirm/prompt).
-pub async fn handle_dialog(session: &BrowserSession, accept: bool, text: Option<&str>) -> Result<String> {
-    let client = session.client()?;
+pub async fn handle_dialog(client: &CdpClient, accept: bool, text: Option<&str>) -> Result<String> {
     let mut params = json!({"accept": accept});
     if let Some(t) = text {
         params["promptText"] = json!(t);
@@ -175,8 +178,7 @@ pub async fn handle_dialog(session: &BrowserSession, accept: bool, text: Option<
 }
 
 /// Get console messages (placeholder — requires a Runtime.consoleAPICalled listener).
-pub async fn get_console_messages(session: &BrowserSession) -> Result<Vec<String>> {
-    let _client = session.client()?;
+pub async fn get_console_messages(_client: &CdpClient) -> Result<Vec<String>> {
     // Event-based listener not yet wired; return empty for now.
     Ok(Vec::new())
 }
@@ -198,11 +200,10 @@ pub async fn get_text(session: &mut BrowserSession, element_ref: &str) -> Result
 
 /// Wait for a CSS selector to appear, or timeout.
 pub async fn wait_for(
-    session: &BrowserSession,
+    client: &CdpClient,
     condition: &str,
     timeout_ms: u64,
 ) -> Result<String> {
-    let client = session.client()?;
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
 
     // Serialize the selector as a proper JS string literal — handles quotes,

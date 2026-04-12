@@ -1,13 +1,25 @@
 //! Browser automation tools implementing the Tool trait.
 //!
-//! Each struct wraps a browser action from src/browser/ and exposes it
-//! as a tool the AI model can call. Tools share a single BrowserSession
-//! so one browser_navigate launches the browser and subsequent clicks/fills
+//! Each struct wraps a browser action from `src/browser/` and exposes it
+//! as a tool the AI model can call. Tools share a single `BrowserSession`
+//! so one `browser_navigate` launches the browser and subsequent clicks/fills
 //! operate on the same page.
+//!
+//! ## Locking model
+//!
+//! The shared `BrowserSession` lives behind an `Arc<Mutex<_>>`. Short-lived
+//! operations (resolving an `@eN` ref, updating `current_url`) hold the lock
+//! directly. Long-lived CDP operations (page load, `wait_for` polling) take
+//! a brief lock to *clone the `CdpClient` handle out*, drop the session
+//! guard, then call the action on the cloned client. `CdpClient` is
+//! `#[derive(Clone)]` and thread-safe internally. This keeps concurrent
+//! browser tool calls (e.g. a `/browser` close while a `wait_for` is in
+//! flight) from serializing on the session mutex for up to the full
+//! timeout.
 
 use crate::browser::{self, BrowserSession};
 use crate::tools::{Tool, ToolContext, ToolOutput};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Arc;
@@ -15,9 +27,22 @@ use tokio::sync::Mutex;
 
 pub type SharedSession = Arc<Mutex<BrowserSession>>;
 
+/// Extract a required string field from a tool input object.
+/// Returns a clear error instead of silently substituting a default — the
+/// model can then self-correct on the next turn instead of acting on
+/// garbage (clicking @e1 when it meant @e42, navigating to about:blank
+/// when it meant the actual URL, etc.).
+fn required_str<'a>(input: &'a serde_json::Value, field: &str) -> Result<&'a str> {
+    input[field]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow!("missing required field: {field}"))
+}
+
 /// Ensure the browser is launched. Launches on first use.
-/// Each tool holds its own copy of headless + chrome_path (captured at
-/// construction from the Config), so no ToolContext fields are needed.
+/// Each navigator-style tool holds its own copy of headless + chrome_path
+/// (captured at construction from the Config), so no ToolContext fields
+/// are needed.
 async fn ensure_launched(
     session: &SharedSession,
     headless: bool,
@@ -28,6 +53,14 @@ async fn ensure_launched(
         s.launch(headless, chrome_path).await?;
     }
     Ok(())
+}
+
+/// Clone the `CdpClient` out from under the session lock, or fail with the
+/// "Browser not connected" error. Callers use this when they need to run a
+/// long CDP operation without holding the session mutex.
+async fn clone_client(session: &SharedSession) -> Result<browser::cdp::CdpClient> {
+    let s = session.lock().await;
+    Ok(s.client()?.clone())
 }
 
 // ── browser_navigate ────────────────────────────────────────────────────────
@@ -57,14 +90,34 @@ impl Tool for BrowserNavigateTool {
         })
     }
     async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput> {
+        let url = required_str(&input, "url")?;
         ensure_launched(&self.session, self.headless, self.chrome_path.as_deref()).await?;
-        let url = input["url"].as_str().unwrap_or("about:blank");
-        let mut session = self.session.lock().await;
-        let (title, status) = browser::actions::navigate(&mut session, url).await?;
 
-        // Auto-snapshot after navigation so the model has refs to act on.
-        let (tree, refs) = browser::snapshot::take_snapshot(session.client()?).await?;
-        session.set_refs(refs);
+        // Clone the CdpClient out so Page.navigate + load-event wait
+        // (up to 30 s) does not hold the session lock.
+        let client = clone_client(&self.session).await?;
+        let (title, status) = browser::actions::navigate(&client, url).await?;
+
+        // Snapshot afterwards. This also uses the client, not the session,
+        // so still no session lock held.
+        let tree = match browser::snapshot::take_snapshot(&client).await {
+            Ok((tree, refs)) => {
+                // Brief re-lock to publish the post-navigation state.
+                let mut session = self.session.lock().await;
+                session.current_url = url.to_string();
+                session.current_title = title.clone();
+                session.set_refs(refs);
+                tree
+            }
+            Err(e) => {
+                // Snapshot failed (e.g. page still settling). Still publish
+                // the navigation result so the model sees we made progress.
+                let mut session = self.session.lock().await;
+                session.current_url = url.to_string();
+                session.current_title = title.clone();
+                format!("(snapshot unavailable: {e})")
+            }
+        };
 
         Ok(ToolOutput::success(format!(
             "Navigated to: {url}\nTitle: {title}\nStatus: {status}\n\nAccessibility snapshot:\n{tree}"
@@ -95,9 +148,9 @@ impl Tool for BrowserSnapshotTool {
         })
     }
     async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput> {
-        let mut session = self.session.lock().await;
-        let (tree, refs) = browser::snapshot::take_snapshot(session.client()?).await?;
-        session.set_refs(refs);
+        let client = clone_client(&self.session).await?;
+        let (tree, refs) = browser::snapshot::take_snapshot(&client).await?;
+        self.session.lock().await.set_refs(refs);
         Ok(ToolOutput::success(tree))
     }
 }
@@ -130,19 +183,30 @@ impl Tool for BrowserClickTool {
         })
     }
     async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput> {
-        let element_ref = input["ref"].as_str().unwrap_or("");
-        let mut session = self.session.lock().await;
-        // Force early error if the browser is not connected.
-        let _ = session.client()?;
-        let result = browser::actions::click(&mut session, element_ref).await?;
+        let element_ref = required_str(&input, "ref")?;
 
-        // Auto-snapshot after click so the model's next action sees the post-interaction refs.
-        let (tree, refs) = browser::snapshot::take_snapshot(session.client()?).await?;
-        session.set_refs(refs);
+        // click needs the session (ref map + resolve_ref), so hold the lock.
+        // This is fast — no long awaits inside actions::click.
+        let (result, client) = {
+            let mut session = self.session.lock().await;
+            let result = browser::actions::click(&mut session, element_ref).await?;
+            let client = session.client()?.clone();
+            (result, client)
+        };
 
-        Ok(ToolOutput::success(format!(
-            "{result}\n\nUpdated snapshot:\n{tree}"
-        )))
+        // Auto-snapshot uses only the client — no session lock held during
+        // the CDP round-trip. If the snapshot fails (e.g. page navigated
+        // away mid-click), report that as a soft warning rather than
+        // losing the successful click result.
+        let trailer = match browser::snapshot::take_snapshot(&client).await {
+            Ok((tree, refs)) => {
+                self.session.lock().await.set_refs(refs);
+                format!("\n\nUpdated snapshot:\n{tree}")
+            }
+            Err(e) => format!("\n\n(snapshot unavailable: {e})"),
+        };
+
+        Ok(ToolOutput::success(format!("{result}{trailer}")))
     }
 }
 
@@ -172,8 +236,12 @@ impl Tool for BrowserFillTool {
         })
     }
     async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput> {
-        let element_ref = input["ref"].as_str().unwrap_or("");
-        let value = input["value"].as_str().unwrap_or("");
+        let element_ref = required_str(&input, "ref")?;
+        // `value` is required by schema but may legitimately be the empty
+        // string (to clear a field). Accept "" here rather than erroring.
+        let value = input["value"]
+            .as_str()
+            .ok_or_else(|| anyhow!("missing required field: value"))?;
         let mut session = self.session.lock().await;
         let _ = session.client()?;
         let result = browser::actions::fill(&mut session, element_ref, value).await?;
@@ -211,14 +279,20 @@ impl Tool for BrowserScreenshotTool {
     }
     async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput> {
         let full_page = input["full_page"].as_bool().unwrap_or(false);
-        let session = self.session.lock().await;
-        let _ = session.client()?;
-        let b64 = browser::actions::screenshot(&session, full_page).await?;
-        drop(session);
+        let client = clone_client(&self.session).await?;
+        let b64 = browser::actions::screenshot(&client, full_page).await?;
 
         use base64::Engine;
         let bytes = base64::engine::general_purpose::STANDARD.decode(&b64)?;
-        let path = std::env::temp_dir().join("rustyclaw_screenshot.png");
+
+        // Unique filename per screenshot — process-wide timestamp in nanos.
+        // Prevents collisions across parallel agents sharing $TMPDIR and
+        // preserves screenshot history within a session.
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!("rustyclaw_screenshot_{ts}.png"));
         tokio::fs::write(&path, &bytes).await?;
 
         Ok(ToolOutput::success(format!(
@@ -254,7 +328,7 @@ impl Tool for BrowserGetTextTool {
         })
     }
     async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput> {
-        let element_ref = input["ref"].as_str().unwrap_or("");
+        let element_ref = required_str(&input, "ref")?;
         let mut session = self.session.lock().await;
         let _ = session.client()?;
         let text = browser::actions::get_text(&mut session, element_ref).await?;
@@ -289,10 +363,9 @@ impl Tool for BrowserPressKeyTool {
         })
     }
     async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput> {
-        let key = input["key"].as_str().unwrap_or("");
-        let session = self.session.lock().await;
-        let _ = session.client()?;
-        let result = browser::actions::press_key(&session, key).await?;
+        let key = required_str(&input, "key")?;
+        let client = clone_client(&self.session).await?;
+        let result = browser::actions::press_key(&client, key).await?;
         Ok(ToolOutput::success(result))
     }
 }
@@ -326,11 +399,13 @@ impl Tool for BrowserWaitTool {
         })
     }
     async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput> {
-        let selector = input["selector"].as_str().unwrap_or("");
+        let selector = required_str(&input, "selector")?;
         let timeout_ms = input["timeout_ms"].as_u64().unwrap_or(30_000);
-        let session = self.session.lock().await;
-        let _ = session.client()?;
-        let result = browser::actions::wait_for(&session, selector, timeout_ms).await?;
+
+        // Clone the client so the polling loop does NOT hold the session
+        // lock for the full timeout window.
+        let client = clone_client(&self.session).await?;
+        let result = browser::actions::wait_for(&client, selector, timeout_ms).await?;
         Ok(ToolOutput::success(result))
     }
 }
