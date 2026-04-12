@@ -457,6 +457,8 @@ pub fn all_tools_with_state(config: &crate::config::Config) -> (Vec<DynTool>, Sh
             session: browser_session.clone(),
             headless: config.browser_headless,
             chrome_path: config.browser_chrome_path.clone(),
+            cdp_endpoint: config.browser_cdp_endpoint.clone(),
+            timeout_ms: config.browser_timeout_ms,
         }));
         tools.push(Arc::new(browser_tools::BrowserSnapshotTool {
             session: browser_session.clone(),
@@ -478,6 +480,7 @@ pub fn all_tools_with_state(config: &crate::config::Config) -> (Vec<DynTool>, Sh
         }));
         tools.push(Arc::new(browser_tools::BrowserWaitTool {
             session: browser_session.clone(),
+            default_timeout_ms: config.browser_timeout_ms,
         }));
         Some(browser_session)
     } else {
