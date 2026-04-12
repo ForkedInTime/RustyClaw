@@ -27,3 +27,10 @@ pub mod tools;
 pub mod voice;
 
 pub mod sdk;
+
+/// Minimal re-export of the `tui::diff` submodule for integration tests.
+/// The rest of `tui` is binary-only and not exposed here.
+pub mod tui {
+    #[path = "diff.rs"]
+    pub mod diff;
+}
