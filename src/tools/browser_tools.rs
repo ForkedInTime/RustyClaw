@@ -39,18 +39,29 @@ fn required_str<'a>(input: &'a serde_json::Value, field: &str) -> Result<&'a str
         .ok_or_else(|| anyhow!("missing required field: {field}"))
 }
 
-/// Ensure the browser is launched. Launches on first use.
-/// Each navigator-style tool holds its own copy of headless + chrome_path
+/// Ensure the browser is connected. If `cdp_endpoint` is set (from
+/// `browserCdpEndpoint` in settings.json), connect to that existing CDP
+/// WebSocket — useful for attaching to a pre-launched Chrome (e.g. one
+/// running in a container, or a user's own Chrome opened with
+/// `--remote-debugging-port`). Otherwise, launch a fresh headless Chrome
+/// using the provided headless + chrome_path settings.
+///
+/// Each navigator-style tool holds its own copy of these settings
 /// (captured at construction from the Config), so no ToolContext fields
 /// are needed.
 async fn ensure_launched(
     session: &SharedSession,
     headless: bool,
     chrome_path: Option<&str>,
+    cdp_endpoint: Option<&str>,
 ) -> Result<()> {
     let mut s = session.lock().await;
     if !s.is_connected() {
-        s.launch(headless, chrome_path).await?;
+        if let Some(endpoint) = cdp_endpoint {
+            s.connect(endpoint).await?;
+        } else {
+            s.launch(headless, chrome_path).await?;
+        }
     }
     Ok(())
 }
@@ -69,6 +80,10 @@ pub struct BrowserNavigateTool {
     pub session: SharedSession,
     pub headless: bool,
     pub chrome_path: Option<String>,
+    /// If set, attach to an existing CDP endpoint instead of launching Chrome.
+    pub cdp_endpoint: Option<String>,
+    /// Page-load timeout (ms) applied to `actions::navigate`.
+    pub timeout_ms: u64,
 }
 
 #[async_trait]
@@ -91,12 +106,18 @@ impl Tool for BrowserNavigateTool {
     }
     async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput> {
         let url = required_str(&input, "url")?;
-        ensure_launched(&self.session, self.headless, self.chrome_path.as_deref()).await?;
+        ensure_launched(
+            &self.session,
+            self.headless,
+            self.chrome_path.as_deref(),
+            self.cdp_endpoint.as_deref(),
+        )
+        .await?;
 
         // Clone the CdpClient out so Page.navigate + load-event wait
-        // (up to 30 s) does not hold the session lock.
+        // (up to timeout_ms) does not hold the session lock.
         let client = clone_client(&self.session).await?;
-        let (title, status) = browser::actions::navigate(&client, url).await?;
+        let (title, status) = browser::actions::navigate(&client, url, self.timeout_ms).await?;
 
         // Snapshot afterwards. This also uses the client, not the session,
         // so still no session lock held.
@@ -374,6 +395,9 @@ impl Tool for BrowserPressKeyTool {
 
 pub struct BrowserWaitTool {
     pub session: SharedSession,
+    /// Fallback timeout (ms) when the tool input omits `timeout_ms`.
+    /// Sourced from `browserTimeoutMs` in settings.json.
+    pub default_timeout_ms: u64,
 }
 
 #[async_trait]
@@ -391,8 +415,7 @@ impl Tool for BrowserWaitTool {
                 "selector":   { "type": "string", "description": "CSS selector to wait for" },
                 "timeout_ms": {
                     "type": "integer",
-                    "description": "Timeout in milliseconds (default 30000)",
-                    "default": 30000
+                    "description": "Timeout in milliseconds (falls back to browserTimeoutMs from settings)"
                 }
             },
             "required": ["selector"]
@@ -400,7 +423,7 @@ impl Tool for BrowserWaitTool {
     }
     async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput> {
         let selector = required_str(&input, "selector")?;
-        let timeout_ms = input["timeout_ms"].as_u64().unwrap_or(30_000);
+        let timeout_ms = input["timeout_ms"].as_u64().unwrap_or(self.default_timeout_ms);
 
         // Clone the client so the polling loop does NOT hold the session
         // lock for the full timeout window.

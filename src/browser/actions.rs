@@ -13,8 +13,8 @@ use serde_json::json;
 /// Navigate to a URL. Returns (title, status). Does NOT mutate session state —
 /// the caller is responsible for updating `current_url` / `current_title`
 /// after this returns, so the session lock can be released while we wait on
-/// the page load event (up to 30 s).
-pub async fn navigate(client: &CdpClient, url: &str) -> Result<(String, u16)> {
+/// the page load event (bounded by `timeout_ms`).
+pub async fn navigate(client: &CdpClient, url: &str, timeout_ms: u64) -> Result<(String, u16)> {
     // Subscribe BEFORE navigating so we don't miss Page.loadEventFired on fast loads.
     let mut events = client.subscribe();
 
@@ -26,13 +26,14 @@ pub async fn navigate(client: &CdpClient, url: &str) -> Result<(String, u16)> {
     }
 
     // Wait for load event
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    let deadline =
+        tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
     loop {
         match tokio::time::timeout_at(deadline, events.recv()).await {
             Ok(Ok(ev)) if ev.method == "Page.loadEventFired" => break,
             Ok(Ok(_)) => continue,
             Ok(Err(_)) => break, // Channel lagged, page likely loaded
-            Err(_) => anyhow::bail!("Page load timed out after 30s"),
+            Err(_) => anyhow::bail!("Page load timed out after {timeout_ms}ms"),
         }
     }
 
