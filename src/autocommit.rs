@@ -498,10 +498,14 @@ mod git_detection_tests {
             .expect("git init");
         assert!(status.success(), "git init failed");
         // Set required git config so later commits work.
+        // core.autocrlf=false prevents Windows git from rewriting "x\n" to
+        // "x\r\n" on checkout, which breaks byte-exact fixture assertions.
         for (k, v) in [
             ("user.name", "rustyclaw-test"),
             ("user.email", "noreply@rustyclaw.local"),
             ("commit.gpgsign", "false"),
+            ("core.autocrlf", "false"),
+            ("core.safecrlf", "false"),
         ] {
             let s = Command::new("git")
                 .args(["config", k, v])
