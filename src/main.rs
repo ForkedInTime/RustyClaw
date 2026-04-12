@@ -2,6 +2,7 @@
 /// Entry point
 mod api;
 mod autofix;
+mod browser;
 mod commands;
 mod compact;
 mod config;
