@@ -513,6 +513,23 @@ pub struct PendingUserQuestion {
     pub cursor: usize,
 }
 
+// ── Watcher handle ────────────────────────────────────────────────────────────
+
+/// Handle to an active file watcher. Owns the `RecommendedWatcher` (drop = stop)
+/// and the abort handle for the background task that forwards watch events into
+/// the TUI. Dropping drops both, so `app.watcher = None` fully tears it down.
+pub struct WatcherHandle {
+    #[allow(dead_code)] // kept alive for its drop side-effect
+    pub watcher: notify::RecommendedWatcher,
+    pub forwarder: tokio::task::AbortHandle,
+}
+
+impl Drop for WatcherHandle {
+    fn drop(&mut self) {
+        self.forwarder.abort();
+    }
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 pub struct App {
@@ -652,6 +669,10 @@ pub struct App {
     /// drive the same Chrome instance. `None` when `browser_enabled == false`.
     pub browser_session:
         Option<std::sync::Arc<tokio::sync::Mutex<crate::browser::BrowserSession>>>,
+
+    /// Active file-watch state. `None` when no watcher is running.
+    /// Dropping this stops watching.
+    pub watcher: Option<WatcherHandle>,
 }
 
 /// Format a raw model ID into a human-readable name like "Sonnet 4.6".
@@ -781,6 +802,7 @@ impl App {
             router: crate::router::RouterConfig::new(model),
             cost_tracker: crate::cost::CostTracker::new(),
             browser_session: None,
+            watcher: None,
         }
     }
 

@@ -316,6 +316,17 @@ pub struct Config {
     /// Default browser action timeout in milliseconds.
     pub browser_timeout_ms: u64,
 
+    /// Watch mode enabled on startup.
+    pub watch_enabled: bool,
+    /// Watch debounce (ms) — coalesces rapid filesystem events.
+    pub watch_debounce_ms: u64,
+    /// Minimum gap between watch triggers (ms).
+    pub watch_rate_limit_ms: u64,
+    /// Comment markers that fire watch auto-action (e.g. `["AI:", "AGENT:"]`).
+    pub watch_markers: Vec<String>,
+    /// Auto-show the diff overlay after AI-authored edits.
+    pub diff_review: bool,
+
     /// Whether desktop notifications (notify-send) + terminal bell fire on task completion.
     pub notifications_enabled: bool,
 
@@ -427,6 +438,11 @@ impl Default for Config {
             browser_chrome_path: None,
             browser_cdp_endpoint: None,
             browser_timeout_ms: 30_000,
+            watch_enabled: false,
+            watch_debounce_ms: 500,
+            watch_rate_limit_ms: 10_000,
+            watch_markers: vec!["AI:".into(), "AGENT:".into()],
+            diff_review: false,
             notifications_enabled: false,
             spinner_style: "themed".to_string(),
             sandbox_allow_network: true,
