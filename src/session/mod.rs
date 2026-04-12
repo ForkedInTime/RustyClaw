@@ -153,13 +153,16 @@ impl Session {
         self.meta.save().await
     }
 
-    /// Load all messages from a session file.
+    /// Load all messages from a session file. Returns an empty vec if the
+    /// session file does not exist — no TOCTOU race between an exists() check
+    /// and the read, because we let the read itself surface the NotFound.
     pub async fn load_messages(id: &str) -> Result<Vec<Message>> {
         let path = Self::jsonl_path(id);
-        if !path.exists() {
-            return Ok(Vec::new());
-        }
-        let content = fs::read_to_string(&path).await?;
+        let content = match fs::read_to_string(&path).await {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
         content
             .lines()
             .filter(|l| !l.trim().is_empty())
