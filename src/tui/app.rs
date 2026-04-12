@@ -646,6 +646,12 @@ pub struct App {
     pub router: crate::router::RouterConfig,
     /// Session cost tracker with per-model breakdown.
     pub cost_tracker: crate::cost::CostTracker,
+
+    /// Shared browser session — populated from `SharedToolState::browser_session`
+    /// so `/browser`, `/browse`, `/screenshot` and the `browser_*` tools all
+    /// drive the same Chrome instance. `None` when `browser_enabled == false`.
+    pub browser_session:
+        Option<std::sync::Arc<tokio::sync::Mutex<crate::browser::BrowserSession>>>,
 }
 
 /// Format a raw model ID into a human-readable name like "Sonnet 4.6".
@@ -774,6 +780,7 @@ impl App {
             pending_redo_positions: None,
             router: crate::router::RouterConfig::new(model),
             cost_tracker: crate::cost::CostTracker::new(),
+            browser_session: None,
         }
     }
 

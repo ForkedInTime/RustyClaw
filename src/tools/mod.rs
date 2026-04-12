@@ -374,6 +374,10 @@ pub fn default_tools() -> Vec<DynTool> {
 /// All shared state needed by tools that must also be readable by slash commands.
 pub struct SharedToolState {
     pub todo: todo::TodoState,
+    /// Shared across the 8 browser tools and the /browser slash commands.
+    /// None when config.browser_enabled == false.
+    pub browser_session:
+        Option<std::sync::Arc<tokio::sync::Mutex<crate::browser::BrowserSession>>>,
 }
 
 /// Build the full tool set. Returns tools + shared state so slash commands can read it.
@@ -444,8 +448,8 @@ pub fn all_tools_with_state(config: &crate::config::Config) -> (Vec<DynTool>, Sh
     tools.push(Arc::new(powershell::PowerShellTool));
     tools.push(Arc::new(web_browser::WebBrowserTool));
 
-    // Browser automation tools (shared session across all browser_* tools).
-    if config.browser_enabled {
+    // Browser automation tools (shared session across all browser_* tools AND /browser commands).
+    let browser_session_shared = if config.browser_enabled {
         let browser_session = std::sync::Arc::new(tokio::sync::Mutex::new(
             crate::browser::BrowserSession::default(),
         ));
@@ -473,9 +477,12 @@ pub fn all_tools_with_state(config: &crate::config::Config) -> (Vec<DynTool>, Sh
             session: browser_session.clone(),
         }));
         tools.push(Arc::new(browser_tools::BrowserWaitTool {
-            session: browser_session,
+            session: browser_session.clone(),
         }));
-    }
+        Some(browser_session)
+    } else {
+        None
+    };
 
     tools.push(Arc::new(lsp::LSPTool));
     tools.push(Arc::new(discover_skills::DiscoverSkillsTool));
@@ -510,7 +517,10 @@ pub fn all_tools_with_state(config: &crate::config::Config) -> (Vec<DynTool>, Sh
         tools_snapshot: snapshot,
     }));
 
-    let shared = SharedToolState { todo: todo_state };
+    let shared = SharedToolState {
+        todo: todo_state,
+        browser_session: browser_session_shared,
+    };
     (tools, shared)
 }
 
