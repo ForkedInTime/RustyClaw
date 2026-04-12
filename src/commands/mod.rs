@@ -741,8 +741,8 @@ fn cmd_model(args: &str, _ctx: &CommandContext) -> CommandAction {
         let raw = args.trim();
         let model = if raw == "default" {
             crate::api::default_model().to_string()
-        } else if raw.starts_with("ollama ") {
-            format!("ollama:{}", raw["ollama ".len()..].trim())
+        } else if let Some(rest) = raw.strip_prefix("ollama ") {
+            format!("ollama:{}", rest.trim())
         } else if let Some(space_pos) = raw.find(' ') {
             let prefix = &raw[..space_pos];
             // Check if the word before the space is a known provider prefix

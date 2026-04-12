@@ -19,8 +19,8 @@
 #![cfg(unix)]
 
 use rustyclaw::autocommit::{
-    is_git_repo, prune_old_refs, restore_to, snapshot_turn, AutoCommitConfig, SnapshotOutcome,
-    SHADOW_REF_PREFIX,
+    AutoCommitConfig, SHADOW_REF_PREFIX, SnapshotOutcome, is_git_repo, prune_old_refs, restore_to,
+    snapshot_turn,
 };
 use std::fs;
 use std::path::Path;
@@ -218,11 +218,7 @@ fn dogfood_shadow_refs_invisible_to_normal_git() {
     // ── A. `git log` on HEAD shows only the user's real commit ──
     let log = git(td.path(), &["log", "--oneline"]);
     let log_lines: Vec<&str> = log.lines().collect();
-    assert_eq!(
-        log_lines.len(),
-        1,
-        "git log leaked shadow commits: {log}"
-    );
+    assert_eq!(log_lines.len(), 1, "git log leaked shadow commits: {log}");
     assert!(log_lines[0].contains("base"));
 
     // ── B. `git log --all` DOES show shadow commits ──
@@ -344,7 +340,12 @@ fn dogfood_snapshot_preserves_user_index_and_worktree() {
     // untracked + modified + staged files) so undo would restore them.
     let shadow_tree = git(
         td.path(),
-        &["ls-tree", "-r", "--name-only", "refs/rustyclaw/sessions/messy"],
+        &[
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "refs/rustyclaw/sessions/messy",
+        ],
     );
     let files: std::collections::HashSet<&str> = shadow_tree.lines().collect();
     assert!(files.contains("README.md"));

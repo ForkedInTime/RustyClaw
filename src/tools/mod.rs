@@ -156,7 +156,7 @@ pub async fn snapshot_file(ctx: &ToolContext, path: &std::path::Path) {
         .trim_start_matches('_')
         .to_string();
 
-    if let Err(_) = tokio::fs::create_dir_all(snap_dir).await {
+    if tokio::fs::create_dir_all(snap_dir).await.is_err() {
         return;
     }
     let dest = snap_dir.join(&flat_name);

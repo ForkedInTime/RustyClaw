@@ -823,17 +823,17 @@ pub fn voice_status(enabled: bool, tts_enabled: bool) -> String {
         "✗ XTTS v2 not installed"
     };
 
-    // Voice clone status
+    // Voice clone status. Race-safe: if the sample file disappears between
+    // voice_clone_sample_path() returning Some and the tier detection, we
+    // treat it the same as "no clone" rather than panicking in a doctor path.
     let clone_path = voice_clone_sample_path();
-    let clone_exists = clone_path.as_ref().is_some_and(|p| p.exists());
-
-    let clone_status = if clone_exists {
-        let tier = detect_clone_tier(&clone_path.unwrap());
-        format!("✓ your voice ({tier} tier)")
-    } else if xtts_ok {
-        format!("default speaker ({XTTS_DEFAULT_SPEAKER})")
-    } else {
-        "— (requires XTTS v2)".to_string()
+    let clone_status = match clone_path.as_ref().filter(|p| p.exists()) {
+        Some(p) => {
+            let tier = detect_clone_tier(p);
+            format!("✓ your voice ({tier} tier)")
+        }
+        None if xtts_ok => format!("default speaker ({XTTS_DEFAULT_SPEAKER})"),
+        None => "— (requires XTTS v2)".to_string(),
     };
 
     let tts_ready = xtts_ok;
@@ -938,7 +938,7 @@ impl CloneTier {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.trim().to_lowercase().as_str() {
             "quick" | "1" | "10s" => Some(CloneTier::Quick),
             "recommended" | "2" | "60s" => Some(CloneTier::Recommended),

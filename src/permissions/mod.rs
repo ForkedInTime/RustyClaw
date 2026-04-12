@@ -46,8 +46,10 @@ impl PermissionState {
     /// `allow` pre-populates the always-allowed set (from settings.permissions.allow).
     /// `deny`  pre-populates the deny list      (from settings.permissions.deny).
     pub fn new(bypass: bool, allow: &[String], deny: &[String]) -> Self {
-        let mut inner = Inner::default();
-        inner.bypass = bypass;
+        let mut inner = Inner {
+            bypass,
+            ..Inner::default()
+        };
         for t in allow {
             inner.always_allowed.insert(t.clone());
         }

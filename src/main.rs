@@ -1150,10 +1150,10 @@ async fn handle_mcp_subcommand(subcommand: &Option<McpSubcommand>) -> Result<()>
                 let content = std::fs::read_to_string(&project_path)?;
                 let mut json: serde_json::Value =
                     serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
-                json.as_object_mut().map(|m| {
+                if let Some(m) = json.as_object_mut() {
                     m.remove("approvedMcpjsonServers");
                     m.remove("rejectedMcpjsonServers");
-                });
+                }
                 std::fs::write(&project_path, serde_json::to_string_pretty(&json)?)?;
                 println!("Reset project MCP choices in {}", project_path.display());
             } else {

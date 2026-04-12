@@ -565,7 +565,7 @@ fn format_lsp_result(operation: &str, result: &Value) -> String {
         _ => {
             // Locations array
             if let Some(arr) = result.as_array() {
-                let lines: Vec<String> = arr.iter().map(|loc| format_location(loc)).collect();
+                let lines: Vec<String> = arr.iter().map(format_location).collect();
                 if lines.is_empty() {
                     format!("{operation}: no results")
                 } else {

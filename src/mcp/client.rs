@@ -93,23 +93,20 @@ impl StdioTransport {
                 if trimmed.is_empty() {
                     continue;
                 }
-                match serde_json::from_str::<JsonRpcResponse>(trimmed) {
-                    Ok(resp) => {
-                        let id = match resp.id.as_ref().and_then(|v| v.as_u64()) {
-                            Some(id) => id,
-                            None => continue, // notification — ignore
-                        };
-                        let result = if let Some(err) = resp.error {
-                            Err(anyhow!("MCP error {}: {}", err.code, err.message))
-                        } else {
-                            Ok(resp.result.unwrap_or(Value::Null))
-                        };
-                        let mut pending = pending_clone.lock().await;
-                        if let Some(tx) = pending.remove(&id) {
-                            let _ = tx.send(result);
-                        }
+                // Ignore malformed / partial lines
+                if let Ok(resp) = serde_json::from_str::<JsonRpcResponse>(trimmed) {
+                    let Some(id) = resp.id.as_ref().and_then(|v| v.as_u64()) else {
+                        continue; // notification — ignore
+                    };
+                    let result = if let Some(err) = resp.error {
+                        Err(anyhow!("MCP error {}: {}", err.code, err.message))
+                    } else {
+                        Ok(resp.result.unwrap_or(Value::Null))
+                    };
+                    let mut pending = pending_clone.lock().await;
+                    if let Some(tx) = pending.remove(&id) {
+                        let _ = tx.send(result);
                     }
-                    Err(_) => {} // malformed / partial line — skip
                 }
             }
             // Process exited — drain any remaining pending requests with an error

@@ -1,13 +1,13 @@
-/// Deep link protocol handler — port of utils/deepLink/
-///
-/// Registers a custom URI scheme so external apps can open a rustyclaw session
-/// by navigating to: <protocol>://open?q=<prompt>&cwd=<dir>&repo=<name>
-///
-/// The protocol name is derived from the binary name at compile time
-/// (e.g., "rustyclaw" → protocol "rustyclaw-cli"), keeping it configurable
-/// without hardcoding "rustrustyclaw" or any other specific name.
-///
-/// Linux: creates a .desktop file and registers via xdg-mime.
+//! Deep link protocol handler — port of utils/deepLink/
+//!
+//! Registers a custom URI scheme so external apps can open a rustyclaw session
+//! by navigating to: `<protocol>://open?q=<prompt>&cwd=<dir>&repo=<name>`
+//!
+//! The protocol name is derived from the binary name at compile time
+//! (e.g., "rustyclaw" → protocol "rustyclaw-cli"), keeping it configurable
+//! without hardcoding "rustrustyclaw" or any other specific name.
+//!
+//! Linux: creates a .desktop file and registers via xdg-mime.
 
 /// The URL scheme suffix appended to the binary name.
 const SCHEME_SUFFIX: &str = "-cli";

@@ -105,7 +105,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             n.div_ceil(usable_w).max(1) as u16
         })
         .sum();
-    let input_height = visual_lines.min(8).max(1);
+    let input_height = visual_lines.clamp(1, 8);
 
     // Banner height — must match viewport_height() in run.rs exactly.
     // border top+bottom = 2; left col = logo + 4 header/model/cwd lines;
@@ -265,18 +265,18 @@ fn draw_banner_right(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
     };
 
     let max_w = content_area.width.saturating_sub(2) as usize;
-    let mut lines: Vec<Line<'static>> = Vec::new();
-
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        " Tips for getting started",
-        Style::default().fg(tc.accent).add_modifier(Modifier::BOLD),
-    )));
-    lines.push(Line::from(Span::styled(
-        " Run /init to create a CLAUDE.md file with instructions",
-        Style::default().fg(Color::White),
-    )));
-    lines.push(Line::raw(""));
+    let mut lines: Vec<Line<'static>> = vec![
+        Line::raw(""),
+        Line::from(Span::styled(
+            " Tips for getting started",
+            Style::default().fg(tc.accent).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            " Run /init to create a CLAUDE.md file with instructions",
+            Style::default().fg(Color::White),
+        )),
+        Line::raw(""),
+    ];
 
     let divider: String = std::iter::repeat_n('─', max_w).collect();
     lines.push(Line::from(Span::styled(
@@ -861,27 +861,22 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App, tc: ThemeColors) {
 /// Estimate context window size (tokens) for a model name.
 fn context_window_for_model(model: &str) -> u64 {
     let m = model.to_lowercase();
-    if m.contains("opus") {
+    // Claude 4.x + 3.5 / 3.7 all ship 200k context windows today. If Anthropic
+    // changes this we want the table — not one branch per model — to update.
+    if ["opus", "sonnet", "haiku"].iter().any(|k| m.contains(k)) {
         200_000
-    } else if m.contains("sonnet") {
-        200_000
-    } else if m.contains("haiku") {
-        200_000
-    } else if m.contains("gpt-4o") {
-        128_000
-    } else if m.contains("gpt-4") {
+    } else if ["gpt-4o", "gpt-4", "llama"].iter().any(|k| m.contains(k)) {
         128_000
     } else if m.contains("deepseek") {
         64_000
-    } else if m.contains("llama") {
-        128_000
     } else if m.contains("mistral") {
         32_000
     } else if m.contains("gemma") {
         8_192
     } else {
+        // Conservative default for unknown models — assumes modern Claude-class.
         200_000
-    } // conservative default for Claude models
+    }
 }
 
 // ── Permission dialog ─────────────────────────────────────────────────────────

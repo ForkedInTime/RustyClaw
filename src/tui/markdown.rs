@@ -876,9 +876,9 @@ fn render_table(rows: &[&str], base: Style, lines: &mut Vec<Line<'static>>) {
     {
         let header = &parsed[0];
         let mut spans: Vec<Span<'static>> = vec![Span::styled("  ", base)];
-        for j in 0..ncols {
+        for (j, width) in col_widths.iter().enumerate().take(ncols) {
             let cell = header.get(j).map(|s| s.as_str()).unwrap_or("");
-            let padded = format!(" {:<width$} ", cell, width = col_widths[j]);
+            let padded = format!(" {:<width$} ", cell, width = *width);
             spans.push(Span::styled(padded, CYAN.add_modifier(Modifier::BOLD)));
             if j + 1 < ncols {
                 spans.push(Span::styled("│", GRAY));
@@ -890,8 +890,8 @@ fn render_table(rows: &[&str], base: Style, lines: &mut Vec<Line<'static>>) {
     // Separator
     if has_separator {
         let mut sep = String::from("  ");
-        for j in 0..ncols {
-            sep.push_str(&"─".repeat(col_widths[j] + 2));
+        for (j, width) in col_widths.iter().enumerate().take(ncols) {
+            sep.push_str(&"─".repeat(width + 2));
             if j + 1 < ncols {
                 sep.push('┼');
             }
@@ -902,9 +902,9 @@ fn render_table(rows: &[&str], base: Style, lines: &mut Vec<Line<'static>>) {
     // Data rows
     for row in &parsed[data_start..] {
         let mut spans: Vec<Span<'static>> = vec![Span::styled("  ", base)];
-        for j in 0..ncols {
+        for (j, width) in col_widths.iter().enumerate().take(ncols) {
             let cell = row.get(j).map(|s| s.as_str()).unwrap_or("");
-            let padded = format!(" {:<width$} ", cell, width = col_widths[j]);
+            let padded = format!(" {:<width$} ", cell, width = *width);
             let mut cell_spans = inline_spans(&padded, base);
             spans.append(&mut cell_spans);
             if j + 1 < ncols {

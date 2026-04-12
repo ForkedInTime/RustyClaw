@@ -256,12 +256,12 @@ fn short_model_name(model: &str) -> String {
         "Haiku".into()
     } else if model.contains("sonnet") {
         "Sonnet".into()
-    } else if model.starts_with("ollama:") {
-        format!("Ollama ({})", &model[7..])
+    } else if let Some(rest) = model.strip_prefix("ollama:") {
+        format!("Ollama ({rest})")
     } else if let Some(rest) = model.strip_prefix("groq:") {
-        format!("Groq ({})", rest)
+        format!("Groq ({rest})")
     } else if let Some(rest) = model.strip_prefix("deepseek:") {
-        format!("DeepSeek ({})", rest)
+        format!("DeepSeek ({rest})")
     } else {
         model.to_string()
     }
