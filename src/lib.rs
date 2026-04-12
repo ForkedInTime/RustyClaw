@@ -7,6 +7,7 @@
 pub mod api;
 pub mod autocommit;
 pub mod autofix;
+pub mod browser;
 pub mod commands;
 pub mod compact;
 pub mod config;
