@@ -66,7 +66,7 @@ pub fn compact_needed(input_tokens: u64) -> CompactNeeded {
 /// This mirrors the snipCompactIfNeeded strategy: tool call *structure* is
 /// preserved (Claude can see what tools were invoked) but the large payloads
 /// that fill the context window are cleared.
-pub fn snip_compact(messages: &mut Vec<Message>) {
+pub fn snip_compact(messages: &mut [Message]) {
     let len = messages.len();
     if len <= SNIP_KEEP_RECENT {
         return;

@@ -10,7 +10,7 @@
 ///   The prompt template. {{ARGS}} is replaced with the user's arguments.
 use anyhow::Result;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 use tokio::fs;
 
 #[derive(Debug, Clone)]
@@ -55,12 +55,12 @@ pub async fn load_skills() -> HashMap<String, Skill> {
 }
 
 /// Parse a skill from a markdown file.
-async fn load_skill_file(path: &PathBuf) -> Result<Skill> {
+async fn load_skill_file(path: &Path) -> Result<Skill> {
     let content = fs::read_to_string(path).await?;
     parse_skill_content(&content, path)
 }
 
-fn parse_skill_content(content: &str, path: &PathBuf) -> Result<Skill> {
+fn parse_skill_content(content: &str, path: &Path) -> Result<Skill> {
     // Name is the filename without extension
     let name = path
         .file_stem()

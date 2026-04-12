@@ -75,8 +75,7 @@ fn viewport_height(app: &App, term_cols: u16, term_rows: u16) -> u16 {
             (n.saturating_add(usable_w).saturating_sub(1) / usable_w.max(1)).max(1) as u16
         })
         .sum::<u16>()
-        .min(8)
-        .max(1);
+        .clamp(1, 8);
 
     if show_banner {
         // Must mirror the banner_h formula in render::draw() exactly.
@@ -1064,14 +1063,24 @@ async fn run_loop(mut config: Config, resume_id: Option<String>) -> Result<()> {
             Some(Ok(term_ev)) = term_events.next() => {
                 match term_ev {
                     Event::Key(key) => {
-                        handle_key(
-                            key, &mut app, &mut messages,
-                            &mut client, &tools, &mut config,
-                            &perm_state, &skills, &mut system_prompt, &tx,
-                            &todo_state, &mut session, &mut saved_count,
-                            &mcp_statuses, &mut turn_counter,
-                            &spawn_registry,
-                        ).await?;
+                        handle_key(KeyCtx {
+                            key,
+                            app: &mut app,
+                            messages: &mut messages,
+                            client: &mut client,
+                            tools: &tools,
+                            config: &mut config,
+                            perm_state: &perm_state,
+                            skills: &skills,
+                            system_prompt: &mut system_prompt,
+                            tx: &tx,
+                            todo_state: &todo_state,
+                            session: &mut session,
+                            saved_count: &mut saved_count,
+                            mcp_statuses: &mcp_statuses,
+                            turn_counter: &mut turn_counter,
+                            spawn_registry: &spawn_registry,
+                        }).await?;
                     }
                     Event::Mouse(mouse) => {
                         match mouse.kind {
@@ -1252,24 +1261,48 @@ async fn run_loop(mut config: Config, resume_id: Option<String>) -> Result<()> {
 
 // ── Key handler ───────────────────────────────────────────────────────────────
 
-async fn handle_key(
+/// Bundle of references `handle_key` needs to mutate app/session state and react
+/// to the current key event. Exists purely to keep the argument count below the
+/// clippy::too_many_arguments threshold; the body destructures it on entry and
+/// uses the fields directly.
+struct KeyCtx<'a> {
     key: crossterm::event::KeyEvent,
-    app: &mut App,
-    messages: &mut Vec<Message>,
-    client: &mut ApiBackend,
-    tools: &[DynTool],
-    config: &mut Config,
-    perm_state: &PermissionState,
-    skills: &std::collections::HashMap<String, crate::skills::Skill>,
-    system_prompt: &mut String,
-    tx: &mpsc::UnboundedSender<AppEvent>,
-    todo_state: &TodoState,
-    session: &mut Session,
-    saved_count: &mut usize,
-    mcp_statuses: &[crate::mcp::types::McpServerStatus],
-    turn_counter: &mut usize,
-    spawn_registry: &crate::spawn::SpawnRegistry,
-) -> Result<()> {
+    app: &'a mut App,
+    messages: &'a mut Vec<Message>,
+    client: &'a mut ApiBackend,
+    tools: &'a [DynTool],
+    config: &'a mut Config,
+    perm_state: &'a PermissionState,
+    skills: &'a std::collections::HashMap<String, crate::skills::Skill>,
+    system_prompt: &'a mut String,
+    tx: &'a mpsc::UnboundedSender<AppEvent>,
+    todo_state: &'a TodoState,
+    session: &'a mut Session,
+    saved_count: &'a mut usize,
+    mcp_statuses: &'a [crate::mcp::types::McpServerStatus],
+    turn_counter: &'a mut usize,
+    spawn_registry: &'a crate::spawn::SpawnRegistry,
+}
+
+async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
+    let KeyCtx {
+        key,
+        app,
+        messages,
+        client,
+        tools,
+        config,
+        perm_state,
+        skills,
+        system_prompt,
+        tx,
+        todo_state,
+        session,
+        saved_count,
+        mcp_statuses,
+        turn_counter,
+        spawn_registry,
+    } = ctx;
     use KeyCode::*;
 
     // Overlay dismissal takes second priority (after permission dialog)
@@ -1929,7 +1962,18 @@ async fn handle_key(
                         let pm = app.plan_mode;
                         let sid3 = session.id.clone();
                         let handle = tokio::spawn(async move {
-                            run_api_task(c2, tvec, snapshot, cfg, ps, sp, tx2, pm, sid3).await;
+                            run_api_task(ApiTask {
+                                client: c2,
+                                tools: tvec,
+                                messages: snapshot,
+                                config: cfg,
+                                perm_state: ps,
+                                system_prompt: sp,
+                                tx: tx2,
+                                plan_mode: pm,
+                                session_id: sid3,
+                            })
+                            .await;
                         });
                         app.api_task = Some(handle.abort_handle());
                     }
@@ -2955,7 +2999,18 @@ async fn handle_key(
                             let pm = app.plan_mode;
                             let sid3 = session.id.clone();
                             let handle = tokio::spawn(async move {
-                                run_api_task(c2, tvec, snapshot, cfg, ps, sp, tx2, pm, sid3).await;
+                                run_api_task(ApiTask {
+                                    client: c2,
+                                    tools: tvec,
+                                    messages: snapshot,
+                                    config: cfg,
+                                    perm_state: ps,
+                                    system_prompt: sp,
+                                    tx: tx2,
+                                    plan_mode: pm,
+                                    session_id: sid3,
+                                })
+                                .await;
                             });
                             app.api_task = Some(handle.abort_handle());
                         } else {
@@ -3493,7 +3548,7 @@ async fn handle_key(
                                 crate::voice::CloneTier::Premium.description(),
                             );
                             app.entries.push(ChatEntry::system(text));
-                        } else if let Some(tier) = crate::voice::CloneTier::from_str(&tier_arg) {
+                        } else if let Some(tier) = crate::voice::CloneTier::parse(&tier_arg) {
                             // Show recording instructions for the chosen tier
                             let instructions = crate::voice::recording_instructions(tier);
                             app.entries.push(ChatEntry::system(instructions));
@@ -3507,7 +3562,7 @@ async fn handle_key(
                         }
                     }
                     CommandAction::VoiceCloneSave(tier_arg) => {
-                        let tier = crate::voice::CloneTier::from_str(&tier_arg)
+                        let tier = crate::voice::CloneTier::parse(&tier_arg)
                             .or(app.pending_clone_tier)
                             .unwrap_or(crate::voice::CloneTier::Recommended);
                         let tx2 = tx.clone();
@@ -3840,7 +3895,18 @@ async fn handle_key(
                             let pm = app.plan_mode;
                             let sid4 = session.id.clone();
                             let handle = tokio::spawn(async move {
-                                run_api_task(c2, tvec, snapshot, cfg, ps, sp, tx2, pm, sid4).await;
+                                run_api_task(ApiTask {
+                                    client: c2,
+                                    tools: tvec,
+                                    messages: snapshot,
+                                    config: cfg,
+                                    perm_state: ps,
+                                    system_prompt: sp,
+                                    tx: tx2,
+                                    plan_mode: pm,
+                                    session_id: sid4,
+                                })
+                                .await;
                             });
                             app.api_task = Some(handle.abort_handle());
                             return Ok(());
@@ -3990,7 +4056,18 @@ async fn handle_key(
 
             let sid2 = session.id.clone();
             let handle = tokio::spawn(async move {
-                run_api_task(c2, tvec, msgs, cfg, ps, sp, tx2, pm, sid2).await;
+                run_api_task(ApiTask {
+                    client: c2,
+                    tools: tvec,
+                    messages: msgs,
+                    config: cfg,
+                    perm_state: ps,
+                    system_prompt: sp,
+                    tx: tx2,
+                    plan_mode: pm,
+                    session_id: sid2,
+                })
+                .await;
             });
             app.api_task = Some(handle.abort_handle());
         }
@@ -4203,11 +4280,9 @@ fn handle_vim_normal(key: crossterm::event::KeyEvent, app: &mut App) {
 
     // Handle pending two-char commands (e.g. "dd")
     if let Some(pending) = app.vim_pending.take() {
-        match (pending, key.code) {
-            ('d', Char('d')) => {
-                app.clear_line();
-            }
-            _ => {} // Unknown combination — silently drop
+        // Unknown combinations are silently dropped.
+        if let ('d', Char('d')) = (pending, key.code) {
+            app.clear_line();
         }
         return;
     }
@@ -4380,17 +4455,33 @@ const MAX_TOOL_ITERATIONS: u32 = 50;
 /// Destructive tools blocked when plan mode is active.
 const PLAN_MODE_BLOCKED_TOOLS: &[&str] = &["Bash", "Write", "Edit", "MultiEdit", "EnterWorktree"];
 
-async fn run_api_task(
+/// Owned bundle handed to `run_api_task` when a user turn kicks off a new
+/// conversation-streaming task. Exists to stay under the clippy argument cap;
+/// the function destructures it immediately.
+struct ApiTask {
     client: ApiBackend,
     tools: Vec<DynTool>,
-    mut messages: Vec<Message>,
+    messages: Vec<Message>,
     config: Config,
     perm_state: PermissionState,
     system_prompt: String,
     tx: mpsc::UnboundedSender<AppEvent>,
     plan_mode: bool,
     session_id: String,
-) {
+}
+
+async fn run_api_task(task: ApiTask) {
+    let ApiTask {
+        client,
+        tools,
+        mut messages,
+        config,
+        perm_state,
+        system_prompt,
+        tx,
+        plan_mode,
+        session_id,
+    } = task;
     let session_id = session_id.as_str();
     // Set up AskUserQuestion channel: tool → TUI dialog
     let (ask_tx, mut ask_rx) =

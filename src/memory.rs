@@ -37,7 +37,7 @@ impl Category {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "decision" => Category::Decision,
             "preference" => Category::Preference,
@@ -361,7 +361,7 @@ fn row_to_memory(row: &rusqlite::Row<'_>) -> rusqlite::Result<Memory> {
         id: row.get(0)?,
         key: row.get(1)?,
         value: row.get(2)?,
-        category: Category::from_str(&cat_str),
+        category: Category::parse(&cat_str),
         source: row.get(4)?,
         created_at: row.get(5)?,
         updated_at: row.get(6)?,

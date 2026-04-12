@@ -58,7 +58,10 @@ impl Tool for FileEditTool {
 
     async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let input: FileEditInput = serde_json::from_value(input)?;
-        let path = resolve_path(&input.file_path, &ctx.cwd);
+        let path = match resolve_path(&input.file_path, &ctx.cwd) {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolOutput::error(e.to_string())),
+        };
 
         if let Some(err) = super::check_protected_path(&path) {
             return Ok(err);

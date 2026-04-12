@@ -34,15 +34,17 @@ enum CellSource {
     Text(String),
 }
 
-impl CellSource {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for CellSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CellSource::Lines(v) => v.join(""),
-            CellSource::Text(s) => s.clone(),
+            CellSource::Lines(v) => f.write_str(&v.join("")),
+            CellSource::Text(s) => f.write_str(s),
         }
     }
+}
 
-    fn from_str(s: &str) -> Self {
+impl CellSource {
+    fn from_text(s: &str) -> Self {
         // Store as lines array (each line ends with \n except the last)
         let lines: Vec<String> = if s.is_empty() {
             vec![]
@@ -206,7 +208,7 @@ impl Tool for NotebookEditTool {
                     .find(|c| c.id.as_deref() == Some(cell_id))
                     .ok_or_else(|| anyhow!("Cell not found: {cell_id}"))?;
 
-                cell.source = CellSource::from_str(new_source);
+                cell.source = CellSource::from_text(new_source);
             }
             "insert_before" | "insert_after" => {
                 let cell_id = input
@@ -228,7 +230,7 @@ impl Tool for NotebookEditTool {
                 let new_cell = Cell {
                     id: Some(uuid::Uuid::new_v4().to_string().chars().take(8).collect()),
                     cell_type,
-                    source: CellSource::from_str(new_source),
+                    source: CellSource::from_text(new_source),
                     extra: Default::default(),
                 };
 

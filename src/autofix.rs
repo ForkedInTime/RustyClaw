@@ -56,8 +56,6 @@ pub enum CommandResult {
     Fail {
         stderr: String,
     },
-    /// No command detected and none configured.
-    NoTestRunner,
     /// Skipped due to trigger rules, git errors, etc.
     Skipped {
         reason: String,
@@ -293,10 +291,6 @@ pub fn run_checks(
             CommandResult::Skipped { reason } => {
                 return CheckOutcome::Skipped { reason };
             }
-            CommandResult::NoTestRunner => {
-                // Shouldn't happen for a concrete command string, but
-                // handle defensively.
-            }
         }
     }
 
@@ -324,9 +318,6 @@ pub fn run_checks(
             }
             CommandResult::Skipped { reason } => {
                 return CheckOutcome::Skipped { reason };
-            }
-            CommandResult::NoTestRunner => {
-                // Defensive; same as above.
             }
         }
     }

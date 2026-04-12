@@ -252,16 +252,14 @@ fn extract_chunks(
     let root = tree.root_node();
 
     // Walk top-level children (and one level deeper for module bodies)
-    collect_symbols(
-        &root,
-        source_bytes,
+    let ctx = CollectCtx {
+        source: source_bytes,
         file_path,
         lang_name,
         symbol_nodes,
-        source,
-        &mut chunks,
-        0,
-    );
+        full_source: source,
+    };
+    collect_symbols(&root, &ctx, &mut chunks, 0);
 
     // If we got zero symbols (e.g. a config file or unusual structure),
     // fall back to indexing the entire file as one chunk.
@@ -288,14 +286,19 @@ fn extract_chunks(
     chunks
 }
 
+/// Invariant context passed down each recursive call in `collect_symbols`.
+struct CollectCtx<'a> {
+    source: &'a [u8],
+    file_path: &'a str,
+    lang_name: &'a str,
+    symbol_nodes: &'a [&'a str],
+    full_source: &'a str,
+}
+
 /// Recursively collect symbol nodes from the AST.
 fn collect_symbols(
     node: &tree_sitter::Node,
-    source: &[u8],
-    file_path: &str,
-    lang_name: &str,
-    symbol_nodes: &[&str],
-    full_source: &str,
+    ctx: &CollectCtx<'_>,
     chunks: &mut Vec<CodeChunk>,
     depth: usize,
 ) {
@@ -308,14 +311,14 @@ fn collect_symbols(
     for child in node.children(&mut cursor) {
         let kind = child.kind();
 
-        if symbol_nodes.contains(&kind) {
+        if ctx.symbol_nodes.contains(&kind) {
             let start_line = (child.start_position().row + 1) as i64; // 1-indexed
             let end_line = (child.end_position().row + 1) as i64;
 
             // Extract the source text for this node
             let start_byte = child.start_byte();
             let end_byte = child.end_byte();
-            let content = &full_source[start_byte..end_byte.min(full_source.len())];
+            let content = &ctx.full_source[start_byte..end_byte.min(ctx.full_source.len())];
 
             // Cap chunk size at 200 lines — huge functions get truncated
             let content = if end_line - start_line > 200 {
@@ -329,30 +332,21 @@ fn collect_symbols(
                 content.to_string()
             };
 
-            let symbol_name = extract_symbol_name(&child, source);
+            let symbol_name = extract_symbol_name(&child, ctx.source);
             let symbol_kind = node_kind_to_symbol_kind(kind).to_string();
 
             chunks.push(CodeChunk {
-                file_path: file_path.to_string(),
+                file_path: ctx.file_path.to_string(),
                 symbol_name,
                 symbol_kind,
-                language: lang_name.to_string(),
+                language: ctx.lang_name.to_string(),
                 start_line,
                 end_line,
                 content,
             });
         } else {
             // Recurse into non-symbol nodes (e.g. module bodies, program root)
-            collect_symbols(
-                &child,
-                source,
-                file_path,
-                lang_name,
-                symbol_nodes,
-                full_source,
-                chunks,
-                depth + 1,
-            );
+            collect_symbols(&child, ctx, chunks, depth + 1);
         }
     }
 }

@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
 use std::hash::{Hash, Hasher};
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use tokio::fs;
 
 const MAX_LINES_DEFAULT: usize = 2000;
@@ -56,7 +56,10 @@ impl Tool for FileReadTool {
 
     async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let input: FileReadInput = serde_json::from_value(input)?;
-        let path = resolve_path(&input.file_path, &ctx.cwd);
+        let path = match resolve_path(&input.file_path, &ctx.cwd) {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolOutput::error(e.to_string())),
+        };
 
         if let Some(err) = super::check_sensitive_path(&path, super::SensitiveOp::Read) {
             return Ok(err);
@@ -129,11 +132,54 @@ impl Tool for FileReadTool {
     }
 }
 
-pub fn resolve_path(file_path: &str, cwd: &Path) -> std::path::PathBuf {
-    let p = std::path::Path::new(file_path);
-    if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        cwd.join(p)
+/// Lexically clean a path by resolving `.` and `..` components WITHOUT
+/// touching the filesystem (so this works for files that don't exist yet,
+/// unlike `Path::canonicalize`). Leading `..`s are preserved — they're what
+/// `resolve_path_safe` uses to detect attempted escapes.
+fn clean_path(p: &Path) -> PathBuf {
+    let mut out: Vec<Component<'_>> = Vec::new();
+    for c in p.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                // Only collapse a `..` when the last component is a concrete
+                // directory name. Refuse to pop past RootDir/Prefix, and keep
+                // a leading `..` so the escape check can notice it.
+                match out.last() {
+                    Some(Component::Normal(_)) => {
+                        out.pop();
+                    }
+                    _ => out.push(c),
+                }
+            }
+            other => out.push(other),
+        }
     }
+    out.iter().collect()
+}
+
+/// Resolve a user-supplied path for a tool. Relative paths are joined to
+/// `cwd` and lexically cleaned; if the cleaned result escapes `cwd` (e.g.
+/// `../../etc/passwd`), this returns an error instead of a path the caller
+/// would happily read.
+///
+/// Absolute paths are passed through untouched — tools that run on absolute
+/// paths (e.g. reading `/tmp/foo`) are a legitimate workflow and are still
+/// subject to [`super::check_sensitive_path`]. The containment check here
+/// is a defense-in-depth layer specifically targeting relative-path escapes.
+pub fn resolve_path(file_path: &str, cwd: &Path) -> Result<PathBuf> {
+    let input = Path::new(file_path);
+    if input.is_absolute() {
+        return Ok(input.to_path_buf());
+    }
+    let joined = cwd.join(input);
+    let cleaned = clean_path(&joined);
+    let cwd_cleaned = clean_path(cwd);
+    if !cleaned.starts_with(&cwd_cleaned) {
+        anyhow::bail!(
+            "path '{file_path}' escapes working directory '{}'",
+            cwd_cleaned.display()
+        );
+    }
+    Ok(cleaned)
 }

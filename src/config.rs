@@ -22,10 +22,10 @@ impl OutputStyleDef {
         let stem = path.file_stem()?.to_string_lossy().to_string();
 
         // Simple YAML frontmatter parser (--- ... ---)
-        let (frontmatter, body) = if content.starts_with("---") {
-            let end = content[3..].find("\n---").map(|i| i + 3 + 4).unwrap_or(0);
+        let (frontmatter, body) = if let Some(after_marker) = content.strip_prefix("---") {
+            let end = after_marker.find("\n---").map(|i| i + 3 + 4).unwrap_or(0);
             if end > 3 {
-                let fm = &content[3..end - 4];
+                let fm = &after_marker[..end - 4 - 3];
                 let body = &content[end..];
                 (fm.to_string(), body.trim().to_string())
             } else {
@@ -627,19 +627,26 @@ impl Config {
         // ── API key from environment (not required for Ollama models)
         cfg.api_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
 
-        // ── ANTHROPIC_API_KEY_FILE_DESCRIPTOR: read API key from an open fd
-        if cfg.api_key.is_empty()
-            && let Ok(fd_str) = std::env::var("RUSTYCLAW_API_KEY_FILE_DESCRIPTOR")
-            && let Ok(fd) = fd_str.parse::<i32>()
+        // ── RUSTYCLAW_API_KEY_FILE_DESCRIPTOR: read API key from an open fd.
+        //    Unix-only — Windows uses HANDLEs, not POSIX fds, and the
+        //    cross-platform equivalent (handle-based reads) is not worth
+        //    the additional complexity for a feature that is principally
+        //    used by POSIX-style keychain helpers anyway.
+        #[cfg(unix)]
         {
-            use std::io::Read;
-            use std::os::unix::io::FromRawFd;
-            let mut f = unsafe { std::fs::File::from_raw_fd(fd) };
-            let mut buf = String::new();
-            if f.read_to_string(&mut buf).is_ok() {
-                cfg.api_key = buf.trim().to_string();
+            if cfg.api_key.is_empty()
+                && let Ok(fd_str) = std::env::var("RUSTYCLAW_API_KEY_FILE_DESCRIPTOR")
+                && let Ok(fd) = fd_str.parse::<i32>()
+            {
+                use std::io::Read;
+                use std::os::unix::io::FromRawFd;
+                let mut f = unsafe { std::fs::File::from_raw_fd(fd) };
+                let mut buf = String::new();
+                if f.read_to_string(&mut buf).is_ok() {
+                    cfg.api_key = buf.trim().to_string();
+                }
+                std::mem::forget(f); // don't close the fd
             }
-            std::mem::forget(f); // don't close the fd
         }
 
         // ── apiKeyHelper: run a shell command to get the API key

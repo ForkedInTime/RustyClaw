@@ -279,8 +279,9 @@ async fn run_spawned_agent(
                 Ok(output) => {
                     // Extract text from ToolOutput content
                     let text = output.content.iter()
-                        .filter_map(|c| match c {
-                            crate::api::types::ToolResultContent::Text { text } => Some(text.as_str()),
+                        .map(|c| {
+                            let crate::api::types::ToolResultContent::Text { text } = c;
+                            text.as_str()
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
@@ -557,7 +558,16 @@ fn find_agent_mut<'a>(
 
     match matching_ids.len() {
         0 => anyhow::bail!("No agent found matching '{id}'. Use /agents to list."),
-        1 => Ok(reg.get_mut(&matching_ids[0]).unwrap()),
+        1 => {
+            // The key came from reg.keys() a moment ago and the registry is
+            // held under the caller's lock, so a get_mut miss is unreachable
+            // in practice — but surface it as an error instead of panicking
+            // to avoid crashing /agents on a concurrent-modification bug.
+            let only = &matching_ids[0];
+            reg.get_mut(only).ok_or_else(|| {
+                anyhow::anyhow!("agent '{only}' vanished from registry between lookup and get")
+            })
+        }
         _ => anyhow::bail!(
             "Ambiguous id '{id}' — matches {} agents. Be more specific.",
             matching_ids.len()

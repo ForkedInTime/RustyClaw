@@ -154,21 +154,21 @@ impl ClaudeClient {
                     }
                 },
                 StreamEvent::ContentBlockDelta { index, delta } => match delta {
-                    ContentDelta::TextDelta { text } => {
+                    ContentDelta::Text { text } => {
                         on_text(&text);
                         text_blocks.entry(index).or_default().push_str(&text);
                     }
-                    ContentDelta::InputJsonDelta { partial_json } => {
+                    ContentDelta::InputJson { partial_json } => {
                         if let Some((_, _, json)) = tool_blocks.get_mut(&index) {
                             json.push_str(&partial_json);
                         }
                     }
-                    ContentDelta::ThinkingDelta { thinking } => {
+                    ContentDelta::Thinking { thinking } => {
                         if let Some((t, _)) = thinking_blocks.get_mut(&index) {
                             t.push_str(&thinking);
                         }
                     }
-                    ContentDelta::SignatureDelta { signature } => {
+                    ContentDelta::Signature { signature } => {
                         if let Some((_, s)) = thinking_blocks.get_mut(&index) {
                             s.push_str(&signature);
                         }

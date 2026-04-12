@@ -368,14 +368,51 @@ impl Settings {
     }
 
     /// Try to read and parse a settings file; silently return defaults on any error.
+    ///
+    /// Security hardening: `apiKeyHelper` is stripped from the parsed settings
+    /// if the source file is world- or group-writable, since the helper is
+    /// executed via `sh -c` and a writable settings file is an obvious
+    /// shell-injection vector on shared hosts. The warning is emitted via
+    /// `tracing::warn` so it shows up in the log file without corrupting TUI.
     fn from_file(path: &Path) -> Self {
         if !path.exists() {
             return Self::default();
         }
-        match std::fs::read_to_string(path) {
-            Err(_) => Self::default(),
+        let parsed: Self = match std::fs::read_to_string(path) {
+            Err(_) => return Self::default(),
             Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+        };
+        Self::sanitize_unsafe_helper(parsed, path)
+    }
+
+    /// If `parsed.api_key_helper` is Some and the source file has unsafe
+    /// permissions (world- or group-writable on unix), strip the helper and
+    /// warn. Windows has no POSIX permission bits so this is a no-op there;
+    /// the threat model (multi-user shared settings) is primarily a unix
+    /// concern anyway.
+    fn sanitize_unsafe_helper(mut parsed: Self, path: &Path) -> Self {
+        if parsed.api_key_helper.is_none() {
+            return parsed;
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if let Ok(md) = std::fs::metadata(path) {
+                let mode = md.mode() & 0o777;
+                if mode & 0o022 != 0 {
+                    tracing::warn!(
+                        "ignoring apiKeyHelper from {}: file is world/group-writable (mode {:o}); \
+                         refusing to execute it as a shell command. Run `chmod 600 {}` to enable.",
+                        path.display(),
+                        mode,
+                        path.display()
+                    );
+                    parsed.api_key_helper = None;
+                }
+            }
+        }
+        let _ = path; // silence unused on non-unix
+        parsed
     }
 
     /// Merge `other` on top of `self` — `other` wins for any Some field.

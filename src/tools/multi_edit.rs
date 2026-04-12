@@ -92,7 +92,15 @@ impl Tool for MultiEditTool {
         let mut had_error = false;
 
         for (i, edit) in input.edits.iter().enumerate() {
-            let path = resolve_path(&edit.file_path, &ctx.cwd);
+            let path = match resolve_path(&edit.file_path, &ctx.cwd) {
+                Ok(p) => p,
+                Err(e) => {
+                    let label = format!("[{}/{}] {}", i + 1, input.edits.len(), edit.file_path);
+                    results.push(format!("{label} ✗ {e}"));
+                    had_error = true;
+                    continue;
+                }
+            };
             let label = format!("[{}/{}] {}", i + 1, input.edits.len(), path.display());
 
             if let Some(err) = super::check_protected_path(&path) {
