@@ -841,6 +841,11 @@ impl App {
         self.history_idx = None;
         if !s.trim().is_empty() {
             self.input_history.push(s.clone());
+            // Cap history to prevent unbounded growth in long sessions
+            if self.input_history.len() > 500 {
+                self.input_history.drain(..self.input_history.len() - 500);
+                self.input_history.shrink_to_fit();
+            }
         }
         s
     }
@@ -1215,13 +1220,24 @@ impl App {
                 let preview = format_tool_preview(&name, &args);
                 self.entries
                     .push(ChatEntry::tool_call(format!("{name}  {preview}")));
-                self.tool_stream_buf.clear();
+                self.tool_stream_buf = String::new(); // drop old capacity
                 self.scroll_to_bottom();
             }
             AppEvent::ToolOutputStream(line) => {
-                // Accumulate live output lines and show as a live status entry
+                // Accumulate live output lines (capped at 4KB — we only display the last 500 chars)
                 self.tool_stream_buf.push_str(&line);
                 self.tool_stream_buf.push('\n');
+                if self.tool_stream_buf.len() > 4096 {
+                    let start = self.tool_stream_buf.len() - 2048;
+                    // Find a safe char boundary
+                    let mut start = start;
+                    while start < self.tool_stream_buf.len()
+                        && !self.tool_stream_buf.is_char_boundary(start)
+                    {
+                        start += 1;
+                    }
+                    self.tool_stream_buf = self.tool_stream_buf[start..].to_string();
+                }
                 // Update or create the live output entry (last entry if it's a tool_stream kind)
                 let display = if self.tool_stream_buf.len() > 500 {
                     format!(
@@ -1338,8 +1354,9 @@ impl App {
     }
 
     pub fn clear(&mut self) {
-        self.entries.clear();
-        self.streaming.clear();
+        self.entries = Vec::new();
+        self.streaming = String::new();
+        self.tool_stream_buf = String::new();
         self.tokens_in = 0;
         self.tokens_out = 0;
         self.cache_read_tokens = 0;
@@ -1347,7 +1364,7 @@ impl App {
         self.scroll = 0;
         self.follow_bottom = true;
         self.show_welcome = true;
-        self.turn_costs.clear();
+        self.turn_costs = Vec::new();
     }
 }
 

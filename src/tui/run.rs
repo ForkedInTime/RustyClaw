@@ -761,12 +761,10 @@ async fn run_loop(mut config: Config, resume_id: Option<String>) -> Result<()> {
             match Session::resume(&id).await {
                 Ok((new_session, loaded_messages)) => {
                     let display = entries_from_messages(&loaded_messages);
-                    messages.clear();
-                    messages.extend(loaded_messages.iter().cloned());
                     saved_count = loaded_messages.len();
-                    app.entries.clear();
-                    app.entries.extend(display);
-                    app.streaming.clear();
+                    messages = loaded_messages;
+                    app.entries = display;
+                    app.streaming = String::new();
                     app.show_welcome = false;
                     app.scroll_to_bottom();
                     let resume_name = new_session.meta.name.clone();
@@ -1781,6 +1779,7 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                     }
                     CommandAction::Clear => {
                         messages.clear();
+                        messages.shrink_to_fit();
                         app.clear();
                         app.pending_screen_clear = true;
                         // Refresh recent sessions so the welcome banner is up-to-date
@@ -1986,6 +1985,7 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                         } else {
                             let remove = pairs_to_remove.min(len);
                             messages.truncate(len - remove);
+                            messages.shrink_to_fit();
                             // Also trim display entries — remove last n*2 non-system entries
                             let mut removed = 0;
                             while removed < pairs_to_remove {
@@ -2106,12 +2106,10 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                             match Session::resume(&id).await {
                                 Ok((new_session, loaded_messages)) => {
                                     let display = entries_from_messages(&loaded_messages);
-                                    messages.clear();
-                                    messages.extend(loaded_messages.iter().cloned());
                                     *saved_count = loaded_messages.len();
-                                    app.entries.clear();
-                                    app.entries.extend(display);
-                                    app.streaming.clear();
+                                    *messages = loaded_messages;
+                                    app.entries = display;
+                                    app.streaming = String::new();
                                     app.show_welcome = false;
                                     app.scroll_to_bottom();
                                     let resume_name = new_session.meta.name.clone();
@@ -2581,11 +2579,9 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                                 Some((msgs, src_model)) => {
                                     let count = msgs.len();
                                     let display = entries_from_messages(&msgs);
-                                    messages.clear();
-                                    messages.extend(msgs);
+                                    *messages = msgs;
                                     *saved_count = 0;
-                                    app.entries.clear();
-                                    app.entries.extend(display);
+                                    app.entries = display;
                                     app.show_welcome = false;
                                     app.scroll_to_bottom();
                                     app.overlay = Some(Overlay::new(
