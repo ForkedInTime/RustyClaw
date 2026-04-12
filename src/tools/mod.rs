@@ -3,6 +3,7 @@ pub mod agent;
 pub mod ask_user;
 pub mod bash;
 pub mod brief_tool;
+pub mod browser_tools;
 pub mod config_tool;
 pub mod cron;
 pub mod discover_skills;
@@ -442,6 +443,40 @@ pub fn all_tools_with_state(config: &crate::config::Config) -> (Vec<DynTool>, Sh
     tools.push(Arc::new(sleep::SleepTool));
     tools.push(Arc::new(powershell::PowerShellTool));
     tools.push(Arc::new(web_browser::WebBrowserTool));
+
+    // Browser automation tools (shared session across all browser_* tools).
+    if config.browser_enabled {
+        let browser_session = std::sync::Arc::new(tokio::sync::Mutex::new(
+            crate::browser::BrowserSession::default(),
+        ));
+        tools.push(Arc::new(browser_tools::BrowserNavigateTool {
+            session: browser_session.clone(),
+            headless: config.browser_headless,
+            chrome_path: config.browser_chrome_path.clone(),
+        }));
+        tools.push(Arc::new(browser_tools::BrowserSnapshotTool {
+            session: browser_session.clone(),
+        }));
+        tools.push(Arc::new(browser_tools::BrowserClickTool {
+            session: browser_session.clone(),
+        }));
+        tools.push(Arc::new(browser_tools::BrowserFillTool {
+            session: browser_session.clone(),
+        }));
+        tools.push(Arc::new(browser_tools::BrowserScreenshotTool {
+            session: browser_session.clone(),
+        }));
+        tools.push(Arc::new(browser_tools::BrowserGetTextTool {
+            session: browser_session.clone(),
+        }));
+        tools.push(Arc::new(browser_tools::BrowserPressKeyTool {
+            session: browser_session.clone(),
+        }));
+        tools.push(Arc::new(browser_tools::BrowserWaitTool {
+            session: browser_session,
+        }));
+    }
+
     tools.push(Arc::new(lsp::LSPTool));
     tools.push(Arc::new(discover_skills::DiscoverSkillsTool));
     tools.push(Arc::new(skill_tool::SkillTool));

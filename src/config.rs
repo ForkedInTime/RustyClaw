@@ -305,6 +305,17 @@ pub struct Config {
     /// Path to the TTS voice model file or clone sample.
     pub tts_voice_model: Option<String>,
 
+    /// Whether browser automation is enabled.
+    pub browser_enabled: bool,
+    /// Run browser in headless mode (default: true).
+    pub browser_headless: bool,
+    /// Custom Chrome/Chromium binary path (None = auto-detect).
+    pub browser_chrome_path: Option<String>,
+    /// Connect to existing CDP endpoint instead of launching Chrome.
+    pub browser_cdp_endpoint: Option<String>,
+    /// Default browser action timeout in milliseconds.
+    pub browser_timeout_ms: u64,
+
     /// Whether desktop notifications (notify-send) + terminal bell fire on task completion.
     pub notifications_enabled: bool,
 
@@ -411,6 +422,11 @@ impl Default for Config {
             voice_api_url: None,
             tts_enabled: false,
             tts_voice_model: None,
+            browser_enabled: true,
+            browser_headless: true,
+            browser_chrome_path: None,
+            browser_cdp_endpoint: None,
+            browser_timeout_ms: 30_000,
             notifications_enabled: false,
             spinner_style: "themed".to_string(),
             sandbox_allow_network: true,
