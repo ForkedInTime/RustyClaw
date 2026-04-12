@@ -7,7 +7,7 @@ use anyhow::{Result, bail};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{Mutex, broadcast, oneshot};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -60,6 +60,8 @@ pub struct CdpClient {
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<CdpResponse>>>>,
     /// Broadcast channel for CDP events.
     event_tx: broadcast::Sender<CdpEvent>,
+    /// True while the reader loop is alive.
+    alive: Arc<AtomicBool>,
 }
 
 impl CdpClient {
@@ -74,18 +76,21 @@ impl CdpClient {
             Arc::new(Mutex::new(HashMap::new()));
         let (event_tx, _) = broadcast::channel(256);
 
+        let alive = Arc::new(AtomicBool::new(true));
+
         let client = Self {
             writer: Arc::new(Mutex::new(writer)),
             next_id: Arc::new(AtomicU64::new(1)),
             pending: pending.clone(),
             event_tx: event_tx.clone(),
+            alive: alive.clone(),
         };
 
         // Spawn reader task to dispatch incoming messages.
         let pending_r = pending;
         let event_tx_r = event_tx;
         tokio::spawn(async move {
-            Self::reader_loop(reader, pending_r, event_tx_r).await;
+            Self::reader_loop(reader, pending_r, event_tx_r, alive).await;
         });
 
         // Enable Page and Runtime domains by default.
@@ -101,7 +106,11 @@ impl CdpClient {
         method: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value> {
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        if !self.alive.load(Ordering::Relaxed) {
+            bail!("CDP connection is closed");
+        }
+
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let cmd = CdpCommand {
             id,
             method: method.to_string(),
@@ -119,10 +128,15 @@ impl CdpClient {
             .await
             .map_err(|e| anyhow::anyhow!("CDP send failed: {e}"))?;
 
-        let resp = tokio::time::timeout(std::time::Duration::from_secs(30), rx)
-            .await
-            .map_err(|_| anyhow::anyhow!("CDP command timed out: {}", cmd.method))?
-            .map_err(|_| anyhow::anyhow!("CDP response channel dropped"))?;
+        let resp = match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+            Ok(Ok(resp)) => resp,
+            Ok(Err(_)) => bail!("CDP connection lost while waiting for: {}", cmd.method),
+            Err(_) => {
+                // Clean up leaked pending entry on timeout
+                self.pending.lock().await.remove(&id);
+                bail!("CDP command timed out: {}", cmd.method);
+            }
+        };
 
         if let Some(err) = resp.error {
             bail!("CDP error: {err}");
@@ -135,7 +149,13 @@ impl CdpClient {
         self.event_tx.subscribe()
     }
 
+    /// Returns true if the WebSocket connection is still alive.
+    pub fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::Relaxed)
+    }
+
     /// Background reader loop: dispatches responses to pending waiters, events to broadcast.
+    /// On exit, marks alive=false and drains all pending senders so callers get errors fast.
     async fn reader_loop(
         mut reader: futures_util::stream::SplitStream<
             tokio_tungstenite::WebSocketStream<
@@ -144,6 +164,7 @@ impl CdpClient {
         >,
         pending: Arc<Mutex<HashMap<u64, oneshot::Sender<CdpResponse>>>>,
         event_tx: broadcast::Sender<CdpEvent>,
+        alive: Arc<AtomicBool>,
     ) {
         while let Some(Ok(msg)) = reader.next().await {
             let text = match msg {
@@ -167,5 +188,10 @@ impl CdpClient {
                 }
             }
         }
+
+        // Connection dead — notify callers immediately
+        alive.store(false, Ordering::Relaxed);
+        // Drop all pending senders so their receivers get RecvError immediately
+        pending.lock().await.drain();
     }
 }
