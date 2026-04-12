@@ -51,22 +51,28 @@ impl LoopDetector {
     }
 
     /// Check for stagnation. Returns Some(nudge_message) if stuck.
+    ///
+    /// Fires when the most recent `REPEAT_THRESHOLD` actions are all the same
+    /// fingerprint (same action + target + page state). A single differing
+    /// action in between breaks the run — we only care about tight loops.
+    ///
+    /// Nudge escalation is intentionally sticky across this call: callers
+    /// should invoke [`reset`](Self::reset) on navigation / intentional
+    /// context switches to start fresh at the gentlest nudge.
     pub fn check_stagnation(&mut self) -> Option<String> {
         if self.window.len() < REPEAT_THRESHOLD {
             return None;
         }
 
-        // Check if the last N actions have the same fingerprint
         let last = self.window.back()?.clone();
-        let repeat_count = self
+        let all_same = self
             .window
             .iter()
             .rev()
-            .take(REPEAT_THRESHOLD + 1)
-            .filter(|fp| **fp == last)
-            .count();
+            .take(REPEAT_THRESHOLD)
+            .all(|fp| *fp == last);
 
-        if repeat_count >= REPEAT_THRESHOLD {
+        if all_same {
             let nudge = NUDGES[self.nudge_level.min(NUDGES.len() - 1)].to_string();
             if self.nudge_level < NUDGES.len() - 1 {
                 self.nudge_level += 1;
@@ -91,6 +97,10 @@ impl Default for LoopDetector {
 }
 
 /// Hash an action (type + target) into a deterministic fingerprint.
+///
+/// `_extra` is reserved for future use (e.g., hashing input values for
+/// `fill` actions to distinguish retries with different content). For now
+/// only action type and target contribute to the fingerprint.
 pub fn fingerprint_action(action_type: &str, target: &str, _extra: &str) -> String {
     hash_string(&format!("{action_type}:{target}"))
 }
