@@ -126,11 +126,10 @@ pub fn parse_skill_from_content(content: &str, fallback_name: &str) -> Result<Sk
 
 fn parse_yaml_skill(content: &str, fallback_name: &str) -> Result<Skill> {
     // Strip opening `---\n` or `---\r\n`.
-    let after_first = if content.starts_with("---\r\n") {
-        &content[5..]
-    } else {
-        &content[4..]
-    };
+    let after_first = content
+        .strip_prefix("---\r\n")
+        .or_else(|| content.strip_prefix("---\n"))
+        .ok_or_else(|| anyhow::anyhow!("Expected YAML frontmatter delimiter"))?;
     let end = after_first
         .find("\n---\n")
         .or_else(|| after_first.find("\n---\r\n"))
