@@ -7,20 +7,29 @@ use anyhow::Result;
 use std::collections::HashMap;
 use tokio::fs;
 
+/// Parsed YAML frontmatter parameter. `description` and `enum_values` are
+/// loaded from the skill file but not yet displayed in `/skills` listings
+/// or validated on invocation — retained so the parser stays lossless and
+/// the listing UI can pick them up without a schema change.
 #[derive(Debug, Clone)]
 pub struct SkillParam {
     pub name: String,
     pub required: bool,
     pub default: Option<String>,
+    #[allow(dead_code)]
     pub description: String,
+    #[allow(dead_code)]
     pub enum_values: Option<Vec<String>>,
 }
 
+/// `category` is parsed from frontmatter but not yet grouped in any UI —
+/// kept for the planned categorised `/skills` picker.
 #[derive(Debug, Clone)]
 pub struct Skill {
     pub name: String,
     pub description: String,
     pub prompt_template: String,
+    #[allow(dead_code)]
     pub category: Option<String>,
     pub params: Vec<SkillParam>,
 }

@@ -169,6 +169,10 @@ pub async fn press_key(client: &CdpClient, key: &str) -> Result<String> {
 }
 
 /// Handle a dialog (alert/confirm/prompt).
+/// Not yet exposed as a tool — wired up when we add a `browser_dialog`
+/// tool and subscribe to `Page.javascriptDialogOpening`. Safe to drop
+/// if that feature is abandoned.
+#[allow(dead_code)]
 pub async fn handle_dialog(client: &CdpClient, accept: bool, text: Option<&str>) -> Result<String> {
     let mut params = json!({"accept": accept});
     if let Some(t) = text {
@@ -179,6 +183,9 @@ pub async fn handle_dialog(client: &CdpClient, accept: bool, text: Option<&str>)
 }
 
 /// Get console messages (placeholder — requires a Runtime.consoleAPICalled listener).
+/// Not yet exposed as a tool; kept so the signature is stable once we
+/// wire a persistent console-event subscriber to BrowserSession.
+#[allow(dead_code)]
 pub async fn get_console_messages(_client: &CdpClient) -> Result<Vec<String>> {
     // Event-based listener not yet wired; return empty for now.
     Ok(Vec::new())

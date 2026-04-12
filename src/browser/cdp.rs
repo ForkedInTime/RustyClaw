@@ -21,10 +21,14 @@ pub struct CdpCommand {
 }
 
 /// A CDP event received from Chrome (no id field).
+/// `params` is parsed but not yet consumed — event handlers currently filter
+/// on `method` only. Kept so future handlers (e.g. `Page.frameNavigated`
+/// → extract frame id) don't need a breaking API change.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CdpEvent {
     pub method: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub params: serde_json::Value,
 }
 
@@ -150,6 +154,10 @@ impl CdpClient {
     }
 
     /// Returns true if the WebSocket connection is still alive.
+    /// Not yet consulted by any tool — `send()` already surfaces reconnect
+    /// failures on the next call, so live health checks aren't needed today.
+    /// Kept for future /browser status display.
+    #[allow(dead_code)]
     pub fn is_alive(&self) -> bool {
         self.alive.load(Ordering::Relaxed)
     }
