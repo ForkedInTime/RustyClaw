@@ -214,7 +214,7 @@ pub enum CommandAction {
     ReloadSettings,
     /// Reload all plugin MCP servers (re-reads settings.json)
     ReloadPlugins,
-    /// Execute a plugin slash command (<plugin>:<command>)
+    /// Execute a plugin slash command (`<plugin>:<command>`)
     PluginCommand { plugin: String, command: String },
     /// Show interactive model picker (async — needs Ollama query)
     ListModels,
@@ -1713,74 +1713,6 @@ fn mcp_set_disabled(args: &str, disabled: bool) -> CommandAction {
             }
         }
     }
-}
-
-#[allow(dead_code)]
-fn cmd_memory(ctx: &CommandContext) -> CommandAction {
-    let global_claude_md = Config::claude_dir().join("CLAUDE.md");
-    let local_claude_md = ctx.config.cwd.join("CLAUDE.md");
-
-    let mut lines = vec!["Memory (CLAUDE.md files)\n".to_string()];
-
-    // Active merged content summary
-    if ctx.config.claudemd.is_empty() {
-        lines.push("No CLAUDE.md files loaded — Claude has no custom instructions.".into());
-        lines.push("Run /init to create a project CLAUDE.md.".into());
-    } else {
-        lines.push(format!(
-            "Merged CLAUDE.md loaded ({} chars total)",
-            ctx.config.claudemd.len()
-        ));
-        lines.push("This content is included in every system prompt.".into());
-    }
-
-    lines.push(String::new());
-
-    // Global memory
-    if global_claude_md.exists() {
-        match std::fs::read_to_string(&global_claude_md) {
-            Ok(content) => {
-                lines.push(format!("~/.claude/CLAUDE.md ({} chars):", content.len()));
-                for line in content.lines().take(15) {
-                    lines.push(format!("  {line}"));
-                }
-                if content.lines().count() > 15 {
-                    lines.push(format!(
-                        "  ... ({} more lines)",
-                        content.lines().count() - 15
-                    ));
-                }
-            }
-            Err(e) => lines.push(format!("~/.claude/CLAUDE.md: error reading — {e}")),
-        }
-    } else {
-        lines.push("~/.claude/CLAUDE.md: not found".into());
-    }
-
-    lines.push(String::new());
-
-    // Local memory
-    if local_claude_md.exists() {
-        match std::fs::read_to_string(&local_claude_md) {
-            Ok(content) => {
-                lines.push(format!("CLAUDE.md in cwd ({} chars):", content.len()));
-                for line in content.lines().take(15) {
-                    lines.push(format!("  {line}"));
-                }
-                if content.lines().count() > 15 {
-                    lines.push(format!(
-                        "  ... ({} more lines)",
-                        content.lines().count() - 15
-                    ));
-                }
-            }
-            Err(e) => lines.push(format!("CLAUDE.md: error reading — {e}")),
-        }
-    } else {
-        lines.push("CLAUDE.md in cwd: not found (run /init to create)".into());
-    }
-
-    CommandAction::Message(lines.join("\n"))
 }
 
 /// Dispatch the `/memory` command with subcommands for the persistent MemoryStore.

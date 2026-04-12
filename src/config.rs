@@ -127,7 +127,7 @@ pub struct Config {
     pub api_key: String,
 
     /// Model to use for the main loop.
-    /// Use "ollama:<name>" to route to a local Ollama instance instead.
+    /// Use `ollama:<name>` to route to a local Ollama instance instead.
     pub model: String,
 
     /// Max tokens per response (global fallback)
@@ -316,10 +316,6 @@ pub struct Config {
     /// Default browser action timeout in milliseconds.
     pub browser_timeout_ms: u64,
 
-    /// Start file-watching automatically at session start.
-    /// TODO(watch): consulted in `run_loop` once auto-start is wired.
-    #[allow(dead_code)]
-    pub watch_enabled: bool,
     /// Watch debounce (ms) — coalesces rapid filesystem events.
     pub watch_debounce_ms: u64,
     /// Minimum gap between watch triggers (ms).
@@ -437,7 +433,6 @@ impl Default for Config {
             browser_chrome_path: None,
             browser_cdp_endpoint: None,
             browser_timeout_ms: 30_000,
-            watch_enabled: false,
             watch_debounce_ms: 500,
             watch_rate_limit_ms: 10_000,
             watch_markers: vec!["AI:".into(), "AGENT:".into()],
@@ -775,7 +770,7 @@ impl Config {
     /// Load and merge all CLAUDE.md files in priority order:
     ///   ~/.claude/CLAUDE.md (global)
     ///   → parent/CLAUDE.md … (ancestor dirs, outermost first)
-    ///   → <cwd>/CLAUDE.md  (most specific, last = highest priority)
+    ///   → `<cwd>/CLAUDE.md`  (most specific, last = highest priority)
     ///
     /// Returns the concatenated text, with a source comment before each section.
     pub fn load_claude_md(cwd: &Path) -> String {
@@ -1004,7 +999,7 @@ impl Config {
     }
 
     /// Build the full system prompt, matching the original rustyclaw prompt structure.
-    /// Includes the dynamic <env> block (cwd, git, platform, shell, OS).
+    /// Includes the dynamic `<env>` block (cwd, git, platform, shell, OS).
     pub fn build_system_prompt(&self) -> String {
         let cwd = self.cwd.display().to_string();
 
