@@ -28,7 +28,12 @@ const SKIP_ROLES: &[&str] = &[
 ];
 
 /// Parse CDP Accessibility.getFullAXTree node array into a text representation
-/// and a ref map (ref_string -> nodeId as i64).
+/// and a ref map (ref_string -> backendDOMNodeId as i64).
+///
+/// Note: we store `backendDOMNodeId` (DOM-tree backend ID), NOT `nodeId`
+/// (AX-tree-local ID). Downstream actions (click, fill, etc.) pass this
+/// to CDP DOM.resolveNode / DOM.getBoxModel, which require the backend ID.
+/// Nodes without a `backendDOMNodeId` (synthetic AX nodes) are skipped.
 pub fn parse_ax_nodes(nodes: &serde_json::Value) -> (String, HashMap<String, i64>) {
     let mut ref_map = HashMap::new();
     let mut lines = Vec::new();
@@ -42,8 +47,11 @@ pub fn parse_ax_nodes(nodes: &serde_json::Value) -> (String, HashMap<String, i64
     for node in arr {
         let role = node["role"]["value"].as_str().unwrap_or("");
         let name = node["name"]["value"].as_str().unwrap_or("").trim();
-        let node_id_str = node["nodeId"].as_str().unwrap_or("0");
-        let node_id: i64 = node_id_str.parse().unwrap_or(0);
+        // Prefer backendDOMNodeId (an integer). Fall back to parsing nodeId
+        // from a string for test fixtures / older CDP responses.
+        let backend_id = node["backendDOMNodeId"]
+            .as_i64()
+            .or_else(|| node["nodeId"].as_str().and_then(|s| s.parse().ok()));
 
         if SKIP_ROLES.contains(&role) {
             continue;
@@ -57,6 +65,9 @@ pub fn parse_ax_nodes(nodes: &serde_json::Value) -> (String, HashMap<String, i64
         if name.is_empty() && !is_interactive {
             continue;
         }
+
+        // Skip nodes without any usable DOM reference.
+        let Some(node_id) = backend_id else { continue };
 
         let ref_str = format!("@e{ref_counter}");
         ref_map.insert(ref_str.clone(), node_id);
