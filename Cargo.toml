@@ -3,6 +3,10 @@ name = "rustyclaw"
 version = "0.2.0"
 edition = "2024"
 description = "RustyClaw — a Rust-native Claude Code CLI"
+license = "Apache-2.0"
+repository = "https://github.com/ForkedInTime/RustyClaw"
+keywords = ["cli", "ai", "claude", "coding-assistant", "llm"]
+categories = ["command-line-utilities", "development-tools"]
 
 [lib]
 name = "rustyclaw"
@@ -20,7 +24,7 @@ clap = { version = "4", features = ["derive", "env"] }
 rand = "0.9"
 
 # Async runtime (replaces Node.js event loop)
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process", "sync", "time", "io-util", "io-std"] }
 
 # Async fn in trait objects (required for dyn Tool)
 async-trait = "0.1"
