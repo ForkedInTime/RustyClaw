@@ -25,6 +25,7 @@ mod spawn;
 mod tools;
 mod tui;
 mod voice;
+mod watch;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
