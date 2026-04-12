@@ -326,11 +326,6 @@ pub struct Config {
     pub watch_rate_limit_ms: u64,
     /// Comment markers that fire watch auto-action (e.g. `["AI:", "AGENT:"]`).
     pub watch_markers: Vec<String>,
-    /// Auto-open the diff overlay after an AI-authored file edit.
-    /// TODO(diff): consulted in the Edit/Write tool post-hooks once wired.
-    #[allow(dead_code)]
-    pub diff_review: bool,
-
     /// Whether desktop notifications (notify-send) + terminal bell fire on task completion.
     pub notifications_enabled: bool,
 
@@ -446,7 +441,6 @@ impl Default for Config {
             watch_debounce_ms: 500,
             watch_rate_limit_ms: 10_000,
             watch_markers: vec!["AI:".into(), "AGENT:".into()],
-            diff_review: false,
             notifications_enabled: false,
             spinner_style: "themed".to_string(),
             sandbox_allow_network: true,

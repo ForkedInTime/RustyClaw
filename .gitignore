@@ -10,3 +10,6 @@
 
 # Git worktrees
 .worktrees/
+
+# Local RAG index and other .claude/ scratch state
+.claude/
