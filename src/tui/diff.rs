@@ -1,30 +1,13 @@
-//! Unified diff parsing and hunk-level state management for the diff review UI.
+//! Unified diff parsing for the read-only diff overlay (`/diff`).
 //!
-//! This module is parser-only for now. A follow-up task wires it into the TUI
-//! (overlay render + key dispatch + /diff command integration).
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum HunkState {
-    Pending,
-    Accepted,
-    Rejected,
-}
-
-impl HunkState {
-    pub fn toggle(self) -> Self {
-        match self {
-            Self::Pending => Self::Accepted,
-            Self::Accepted => Self::Rejected,
-            Self::Rejected => Self::Pending,
-        }
-    }
-}
+//! Parser-only. Interactive hunk-level accept/reject is not shipped; if it's
+//! ever wired, revive the `HunkState` + `DiffReviewState` machine from git
+//! history (commit e23cc71) rather than re-deriving it.
 
 #[derive(Debug, Clone)]
 pub struct DiffHunk {
     pub header: String, // @@ -1,3 +1,4 @@
     pub lines: Vec<DiffLine>,
-    pub state: HunkState,
 }
 
 #[derive(Debug, Clone)]
@@ -72,7 +55,6 @@ pub fn parse_unified_diff(diff: &str) -> Vec<FileDiff> {
                     current_hunks.push(DiffHunk {
                         header: current_header.clone(),
                         lines: std::mem::take(&mut current_lines),
-                        state: HunkState::Pending,
                     });
                 }
                 files.push(FileDiff {
@@ -94,7 +76,6 @@ pub fn parse_unified_diff(diff: &str) -> Vec<FileDiff> {
                 current_hunks.push(DiffHunk {
                     header: current_header.clone(),
                     lines: std::mem::take(&mut current_lines),
-                    state: HunkState::Pending,
                 });
             }
             current_header = line.to_string();
@@ -132,7 +113,6 @@ pub fn parse_unified_diff(diff: &str) -> Vec<FileDiff> {
             current_hunks.push(DiffHunk {
                 header: current_header,
                 lines: current_lines,
-                state: HunkState::Pending,
             });
         }
         files.push(FileDiff {
@@ -144,73 +124,4 @@ pub fn parse_unified_diff(diff: &str) -> Vec<FileDiff> {
     }
 
     files
-}
-
-/// Scrollable review state — cursor over files and their hunks.
-#[allow(dead_code)] // wired in Task 12
-pub struct DiffReviewState {
-    pub files: Vec<FileDiff>,
-    pub current_file: usize,
-    pub current_hunk: usize,
-    pub scroll: usize,
-}
-
-#[allow(dead_code)] // wired in Task 12
-impl DiffReviewState {
-    pub fn new(files: Vec<FileDiff>) -> Self {
-        Self {
-            files,
-            current_file: 0,
-            current_hunk: 0,
-            scroll: 0,
-        }
-    }
-
-    pub fn total_hunks(&self) -> usize {
-        self.files.iter().map(|f| f.hunks.len()).sum()
-    }
-
-    pub fn toggle_current(&mut self) {
-        if let Some(file) = self.files.get_mut(self.current_file)
-            && let Some(hunk) = file.hunks.get_mut(self.current_hunk)
-        {
-            hunk.state = hunk.state.clone().toggle();
-        }
-    }
-
-    pub fn next_hunk(&mut self) {
-        if let Some(file) = self.files.get(self.current_file) {
-            if self.current_hunk + 1 < file.hunks.len() {
-                self.current_hunk += 1;
-            } else if self.current_file + 1 < self.files.len() {
-                self.current_file += 1;
-                self.current_hunk = 0;
-            }
-        }
-    }
-
-    pub fn prev_hunk(&mut self) {
-        if self.current_hunk > 0 {
-            self.current_hunk -= 1;
-        } else if self.current_file > 0 {
-            self.current_file -= 1;
-            self.current_hunk = self.files[self.current_file].hunks.len().saturating_sub(1);
-        }
-    }
-
-    pub fn accept_all(&mut self) {
-        for file in &mut self.files {
-            for hunk in &mut file.hunks {
-                hunk.state = HunkState::Accepted;
-            }
-        }
-    }
-
-    pub fn reject_all(&mut self) {
-        for file in &mut self.files {
-            for hunk in &mut file.hunks {
-                hunk.state = HunkState::Rejected;
-            }
-        }
-    }
 }

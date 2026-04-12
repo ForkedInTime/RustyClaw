@@ -42,14 +42,3 @@ diff --git a/b.rs b/b.rs
     assert_eq!(files[1].path, "b.rs");
 }
 
-#[test]
-fn hunk_state_toggle() {
-    use rustyclaw::tui::diff::HunkState;
-    let mut state = HunkState::Pending;
-    state = state.toggle();
-    assert_eq!(state, HunkState::Accepted);
-    state = state.toggle();
-    assert_eq!(state, HunkState::Rejected);
-    state = state.toggle();
-    assert_eq!(state, HunkState::Pending);
-}
