@@ -9,6 +9,9 @@ use serde_json::json;
 pub async fn navigate(session: &mut BrowserSession, url: &str) -> Result<(String, u16)> {
     let client = session.client()?;
 
+    // Subscribe BEFORE navigating so we don't miss Page.loadEventFired on fast loads.
+    let mut events = client.subscribe();
+
     let result = client.send("Page.navigate", json!({"url": url})).await?;
     if let Some(err) = result["errorText"].as_str() {
         if !err.is_empty() {
@@ -17,7 +20,6 @@ pub async fn navigate(session: &mut BrowserSession, url: &str) -> Result<(String
     }
 
     // Wait for load event
-    let mut events = client.subscribe();
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         match tokio::time::timeout_at(deadline, events.recv()).await {
@@ -93,13 +95,17 @@ pub async fn fill(session: &mut BrowserSession, element_ref: &str, value: &str) 
     // Focus the element
     client.send("DOM.focus", json!({"backendNodeId": node_id})).await?;
 
-    // Clear existing value
-    client.send("Runtime.evaluate", json!({
-        "expression": format!(
-            "document.querySelector('[data-rustyclaw-ref=\"{element_ref}\"]')?.value = '' || \
-             document.activeElement.value = ''"
-        )
-    })).await.ok();
+    // Clear existing value by calling .value = '' on the resolved element directly
+    // (not on document.activeElement, which could be anything after focus changes).
+    let resolved = client.send("DOM.resolveNode", json!({"backendNodeId": node_id})).await?;
+    if let Some(object_id) = resolved["object"]["objectId"].as_str() {
+        let _ = client.send("Runtime.callFunctionOn", json!({
+            "objectId": object_id,
+            "functionDeclaration":
+                "function() { if ('value' in this) this.value = ''; \
+                              else if (this.isContentEditable) this.textContent = ''; }",
+        })).await;
+    }
 
     // Type the value (handles input events correctly)
     client.send("Input.insertText", json!({"text": value})).await?;
@@ -199,12 +205,15 @@ pub async fn wait_for(
     let client = session.client()?;
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
 
+    // Serialize the selector as a proper JS string literal — handles quotes,
+    // backslashes, </script>, unicode, everything. Prevents injection of
+    // arbitrary JS via a malicious selector.
+    let selector_js = serde_json::to_string(condition)?;
+    let expression = format!("!!document.querySelector({selector_js})");
+
     loop {
         let result = client.send("Runtime.evaluate", json!({
-            "expression": format!(
-                "!!document.querySelector('{}')",
-                condition.replace('\'', "\\'")
-            ),
+            "expression": expression,
         })).await?;
 
         if result["result"]["value"].as_bool() == Some(true) {
