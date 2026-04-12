@@ -35,7 +35,7 @@ jobs:
 
           # ── macOS ──────────────────────────────────────────────
           - target: x86_64-apple-darwin
-            os: macos-13          # Intel runner
+            os: macos-14          # Apple Silicon runner (cross-compiles to x86_64)
             artifact: rustyclaw-macos-x64
             cross: false
           - target: aarch64-apple-darwin
@@ -93,7 +93,12 @@ jobs:
 
       - name: Generate checksum (unix)
         if: runner.os != 'Windows'
-        run: sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+        run: |
+          if command -v sha256sum &>/dev/null; then
+            sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+          else
+            shasum -a 256 ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+          fi
 
       - name: Generate checksum (windows)
         if: runner.os == 'Windows'
