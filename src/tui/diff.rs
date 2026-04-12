@@ -3,13 +3,20 @@
 //! Parser-only. Interactive hunk-level accept/reject is not shipped; if it's
 //! ever wired, revive the `HunkState` + `DiffReviewState` machine from git
 //! history (commit e23cc71) rather than re-deriving it.
+//!
+//! The struct fields below are populated by the parser but only the
+//! summary counts (`additions` / `deletions`) are read today — the
+//! overlay renders the raw diff string directly. Fields retained so the
+//! hunk-walker UI can reconnect without a parser change.
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DiffHunk {
     pub header: String, // @@ -1,3 +1,4 @@
     pub lines: Vec<DiffLine>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DiffLine {
     pub kind: DiffLineKind,
@@ -21,12 +28,14 @@ pub enum DiffLineKind {
     Context, // unchanged line (space prefix)
     Added,   // + line
     Removed, // - line
+    #[allow(dead_code)]
     Header,  // @@ header or file header
 }
 
 #[derive(Debug, Clone)]
 pub struct FileDiff {
     pub path: String,
+    #[allow(dead_code)]
     pub hunks: Vec<DiffHunk>,
     pub additions: usize,
     pub deletions: usize,

@@ -2,6 +2,12 @@
 //!
 //! Tracks a rolling window of (action_hash, page_state_hash) pairs.
 //! Detects when the agent repeats the same action on the same page state.
+//!
+//! **Status:** not yet wired into the browser tool loop. Shipped as a
+//! self-contained module so the tool invocation layer can adopt it in a
+//! single diff once nudge-on-stagnation is ready. Delete this module if
+//! that feature is abandoned.
+#![allow(dead_code)]
 use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 

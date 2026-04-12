@@ -47,6 +47,10 @@ impl BrowserSession {
         self.client.is_some()
     }
 
+    /// Expose the ref map for inspection (debugging, REPL, future /browser diagnostics).
+    /// Not currently used by any tool — kept for parity with snapshot.rs, which
+    /// mutates this same map via `set_refs`.
+    #[allow(dead_code)]
     pub fn ref_map(&self) -> &HashMap<String, i64> {
         &self.refs
     }

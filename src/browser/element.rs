@@ -2,8 +2,13 @@
 //!
 //! Scores elements by ARIA role, interactivity signals, and label presence.
 //! Higher scores = more likely to be the element the user/AI wants.
+//!
+//! Not yet consumed — `snapshot.rs` currently includes every visible
+//! interactive node unscored. Kept for the planned "top-N clickable
+//! elements" snapshot mode.
 
 /// Score an element based on its properties. Higher = more interactive/important.
+#[allow(dead_code)]
 pub fn score_element(role: &str, has_click_listener: bool, has_label: bool, is_focusable: bool) -> u32 {
     let mut score = 0u32;
 
