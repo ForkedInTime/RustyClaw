@@ -111,7 +111,8 @@ pub async fn spawn_agent(
     let repo_name = git_root.split('/').next_back().unwrap_or("repo");
     let worktree_path = PathBuf::from(&git_root)
         .parent()
-        .unwrap_or(std::path::Path::new("/tmp"))
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(std::env::temp_dir)
         .join(format!("{repo_name}-{slug}"));
 
     // Create worktree + branch

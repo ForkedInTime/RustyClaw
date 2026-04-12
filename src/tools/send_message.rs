@@ -332,7 +332,7 @@ fn write_mailbox_message(
     timestamp: &str,
 ) -> Result<()> {
     let mailbox_dir = dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .unwrap_or_else(std::env::temp_dir)
         .join(".claude")
         .join("mailboxes")
         .join(team)

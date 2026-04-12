@@ -74,7 +74,7 @@ impl Tool for TeamCreateTool {
         }
 
         let teams_dir = dirs::home_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+            .unwrap_or_else(std::env::temp_dir)
             .join(".claude")
             .join("teams");
         std::fs::create_dir_all(&teams_dir)?;
@@ -149,7 +149,7 @@ impl Tool for TeamDeleteTool {
         };
 
         let team_file = dirs::home_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+            .unwrap_or_else(std::env::temp_dir)
             .join(".claude")
             .join("teams")
             .join(format!("{}.json", name));
@@ -162,7 +162,7 @@ impl Tool for TeamDeleteTool {
 
         // Also clean up mailboxes for this team
         let mailbox_dir = dirs::home_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+            .unwrap_or_else(std::env::temp_dir)
             .join(".claude")
             .join("mailboxes")
             .join(name);
