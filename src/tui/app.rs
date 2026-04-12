@@ -518,10 +518,15 @@ pub struct PendingUserQuestion {
 /// Handle to an active file watcher. Owns the `RecommendedWatcher` (drop = stop)
 /// and the abort handle for the background task that forwards watch events into
 /// the TUI. Dropping drops both, so `app.watcher = None` fully tears it down.
+///
+/// Field order is deliberate: `forwarder` first so it aborts before `watcher`
+/// drops (which closes the notify channel). Combined with the explicit abort
+/// in `Drop::drop`, the forwarder terminates promptly regardless of whether
+/// the channel close or the abort fires first.
 pub struct WatcherHandle {
+    pub forwarder: tokio::task::AbortHandle,
     #[allow(dead_code)] // kept alive for its drop side-effect
     pub watcher: notify::RecommendedWatcher,
-    pub forwarder: tokio::task::AbortHandle,
 }
 
 impl Drop for WatcherHandle {

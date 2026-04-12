@@ -43,3 +43,15 @@ fn scan_marker_on_first_line() {
     assert_eq!(markers[0].line, 1);
     assert!(markers[0].text.contains("very first line"));
 }
+
+#[test]
+fn scan_markers_respects_extension_via_patterns_stub() {
+    // scan_markers itself has no notion of patterns. This test documents the
+    // contract that pattern filtering happens at the `start_watcher` level,
+    // not inside `scan_markers`. Kept minimal — we don't spin up a real
+    // watcher in unit tests.
+    use rustyclaw::watch::scan_markers;
+    let content = "// AI: inside any file extension";
+    let markers = scan_markers(content, &["AI:"]);
+    assert_eq!(markers.len(), 1, "scan_markers doesn't filter by extension");
+}

@@ -316,7 +316,9 @@ pub struct Config {
     /// Default browser action timeout in milliseconds.
     pub browser_timeout_ms: u64,
 
-    /// Watch mode enabled on startup.
+    /// Start file-watching automatically at session start.
+    /// TODO(watch): consulted in `run_loop` once auto-start is wired.
+    #[allow(dead_code)]
     pub watch_enabled: bool,
     /// Watch debounce (ms) — coalesces rapid filesystem events.
     pub watch_debounce_ms: u64,
@@ -324,7 +326,9 @@ pub struct Config {
     pub watch_rate_limit_ms: u64,
     /// Comment markers that fire watch auto-action (e.g. `["AI:", "AGENT:"]`).
     pub watch_markers: Vec<String>,
-    /// Auto-show the diff overlay after AI-authored edits.
+    /// Auto-open the diff overlay after an AI-authored file edit.
+    /// TODO(diff): consulted in the Edit/Write tool post-hooks once wired.
+    #[allow(dead_code)]
     pub diff_review: bool,
 
     /// Whether desktop notifications (notify-send) + terminal bell fire on task completion.
