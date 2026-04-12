@@ -33,3 +33,13 @@ fn scan_custom_markers() {
     assert_eq!(markers.len(), 1);
     assert!(markers[0].text.contains("implement auth"));
 }
+
+#[test]
+fn scan_marker_on_first_line() {
+    use rustyclaw::watch::scan_markers;
+    let content = "// AI: very first line\nfn main() {}";
+    let markers = scan_markers(content, &["AI:"]);
+    assert_eq!(markers.len(), 1);
+    assert_eq!(markers[0].line, 1);
+    assert!(markers[0].text.contains("very first line"));
+}
