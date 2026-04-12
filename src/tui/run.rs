@@ -3955,6 +3955,142 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                         }
                         app.scroll_to_bottom();
                     }
+                    CommandAction::Watch(arg) => {
+                        match arg.as_deref() {
+                            Some("off") | Some("stop") => {
+                                if app.watcher.take().is_some() {
+                                    app.entries.push(ChatEntry::system(
+                                        "Watch mode stopped.".to_string(),
+                                    ));
+                                } else {
+                                    app.entries.push(ChatEntry::system(
+                                        "Watch mode was not active.".to_string(),
+                                    ));
+                                }
+                            }
+                            Some("status") => {
+                                let msg = if app.watcher.is_some() {
+                                    "Watch mode: active"
+                                } else {
+                                    "Watch mode: inactive"
+                                };
+                                app.entries.push(ChatEntry::system(msg.to_string()));
+                            }
+                            arg_opt => {
+                                // Already running? Tell the user instead of double-starting.
+                                if app.watcher.is_some() {
+                                    app.entries.push(ChatEntry::system(
+                                        "Watch mode already active. Use `/watch stop` first.".to_string(),
+                                    ));
+                                } else {
+                                    let watch_path = match arg_opt {
+                                        Some(p) => std::path::PathBuf::from(p),
+                                        None => config.cwd.clone(),
+                                    };
+                                    let cfg = crate::watch::WatchConfig {
+                                        paths: vec![watch_path.clone()],
+                                        patterns: vec![
+                                            "*.rs".into(),
+                                            "*.py".into(),
+                                            "*.ts".into(),
+                                            "*.js".into(),
+                                        ],
+                                        markers: config.watch_markers.clone(),
+                                        debounce_ms: config.watch_debounce_ms,
+                                        rate_limit_ms: config.watch_rate_limit_ms,
+                                    };
+                                    let (wtx, mut wrx) = mpsc::unbounded_channel();
+                                    match crate::watch::start_watcher(cfg, wtx) {
+                                        Ok(watcher) => {
+                                            // Forwarder: every watch event → SystemMessage in the TUI.
+                                            let tx2 = tx.clone();
+                                            let handle = tokio::spawn(async move {
+                                                while let Some(ev) = wrx.recv().await {
+                                                    let msg = match ev {
+                                                        crate::watch::WatchEvent::FileChanged { path } => {
+                                                            format!("[watch] changed: {}", path.display())
+                                                        }
+                                                        crate::watch::WatchEvent::MarkerFound { marker } => {
+                                                            format!(
+                                                                "[watch] {} at {}:{} — {}",
+                                                                marker.kind,
+                                                                marker.file.display(),
+                                                                marker.line,
+                                                                marker.text,
+                                                            )
+                                                        }
+                                                    };
+                                                    let _ = tx2.send(AppEvent::SystemMessage(msg));
+                                                }
+                                            });
+                                            app.watcher = Some(crate::tui::app::WatcherHandle {
+                                                watcher,
+                                                forwarder: handle.abort_handle(),
+                                            });
+                                            app.entries.push(ChatEntry::system(format!(
+                                                "Watching {} for {} markers.",
+                                                watch_path.display(),
+                                                config.watch_markers.join(", "),
+                                            )));
+                                        }
+                                        Err(e) => {
+                                            app.entries.push(ChatEntry::error(format!(
+                                                "Watch failed: {e}"
+                                            )));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::ShowDiff(path) => {
+                        // Use tokio::process::Command with separate args — NEVER sh -c
+                        // with a formatted path (user-controlled → shell injection).
+                        let mut cmd = tokio::process::Command::new("git");
+                        cmd.arg("diff").current_dir(&config.cwd);
+                        if let Some(p) = &path {
+                            cmd.arg("--").arg(p);
+                        }
+                        match cmd.output().await {
+                            Ok(output) if output.status.success() => {
+                                let diff_text = String::from_utf8_lossy(&output.stdout).to_string();
+                                if diff_text.trim().is_empty() {
+                                    app.entries.push(ChatEntry::system(
+                                        "No uncommitted changes.".to_string(),
+                                    ));
+                                } else {
+                                    let files = crate::tui::diff::parse_unified_diff(&diff_text);
+                                    let summary: String = files
+                                        .iter()
+                                        .map(|f| {
+                                            format!(
+                                                "  {} (+{} -{})",
+                                                f.path, f.additions, f.deletions
+                                            )
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join("\n");
+                                    app.overlay = Some(Overlay::new(
+                                        "diff",
+                                        format!("Diff Review\n\n{summary}\n\n{diff_text}"),
+                                    ));
+                                }
+                            }
+                            Ok(output) => {
+                                let stderr = String::from_utf8_lossy(&output.stderr);
+                                app.entries.push(ChatEntry::error(format!(
+                                    "git diff failed: {stderr}"
+                                )));
+                            }
+                            Err(e) => {
+                                app.entries.push(ChatEntry::error(format!(
+                                    "git diff failed: {e}"
+                                )));
+                            }
+                        }
+                        app.scroll_to_bottom();
+                    }
                     CommandAction::Unknown(name) => {
                         // Try skill expansion before giving up
                         if let Some((skill_name, args)) = parse_skill_invocation(&input)

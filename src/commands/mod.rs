@@ -93,6 +93,7 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "usage",
     "version",
     "vim",
+    "watch",
     "voice",
     "autofix-pr",
     "issue",
@@ -299,6 +300,16 @@ pub enum CommandAction {
     BrowserScreenshot,
     /// Close the browser session
     BrowserClose,
+    /// Start / stop / check file watcher.
+    /// `None` = start watching cwd with default settings.
+    /// `Some("off")` or `Some("stop")` = stop the watcher.
+    /// `Some("status")` = report current watch state.
+    /// `Some(path)` = start watching a specific path.
+    Watch(Option<String>),
+    /// Show a diff review overlay.
+    /// `None` = show the full `git diff`.
+    /// `Some(path)` = show `git diff -- <path>`.
+    ShowDiff(Option<String>),
     /// Command not recognised — show error
     Unknown(String),
 }
@@ -358,7 +369,14 @@ pub fn dispatch(input: &str, ctx: &CommandContext) -> CommandAction {
         "doctor" => cmd_doctor(ctx),
         "install-missing" => cmd_install_missing(),
         "init" => cmd_init(ctx),
-        "diff" => cmd_diff(args, ctx),
+        "watch" => {
+            let a = args.trim();
+            CommandAction::Watch(if a.is_empty() { None } else { Some(a.to_string()) })
+        }
+        "diff" => {
+            let a = args.trim();
+            CommandAction::ShowDiff(if a.is_empty() { None } else { Some(a.to_string()) })
+        }
         "permissions" => cmd_permissions(ctx),
         "skills" => cmd_skills(ctx),
         "review" => cmd_review(args),
@@ -1294,39 +1312,6 @@ This file provides guidance to RustyClaw when working with code in this reposito
 Then add only the sections that have real content. Use terse, actionable language.",
         action_desc
     ))
-}
-
-fn cmd_diff(args: &str, ctx: &CommandContext) -> CommandAction {
-    let mut cmd = std::process::Command::new("git");
-    cmd.arg("diff");
-    // Pass the entire args string as a single shell argument to avoid breaking
-    // paths with spaces. Use shell -c so git can interpret flags and paths correctly.
-    if !args.is_empty() {
-        // Prefer passing as separate tokens via shlex-like split to preserve flags.
-        // Simple split on whitespace is sufficient here since git diff paths
-        // are usually passed as unquoted refs/paths in practice.
-        for tok in args.split_whitespace() {
-            cmd.arg(tok);
-        }
-    }
-    cmd.current_dir(&ctx.config.cwd);
-
-    match cmd.output() {
-        Err(e) => CommandAction::Message(format!("git diff failed: {e}")),
-        Ok(out) if !out.status.success() => {
-            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-            CommandAction::Message(format!("git diff error: {stderr}"))
-        }
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            if stdout.trim().is_empty() {
-                CommandAction::Message("No changes (git diff is empty).".into())
-            } else {
-                // Strip ANSI codes for clean display
-                CommandAction::Message(format!("git diff\n\n{stdout}"))
-            }
-        }
-    }
 }
 
 fn cmd_permissions(ctx: &CommandContext) -> CommandAction {
