@@ -15,6 +15,7 @@ use tempfile::TempDir;
 use tokio::process::Child;
 
 /// Active browser session — owns the CDP connection, Chrome child process, and page state.
+#[derive(Default)]
 pub struct BrowserSession {
     client: Option<CdpClient>,
     /// Chrome child process — kept alive for the session; killed on close/drop.
@@ -29,18 +30,6 @@ pub struct BrowserSession {
     pub current_title: String,
 }
 
-impl Default for BrowserSession {
-    fn default() -> Self {
-        Self {
-            client: None,
-            child: None,
-            _user_data: None,
-            refs: HashMap::new(),
-            current_url: String::new(),
-            current_title: String::new(),
-        }
-    }
-}
 
 impl BrowserSession {
     pub fn is_connected(&self) -> bool {
@@ -171,14 +160,12 @@ pub fn find_chrome() -> Option<PathBuf> {
         if let Ok(output) = std::process::Command::new("which")
             .arg(name)
             .output()
-        {
-            if output.status.success() {
+            && output.status.success() {
                 let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !path.is_empty() {
                     return Some(PathBuf::from(path));
                 }
             }
-        }
     }
     // Well-known paths — Linux + macOS
     let known: &[&str] = &[
@@ -217,13 +204,11 @@ async fn poll_cdp_endpoint(port: u16) -> Result<String> {
 
     for _ in 0..30 {
         // Check first so we don't incur an unnecessary sleep when Chrome is already ready.
-        if let Ok(resp) = client.get(&url).send().await {
-            if let Ok(json) = resp.json::<serde_json::Value>().await {
-                if let Some(ws) = json["webSocketDebuggerUrl"].as_str() {
+        if let Ok(resp) = client.get(&url).send().await
+            && let Ok(json) = resp.json::<serde_json::Value>().await
+                && let Some(ws) = json["webSocketDebuggerUrl"].as_str() {
                     return Ok(ws.to_string());
                 }
-            }
-        }
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
     bail!("Chrome did not start within 6 seconds on port {port}")

@@ -56,11 +56,10 @@ pub fn validate_extraction(data: &Value, schema: &Value) -> Result<()> {
             // Check required fields
             if let Some(required) = schema["required"].as_array() {
                 for req in required {
-                    if let Some(field) = req.as_str() {
-                        if data.get(field).is_none() {
+                    if let Some(field) = req.as_str()
+                        && data.get(field).is_none() {
                             anyhow::bail!("Missing required field: {field}");
                         }
-                    }
                 }
             }
         }

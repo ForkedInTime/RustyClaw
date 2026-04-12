@@ -19,11 +19,10 @@ pub async fn navigate(client: &CdpClient, url: &str, timeout_ms: u64) -> Result<
     let mut events = client.subscribe();
 
     let result = client.send("Page.navigate", json!({"url": url})).await?;
-    if let Some(err) = result["errorText"].as_str() {
-        if !err.is_empty() {
+    if let Some(err) = result["errorText"].as_str()
+        && !err.is_empty() {
             anyhow::bail!("Navigation failed: {err}");
         }
-    }
 
     // Wait for load event
     let deadline =
@@ -68,8 +67,8 @@ pub async fn click(session: &mut BrowserSession, element_ref: &str) -> Result<St
     // Get element center coordinates
     let box_model = client.send("DOM.getBoxModel", json!({"backendNodeId": node_id})).await?;
     let content = &box_model["model"]["content"];
-    if let Some(coords) = content.as_array() {
-        if coords.len() >= 4 {
+    if let Some(coords) = content.as_array()
+        && coords.len() >= 4 {
             let x = (coords[0].as_f64().unwrap_or(0.0) + coords[2].as_f64().unwrap_or(0.0)) / 2.0;
             let y = (coords[1].as_f64().unwrap_or(0.0) + coords[5].as_f64().unwrap_or(0.0)) / 2.0;
 
@@ -85,7 +84,6 @@ pub async fn click(session: &mut BrowserSession, element_ref: &str) -> Result<St
             }
             return Ok(format!("Clicked {element_ref} at ({x:.0}, {y:.0})"));
         }
-    }
 
     // Fallback: JS click
     client.send("Runtime.callFunctionOn", json!({
