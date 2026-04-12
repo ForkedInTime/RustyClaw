@@ -3960,7 +3960,7 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                         if let Some((skill_name, args)) = parse_skill_invocation(&input)
                             && let Some(skill) = skills.get(skill_name)
                         {
-                            let mut prompt = skill.expand(args);
+                            let mut prompt = skill.expand_named(args);
                             if config.disable_skill_shell_execution {
                                 prompt.push_str("\n\nNote: shell command execution (Bash tool) is disabled for skill invocations.");
                             }
