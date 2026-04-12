@@ -171,6 +171,7 @@ async fn transcribe_local(wav: &std::path::Path) -> Result<String> {
             // TMPDIR can be /mnt/Storage/tmp, /var/folders/..., or any custom path.
             // The --output_dir passed to whisper MUST match so we can find the .txt output.
             let tmp_dir = std::env::temp_dir();
+            let tmp_dir_str = tmp_dir.to_string_lossy();
             let out = Command::new(binary)
                 .args([
                     &wav.display().to_string(),
@@ -181,7 +182,7 @@ async fn transcribe_local(wav: &std::path::Path) -> Result<String> {
                     "--fp16",
                     "False",
                     "--output_dir",
-                    tmp_dir.to_str().unwrap_or("/tmp"),
+                    tmp_dir_str.as_ref(),
                 ])
                 .output()
                 .await?;
