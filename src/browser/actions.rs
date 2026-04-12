@@ -1,1 +1,220 @@
 //! Browser action functions: navigate, click, fill, screenshot, etc.
+//!
+//! Each function takes a BrowserSession and executes a CDP command.
+use super::BrowserSession;
+use anyhow::Result;
+use serde_json::json;
+
+/// Navigate to a URL. Returns (title, status).
+pub async fn navigate(session: &mut BrowserSession, url: &str) -> Result<(String, u16)> {
+    let client = session.client()?;
+
+    let result = client.send("Page.navigate", json!({"url": url})).await?;
+    if let Some(err) = result["errorText"].as_str() {
+        if !err.is_empty() {
+            anyhow::bail!("Navigation failed: {err}");
+        }
+    }
+
+    // Wait for load event
+    let mut events = client.subscribe();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        match tokio::time::timeout_at(deadline, events.recv()).await {
+            Ok(Ok(ev)) if ev.method == "Page.loadEventFired" => break,
+            Ok(Ok(_)) => continue,
+            Ok(Err(_)) => break, // Channel lagged, page likely loaded
+            Err(_) => anyhow::bail!("Page load timed out after 30s"),
+        }
+    }
+
+    // Get page title
+    let eval = client.send("Runtime.evaluate", json!({
+        "expression": "document.title"
+    })).await?;
+    let title = eval["result"]["value"].as_str().unwrap_or("").to_string();
+    session.current_url = url.to_string();
+    session.current_title = title.clone();
+
+    Ok((title, 200))
+}
+
+/// Click an element by @ref.
+pub async fn click(session: &mut BrowserSession, element_ref: &str) -> Result<String> {
+    let node_id = session.resolve_ref(element_ref)?;
+    let client = session.client()?;
+
+    // Resolve node to a RemoteObject for interaction
+    let resolved = client.send("DOM.resolveNode", json!({"backendNodeId": node_id})).await?;
+    let object_id = resolved["object"]["objectId"].as_str()
+        .ok_or_else(|| anyhow::anyhow!("Could not resolve element {element_ref} to JS object"))?;
+
+    // Scroll into view
+    let _ = client.send("Runtime.callFunctionOn", json!({
+        "objectId": object_id,
+        "functionDeclaration": "function() { this.scrollIntoViewIfNeeded(); }",
+    })).await;
+
+    // Get element center coordinates
+    let box_model = client.send("DOM.getBoxModel", json!({"backendNodeId": node_id})).await?;
+    let content = &box_model["model"]["content"];
+    if let Some(coords) = content.as_array() {
+        if coords.len() >= 4 {
+            let x = (coords[0].as_f64().unwrap_or(0.0) + coords[2].as_f64().unwrap_or(0.0)) / 2.0;
+            let y = (coords[1].as_f64().unwrap_or(0.0) + coords[5].as_f64().unwrap_or(0.0)) / 2.0;
+
+            // Mouse click sequence
+            for event_type in ["mousePressed", "mouseReleased"] {
+                client.send("Input.dispatchMouseEvent", json!({
+                    "type": event_type,
+                    "x": x,
+                    "y": y,
+                    "button": "left",
+                    "clickCount": 1,
+                })).await?;
+            }
+            return Ok(format!("Clicked {element_ref} at ({x:.0}, {y:.0})"));
+        }
+    }
+
+    // Fallback: JS click
+    client.send("Runtime.callFunctionOn", json!({
+        "objectId": object_id,
+        "functionDeclaration": "function() { this.click(); }",
+    })).await?;
+    Ok(format!("Clicked {element_ref} (JS fallback)"))
+}
+
+/// Fill a text input by @ref.
+pub async fn fill(session: &mut BrowserSession, element_ref: &str, value: &str) -> Result<String> {
+    let node_id = session.resolve_ref(element_ref)?;
+    let client = session.client()?;
+
+    // Focus the element
+    client.send("DOM.focus", json!({"backendNodeId": node_id})).await?;
+
+    // Clear existing value
+    client.send("Runtime.evaluate", json!({
+        "expression": format!(
+            "document.querySelector('[data-rustyclaw-ref=\"{element_ref}\"]')?.value = '' || \
+             document.activeElement.value = ''"
+        )
+    })).await.ok();
+
+    // Type the value (handles input events correctly)
+    client.send("Input.insertText", json!({"text": value})).await?;
+
+    Ok(format!("Filled {element_ref} with \"{}\"", if value.len() > 50 {
+        format!("{}...", &value[..50])
+    } else {
+        value.to_string()
+    }))
+}
+
+/// Take a screenshot. Returns base64-encoded PNG.
+pub async fn screenshot(session: &BrowserSession, full_page: bool) -> Result<String> {
+    let client = session.client()?;
+    let mut params = json!({"format": "png"});
+    if full_page {
+        let metrics = client.send("Page.getLayoutMetrics", json!({})).await?;
+        let width = metrics["cssContentSize"]["width"].as_f64().unwrap_or(1280.0);
+        let height = metrics["cssContentSize"]["height"].as_f64().unwrap_or(720.0);
+        params["clip"] = json!({
+            "x": 0, "y": 0,
+            "width": width, "height": height,
+            "scale": 1,
+        });
+    }
+    let result = client.send("Page.captureScreenshot", params).await?;
+    let data = result["data"].as_str().unwrap_or("").to_string();
+    Ok(data)
+}
+
+/// Press a key (e.g. "Enter", "Tab", "Escape", "a").
+pub async fn press_key(session: &BrowserSession, key: &str) -> Result<String> {
+    let client = session.client()?;
+
+    let key_lower = key.to_lowercase();
+    let (key_code, text) = match key_lower.as_str() {
+        "enter" | "return" => ("Enter", "\r"),
+        "tab" => ("Tab", "\t"),
+        "escape" | "esc" => ("Escape", ""),
+        "backspace" => ("Backspace", ""),
+        "space" => (" ", " "),
+        _ => (key, key),
+    };
+
+    client.send("Input.dispatchKeyEvent", json!({
+        "type": "keyDown",
+        "key": key_code,
+        "text": text,
+    })).await?;
+    client.send("Input.dispatchKeyEvent", json!({
+        "type": "keyUp",
+        "key": key_code,
+    })).await?;
+
+    Ok(format!("Pressed key: {key}"))
+}
+
+/// Handle a dialog (alert/confirm/prompt).
+pub async fn handle_dialog(session: &BrowserSession, accept: bool, text: Option<&str>) -> Result<String> {
+    let client = session.client()?;
+    let mut params = json!({"accept": accept});
+    if let Some(t) = text {
+        params["promptText"] = json!(t);
+    }
+    client.send("Page.handleJavaScriptDialog", params).await?;
+    Ok(format!("Dialog {}", if accept { "accepted" } else { "dismissed" }))
+}
+
+/// Get console messages (placeholder — requires a Runtime.consoleAPICalled listener).
+pub async fn get_console_messages(session: &BrowserSession) -> Result<Vec<String>> {
+    let _client = session.client()?;
+    // Event-based listener not yet wired; return empty for now.
+    Ok(Vec::new())
+}
+
+/// Get text content of an element by @ref.
+pub async fn get_text(session: &mut BrowserSession, element_ref: &str) -> Result<String> {
+    let node_id = session.resolve_ref(element_ref)?;
+    let client = session.client()?;
+    let resolved = client.send("DOM.resolveNode", json!({"backendNodeId": node_id})).await?;
+    let object_id = resolved["object"]["objectId"].as_str()
+        .ok_or_else(|| anyhow::anyhow!("Could not resolve {element_ref}"))?;
+    let result = client.send("Runtime.callFunctionOn", json!({
+        "objectId": object_id,
+        "functionDeclaration": "function() { return this.innerText || this.textContent || ''; }",
+        "returnByValue": true,
+    })).await?;
+    Ok(result["result"]["value"].as_str().unwrap_or("").to_string())
+}
+
+/// Wait for a CSS selector to appear, or timeout.
+pub async fn wait_for(
+    session: &BrowserSession,
+    condition: &str,
+    timeout_ms: u64,
+) -> Result<String> {
+    let client = session.client()?;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+
+    loop {
+        let result = client.send("Runtime.evaluate", json!({
+            "expression": format!(
+                "!!document.querySelector('{}')",
+                condition.replace('\'', "\\'")
+            ),
+        })).await?;
+
+        if result["result"]["value"].as_bool() == Some(true) {
+            return Ok(format!("Condition met: {condition}"));
+        }
+
+        if tokio::time::Instant::now() > deadline {
+            return Ok(format!("Timeout after {timeout_ms}ms waiting for: {condition}"));
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+}
