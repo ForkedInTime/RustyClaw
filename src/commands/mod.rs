@@ -19,6 +19,8 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "banner",
     "branch",
     "brief",
+    "browse",
+    "browser",
     "btw",
     "budget",
     "clear",
@@ -69,6 +71,7 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "rewind",
     "review",
     "sandbox",
+    "screenshot",
     "security-review",
     "session",
     "share",
@@ -290,6 +293,12 @@ pub enum CommandAction {
     Redo { n: Option<u32> },
     /// `/autocommit [status]` — print auto-commit state to the chat. v1 only supports `status`.
     AutoCommitStatus,
+    /// Launch browser and optionally navigate to URL
+    BrowseUrl(String),
+    /// Take a screenshot of the current browser page
+    BrowserScreenshot,
+    /// Close the browser session
+    BrowserClose,
     /// Command not recognised — show error
     Unknown(String),
 }
@@ -359,6 +368,17 @@ pub fn dispatch(input: &str, ctx: &CommandContext) -> CommandAction {
         "undo" => cmd_undo(args),
         "redo" => cmd_redo(args),
         "autocommit" => cmd_autocommit(args),
+        "browser" | "browse" => {
+            let url = args.trim().to_string();
+            if url == "close" {
+                CommandAction::BrowserClose
+            } else if url.is_empty() {
+                CommandAction::BrowseUrl("about:blank".to_string())
+            } else {
+                CommandAction::BrowseUrl(url)
+            }
+        }
+        "screenshot" => CommandAction::BrowserScreenshot,
         "branch" => cmd_branch(ctx),
         "summary" => CommandAction::SendPrompt(
             "Please give a brief summary of our conversation so far — what we've discussed, \

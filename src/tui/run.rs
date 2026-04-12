@@ -446,6 +446,9 @@ async fn run_loop(mut config: Config, resume_id: Option<String>) -> Result<()> {
     let mcp_clients = mcp_manager.clients.clone();
     let (mut tools, shared_state) = all_tools_with_state_and_mcp(&config, mcp_tools, mcp_clients);
     let todo_state: TodoState = shared_state.todo;
+    // Keep a handle to the shared browser session so /browser, /browse and /screenshot
+    // drive the SAME Chrome instance as the `browser_*` tools. `None` if browser disabled.
+    let browser_session_for_app = shared_state.browser_session.clone();
     let spawn_registry = crate::spawn::new_registry();
 
     // Apply --allowed-tools / --disallowed-tools CLI filters
@@ -473,6 +476,7 @@ async fn run_loop(mut config: Config, resume_id: Option<String>) -> Result<()> {
     let skills = load_skills().await;
 
     let mut app = App::new(&config.model, &config.cwd);
+    app.browser_session = browser_session_for_app;
     if let Some(ref e) = config.effort {
         app.effort = Some(e.clone());
     }
@@ -3859,6 +3863,97 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                             config.auto_commit.message_prefix,
                         );
                         app.entries.push(ChatEntry::system(msg));
+                    }
+                    CommandAction::BrowseUrl(url) => {
+                        // Ship a prompt to the agent loop — it will invoke the shared
+                        // browser_navigate / browser_snapshot tools (which drive the same
+                        // Chrome instance as /browser and /screenshot).
+                        let prompt = if url == "about:blank" {
+                            "Launch the browser (use the browser_navigate tool with url=about:blank) and take an accessibility snapshot. Tell me it's ready.".to_string()
+                        } else {
+                            format!(
+                                "Navigate the browser to {url} and take an accessibility snapshot. Describe what you see on the page."
+                            )
+                        };
+                        app.entries.push(ChatEntry::user(input.clone()));
+                        app.scroll_to_bottom();
+                        app.start_loading();
+                        let mut snapshot = messages.clone();
+                        snapshot.push(Message {
+                            role: Role::User,
+                            content: vec![ContentBlock::Text { text: prompt }],
+                        });
+                        let c2 = client.clone();
+                        let tvec = tools.to_vec();
+                        let cfg = config.clone();
+                        let tx2 = tx.clone();
+                        let sp = system_prompt.clone();
+                        let ps = perm_state.clone();
+                        let pm = app.plan_mode;
+                        let sid3 = session.id.clone();
+                        let handle = tokio::spawn(async move {
+                            run_api_task(ApiTask {
+                                client: c2,
+                                tools: tvec,
+                                messages: snapshot,
+                                config: cfg,
+                                perm_state: ps,
+                                system_prompt: sp,
+                                tx: tx2,
+                                plan_mode: pm,
+                                session_id: sid3,
+                            })
+                            .await;
+                        });
+                        app.api_task = Some(handle.abort_handle());
+                    }
+                    CommandAction::BrowserScreenshot => {
+                        let prompt = "Take a screenshot of the current browser page (use the browser_screenshot tool) and tell me what is visible.".to_string();
+                        app.entries.push(ChatEntry::user(input.clone()));
+                        app.scroll_to_bottom();
+                        app.start_loading();
+                        let mut snapshot = messages.clone();
+                        snapshot.push(Message {
+                            role: Role::User,
+                            content: vec![ContentBlock::Text { text: prompt }],
+                        });
+                        let c2 = client.clone();
+                        let tvec = tools.to_vec();
+                        let cfg = config.clone();
+                        let tx2 = tx.clone();
+                        let sp = system_prompt.clone();
+                        let ps = perm_state.clone();
+                        let pm = app.plan_mode;
+                        let sid3 = session.id.clone();
+                        let handle = tokio::spawn(async move {
+                            run_api_task(ApiTask {
+                                client: c2,
+                                tools: tvec,
+                                messages: snapshot,
+                                config: cfg,
+                                perm_state: ps,
+                                system_prompt: sp,
+                                tx: tx2,
+                                plan_mode: pm,
+                                session_id: sid3,
+                            })
+                            .await;
+                        });
+                        app.api_task = Some(handle.abort_handle());
+                    }
+                    CommandAction::BrowserClose => {
+                        if let Some(arc) = &app.browser_session {
+                            let mut session = arc.lock().await;
+                            session.close().await;
+                            app.entries
+                                .push(ChatEntry::system("Browser session closed.".to_string()));
+                        } else {
+                            app.entries.push(ChatEntry::system(
+                                "Browser not enabled — set browserEnabled=true in settings.json."
+                                    .to_string(),
+                            ));
+                        }
+                        app.scroll_to_bottom();
                     }
                     CommandAction::Unknown(name) => {
                         // Try skill expansion before giving up
