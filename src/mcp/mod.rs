@@ -2,7 +2,7 @@
 ///
 /// Provides:
 ///   - McpManager  — connects to all servers from settings.json at startup
-///   - McpDynamicTool — wraps an MCP tool as a built-in Tool (Arc<dyn Tool>)
+///   - McpDynamicTool — wraps an MCP tool as a built-in Tool (`Arc<dyn Tool>`)
 ///
 /// Tool names use the format `mcp__<server>__<tool>` to avoid conflicts with
 /// built-in tools and to let Claude identify which server provides each tool.
