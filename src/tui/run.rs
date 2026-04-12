@@ -3983,9 +3983,49 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                                         "Watch mode already active. Use `/watch stop` first.",
                                     ));
                                 } else {
-                                    let watch_path = match arg_opt {
-                                        Some(p) => std::path::PathBuf::from(p),
-                                        None => config.cwd.clone(),
+                                    // Containment check: a user-provided path must resolve
+                                    // inside cwd. Prevents `/watch /etc` or
+                                    // `/watch ../../..` from spinning up a watcher over
+                                    // arbitrary filesystem regions. Canonicalize both
+                                    // sides so symlink trickery can't escape cwd either.
+                                    let watch_path_result: Result<std::path::PathBuf, String> =
+                                        match arg_opt {
+                                            None => Ok(config.cwd.clone()),
+                                            Some(p) => {
+                                                let candidate = std::path::PathBuf::from(p);
+                                                let absolute = if candidate.is_absolute() {
+                                                    candidate
+                                                } else {
+                                                    config.cwd.join(candidate)
+                                                };
+                                                match (
+                                                    absolute.canonicalize(),
+                                                    config.cwd.canonicalize(),
+                                                ) {
+                                                    (Ok(canon), Ok(cwd_canon))
+                                                        if canon.starts_with(&cwd_canon) =>
+                                                    {
+                                                        Ok(canon)
+                                                    }
+                                                    (Ok(canon), Ok(cwd_canon)) => Err(format!(
+                                                        "Watch path {} is outside cwd {}.",
+                                                        canon.display(),
+                                                        cwd_canon.display()
+                                                    )),
+                                                    _ => Err(format!(
+                                                        "Watch path not accessible: {}",
+                                                        absolute.display()
+                                                    )),
+                                                }
+                                            }
+                                        };
+                                    let watch_path = match watch_path_result {
+                                        Ok(p) => p,
+                                        Err(msg) => {
+                                            app.entries.push(ChatEntry::error(msg));
+                                            app.scroll_to_bottom();
+                                            return Ok(());
+                                        }
                                     };
                                     let cfg = crate::watch::WatchConfig {
                                         paths: vec![watch_path.clone()],
