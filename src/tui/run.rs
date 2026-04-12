@@ -3960,11 +3960,11 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                             Some("off") | Some("stop") => {
                                 if app.watcher.take().is_some() {
                                     app.entries.push(ChatEntry::system(
-                                        "Watch mode stopped.".to_string(),
+                                        "Watch mode stopped.",
                                     ));
                                 } else {
                                     app.entries.push(ChatEntry::system(
-                                        "Watch mode was not active.".to_string(),
+                                        "Watch mode was not active.",
                                     ));
                                 }
                             }
@@ -3974,13 +3974,13 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                                 } else {
                                     "Watch mode: inactive"
                                 };
-                                app.entries.push(ChatEntry::system(msg.to_string()));
+                                app.entries.push(ChatEntry::system(msg));
                             }
                             arg_opt => {
                                 // Already running? Tell the user instead of double-starting.
                                 if app.watcher.is_some() {
                                     app.entries.push(ChatEntry::system(
-                                        "Watch mode already active. Use `/watch stop` first.".to_string(),
+                                        "Watch mode already active. Use `/watch stop` first.",
                                     ));
                                 } else {
                                     let watch_path = match arg_opt {
@@ -4024,8 +4024,8 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                                                 }
                                             });
                                             app.watcher = Some(crate::tui::app::WatcherHandle {
-                                                watcher,
                                                 forwarder: handle.abort_handle(),
+                                                watcher,
                                             });
                                             app.entries.push(ChatEntry::system(format!(
                                                 "Watching {} for {} markers.",
@@ -4054,10 +4054,10 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                         }
                         match cmd.output().await {
                             Ok(output) if output.status.success() => {
-                                let diff_text = String::from_utf8_lossy(&output.stdout).to_string();
+                                let diff_text = String::from_utf8_lossy(&output.stdout).into_owned();
                                 if diff_text.trim().is_empty() {
                                     app.entries.push(ChatEntry::system(
-                                        "No uncommitted changes.".to_string(),
+                                        "No uncommitted changes.",
                                     ));
                                 } else {
                                     let files = crate::tui::diff::parse_unified_diff(&diff_text);

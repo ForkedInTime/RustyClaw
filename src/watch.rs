@@ -55,11 +55,13 @@ pub fn scan_markers(content: &str, patterns: &[&str]) -> Vec<Marker> {
 /// Configuration for the file watcher.
 pub struct WatchConfig {
     pub paths: Vec<PathBuf>,
-    /// Glob patterns to include. Wired in Task 12.
-    #[allow(dead_code)]
+    /// Glob patterns to include (e.g. `["*.rs", "*.py"]`). Only `*.<ext>` form
+    /// is supported for v1; other patterns pass through unconditionally.
     pub patterns: Vec<String>,
     pub markers: Vec<String>,      // marker patterns to scan for (e.g. "AI:", "AGENT:")
-    /// Debounce window. Wired in Task 12.
+    /// Debounce window. Reserved — actual debouncing will coalesce rapid
+    /// bursts in a follow-up task. Rate-limiting (`rate_limit_ms`) currently
+    /// provides the only back-pressure.
     #[allow(dead_code)]
     pub debounce_ms: u64,
     pub rate_limit_ms: u64,
@@ -93,6 +95,14 @@ pub fn start_watcher(
     let rate_limit = Duration::from_millis(config.rate_limit_ms);
     let marker_patterns: Vec<String> = config.markers.clone();
 
+    // Precompute `*.EXT` patterns into a Vec<String> of bare extensions.
+    // Skip patterns that aren't `*.<ext>` form — they're no-ops for now.
+    let pattern_exts: Vec<String> = config
+        .patterns
+        .iter()
+        .filter_map(|p| p.strip_prefix("*.").map(|s| s.to_string()))
+        .collect();
+
     // `None` means "never triggered" — allows the first event through without
     // relying on `Instant::now() - rate_limit`, which can underflow on
     // short-uptime systems where `Duration::from_millis(rate_limit_ms)` is
@@ -121,6 +131,18 @@ pub fn start_watcher(
             // Skip non-files and gitignored files
             if !path.is_file() { continue; }
             if path.components().any(|c| c.as_os_str() == ".git") { continue; }
+
+            // Extension filter. Patterns like `*.rs` only — anything else
+            // (or an empty list) passes through. Keeps the implementation
+            // tight; globbing can come later.
+            if !pattern_exts.is_empty() {
+                let matches = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|ext| pattern_exts.iter().any(|p| p == ext))
+                    .unwrap_or(false);
+                if !matches { continue; }
+            }
 
             let _ = tx.send(WatchEvent::FileChanged { path: path.clone() });
 
