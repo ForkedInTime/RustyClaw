@@ -446,6 +446,9 @@ async fn run_loop(mut config: Config, resume_id: Option<String>) -> Result<()> {
     let mcp_clients = mcp_manager.clients.clone();
     let (mut tools, shared_state) = all_tools_with_state_and_mcp(&config, mcp_tools, mcp_clients);
     let todo_state: TodoState = shared_state.todo;
+    // Keep a handle to the shared browser session so /browser, /browse and /screenshot
+    // drive the SAME Chrome instance as the `browser_*` tools. `None` if browser disabled.
+    let browser_session_for_app = shared_state.browser_session.clone();
     let spawn_registry = crate::spawn::new_registry();
 
     // Apply --allowed-tools / --disallowed-tools CLI filters
@@ -473,6 +476,7 @@ async fn run_loop(mut config: Config, resume_id: Option<String>) -> Result<()> {
     let skills = load_skills().await;
 
     let mut app = App::new(&config.model, &config.cwd);
+    app.browser_session = browser_session_for_app;
     if let Some(ref e) = config.effort {
         app.effort = Some(e.clone());
     }
@@ -761,12 +765,10 @@ async fn run_loop(mut config: Config, resume_id: Option<String>) -> Result<()> {
             match Session::resume(&id).await {
                 Ok((new_session, loaded_messages)) => {
                     let display = entries_from_messages(&loaded_messages);
-                    messages.clear();
-                    messages.extend(loaded_messages.iter().cloned());
                     saved_count = loaded_messages.len();
-                    app.entries.clear();
-                    app.entries.extend(display);
-                    app.streaming.clear();
+                    messages = loaded_messages;
+                    app.entries = display;
+                    app.streaming = String::new();
                     app.show_welcome = false;
                     app.scroll_to_bottom();
                     let resume_name = new_session.meta.name.clone();
@@ -1781,6 +1783,7 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                     }
                     CommandAction::Clear => {
                         messages.clear();
+                        messages.shrink_to_fit();
                         app.clear();
                         app.pending_screen_clear = true;
                         // Refresh recent sessions so the welcome banner is up-to-date
@@ -1986,6 +1989,7 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                         } else {
                             let remove = pairs_to_remove.min(len);
                             messages.truncate(len - remove);
+                            messages.shrink_to_fit();
                             // Also trim display entries — remove last n*2 non-system entries
                             let mut removed = 0;
                             while removed < pairs_to_remove {
@@ -2106,12 +2110,10 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                             match Session::resume(&id).await {
                                 Ok((new_session, loaded_messages)) => {
                                     let display = entries_from_messages(&loaded_messages);
-                                    messages.clear();
-                                    messages.extend(loaded_messages.iter().cloned());
                                     *saved_count = loaded_messages.len();
-                                    app.entries.clear();
-                                    app.entries.extend(display);
-                                    app.streaming.clear();
+                                    *messages = loaded_messages;
+                                    app.entries = display;
+                                    app.streaming = String::new();
                                     app.show_welcome = false;
                                     app.scroll_to_bottom();
                                     let resume_name = new_session.meta.name.clone();
@@ -2581,11 +2583,9 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                                 Some((msgs, src_model)) => {
                                     let count = msgs.len();
                                     let display = entries_from_messages(&msgs);
-                                    messages.clear();
-                                    messages.extend(msgs);
+                                    *messages = msgs;
                                     *saved_count = 0;
-                                    app.entries.clear();
-                                    app.entries.extend(display);
+                                    app.entries = display;
                                     app.show_welcome = false;
                                     app.scroll_to_bottom();
                                     app.overlay = Some(Overlay::new(
@@ -3864,12 +3864,279 @@ async fn handle_key(ctx: KeyCtx<'_>) -> Result<()> {
                         );
                         app.entries.push(ChatEntry::system(msg));
                     }
+                    CommandAction::BrowseUrl(url) => {
+                        // Ship a prompt to the agent loop — it will invoke the shared
+                        // browser_navigate / browser_snapshot tools (which drive the same
+                        // Chrome instance as /browser and /screenshot).
+                        let prompt = if url == "about:blank" {
+                            "Launch the browser (use the browser_navigate tool with url=about:blank) and take an accessibility snapshot. Tell me it's ready.".to_string()
+                        } else {
+                            format!(
+                                "Navigate the browser to {url} and take an accessibility snapshot. Describe what you see on the page."
+                            )
+                        };
+                        app.entries.push(ChatEntry::user(input.clone()));
+                        app.scroll_to_bottom();
+                        app.start_loading();
+                        let mut snapshot = messages.clone();
+                        snapshot.push(Message {
+                            role: Role::User,
+                            content: vec![ContentBlock::Text { text: prompt }],
+                        });
+                        let c2 = client.clone();
+                        let tvec = tools.to_vec();
+                        let cfg = config.clone();
+                        let tx2 = tx.clone();
+                        let sp = system_prompt.clone();
+                        let ps = perm_state.clone();
+                        let pm = app.plan_mode;
+                        let sid3 = session.id.clone();
+                        let handle = tokio::spawn(async move {
+                            run_api_task(ApiTask {
+                                client: c2,
+                                tools: tvec,
+                                messages: snapshot,
+                                config: cfg,
+                                perm_state: ps,
+                                system_prompt: sp,
+                                tx: tx2,
+                                plan_mode: pm,
+                                session_id: sid3,
+                            })
+                            .await;
+                        });
+                        app.api_task = Some(handle.abort_handle());
+                    }
+                    CommandAction::BrowserScreenshot => {
+                        let prompt = "Take a screenshot of the current browser page (use the browser_screenshot tool) and tell me what is visible.".to_string();
+                        app.entries.push(ChatEntry::user(input.clone()));
+                        app.scroll_to_bottom();
+                        app.start_loading();
+                        let mut snapshot = messages.clone();
+                        snapshot.push(Message {
+                            role: Role::User,
+                            content: vec![ContentBlock::Text { text: prompt }],
+                        });
+                        let c2 = client.clone();
+                        let tvec = tools.to_vec();
+                        let cfg = config.clone();
+                        let tx2 = tx.clone();
+                        let sp = system_prompt.clone();
+                        let ps = perm_state.clone();
+                        let pm = app.plan_mode;
+                        let sid3 = session.id.clone();
+                        let handle = tokio::spawn(async move {
+                            run_api_task(ApiTask {
+                                client: c2,
+                                tools: tvec,
+                                messages: snapshot,
+                                config: cfg,
+                                perm_state: ps,
+                                system_prompt: sp,
+                                tx: tx2,
+                                plan_mode: pm,
+                                session_id: sid3,
+                            })
+                            .await;
+                        });
+                        app.api_task = Some(handle.abort_handle());
+                    }
+                    CommandAction::BrowserClose => {
+                        if let Some(arc) = &app.browser_session {
+                            let mut session = arc.lock().await;
+                            session.close().await;
+                            app.entries
+                                .push(ChatEntry::system("Browser session closed.".to_string()));
+                        } else {
+                            app.entries.push(ChatEntry::system(
+                                "Browser not enabled — set browserEnabled=true in settings.json."
+                                    .to_string(),
+                            ));
+                        }
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::Watch(arg) => {
+                        match arg.as_deref() {
+                            Some("off") | Some("stop") => {
+                                if app.watcher.take().is_some() {
+                                    app.entries.push(ChatEntry::system(
+                                        "Watch mode stopped.",
+                                    ));
+                                } else {
+                                    app.entries.push(ChatEntry::system(
+                                        "Watch mode was not active.",
+                                    ));
+                                }
+                            }
+                            Some("status") => {
+                                let msg = if app.watcher.is_some() {
+                                    "Watch mode: active"
+                                } else {
+                                    "Watch mode: inactive"
+                                };
+                                app.entries.push(ChatEntry::system(msg));
+                            }
+                            arg_opt => {
+                                // Already running? Tell the user instead of double-starting.
+                                if app.watcher.is_some() {
+                                    app.entries.push(ChatEntry::system(
+                                        "Watch mode already active. Use `/watch stop` first.",
+                                    ));
+                                } else {
+                                    // Containment check: a user-provided path must resolve
+                                    // inside cwd. Prevents `/watch /etc` or
+                                    // `/watch ../../..` from spinning up a watcher over
+                                    // arbitrary filesystem regions. Canonicalize both
+                                    // sides so symlink trickery can't escape cwd either.
+                                    let watch_path_result: Result<std::path::PathBuf, String> =
+                                        match arg_opt {
+                                            None => Ok(config.cwd.clone()),
+                                            Some(p) => {
+                                                let candidate = std::path::PathBuf::from(p);
+                                                let absolute = if candidate.is_absolute() {
+                                                    candidate
+                                                } else {
+                                                    config.cwd.join(candidate)
+                                                };
+                                                match (
+                                                    absolute.canonicalize(),
+                                                    config.cwd.canonicalize(),
+                                                ) {
+                                                    (Ok(canon), Ok(cwd_canon))
+                                                        if canon.starts_with(&cwd_canon) =>
+                                                    {
+                                                        Ok(canon)
+                                                    }
+                                                    (Ok(canon), Ok(cwd_canon)) => Err(format!(
+                                                        "Watch path {} is outside cwd {}.",
+                                                        canon.display(),
+                                                        cwd_canon.display()
+                                                    )),
+                                                    _ => Err(format!(
+                                                        "Watch path not accessible: {}",
+                                                        absolute.display()
+                                                    )),
+                                                }
+                                            }
+                                        };
+                                    let watch_path = match watch_path_result {
+                                        Ok(p) => p,
+                                        Err(msg) => {
+                                            app.entries.push(ChatEntry::error(msg));
+                                            app.scroll_to_bottom();
+                                            return Ok(());
+                                        }
+                                    };
+                                    let cfg = crate::watch::WatchConfig {
+                                        paths: vec![watch_path.clone()],
+                                        patterns: vec![
+                                            "*.rs".into(),
+                                            "*.py".into(),
+                                            "*.ts".into(),
+                                            "*.js".into(),
+                                        ],
+                                        markers: config.watch_markers.clone(),
+                                        debounce_ms: config.watch_debounce_ms,
+                                        rate_limit_ms: config.watch_rate_limit_ms,
+                                    };
+                                    let (wtx, mut wrx) = mpsc::unbounded_channel();
+                                    match crate::watch::start_watcher(cfg, wtx) {
+                                        Ok(watcher) => {
+                                            // Forwarder: every watch event → SystemMessage in the TUI.
+                                            let tx2 = tx.clone();
+                                            let handle = tokio::spawn(async move {
+                                                while let Some(ev) = wrx.recv().await {
+                                                    let msg = match ev {
+                                                        crate::watch::WatchEvent::FileChanged { path } => {
+                                                            format!("[watch] changed: {}", path.display())
+                                                        }
+                                                        crate::watch::WatchEvent::MarkerFound { marker } => {
+                                                            format!(
+                                                                "[watch] {} at {}:{} — {}",
+                                                                marker.kind,
+                                                                marker.file.display(),
+                                                                marker.line,
+                                                                marker.text,
+                                                            )
+                                                        }
+                                                    };
+                                                    let _ = tx2.send(AppEvent::SystemMessage(msg));
+                                                }
+                                            });
+                                            app.watcher = Some(crate::tui::app::WatcherHandle {
+                                                forwarder: handle.abort_handle(),
+                                                watcher,
+                                            });
+                                            app.entries.push(ChatEntry::system(format!(
+                                                "Watching {} for {} markers.",
+                                                watch_path.display(),
+                                                config.watch_markers.join(", "),
+                                            )));
+                                        }
+                                        Err(e) => {
+                                            app.entries.push(ChatEntry::error(format!(
+                                                "Watch failed: {e}"
+                                            )));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        app.scroll_to_bottom();
+                    }
+                    CommandAction::ShowDiff(path) => {
+                        // Use tokio::process::Command with separate args — NEVER sh -c
+                        // with a formatted path (user-controlled → shell injection).
+                        let mut cmd = tokio::process::Command::new("git");
+                        cmd.arg("diff").current_dir(&config.cwd);
+                        if let Some(p) = &path {
+                            cmd.arg("--").arg(p);
+                        }
+                        match cmd.output().await {
+                            Ok(output) if output.status.success() => {
+                                let diff_text = String::from_utf8_lossy(&output.stdout).into_owned();
+                                if diff_text.trim().is_empty() {
+                                    app.entries.push(ChatEntry::system(
+                                        "No uncommitted changes.",
+                                    ));
+                                } else {
+                                    let files = crate::tui::diff::parse_unified_diff(&diff_text);
+                                    let summary: String = files
+                                        .iter()
+                                        .map(|f| {
+                                            format!(
+                                                "  {} (+{} -{})",
+                                                f.path, f.additions, f.deletions
+                                            )
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join("\n");
+                                    app.overlay = Some(Overlay::new(
+                                        "diff",
+                                        format!("Diff Review\n\n{summary}\n\n{diff_text}"),
+                                    ));
+                                }
+                            }
+                            Ok(output) => {
+                                let stderr = String::from_utf8_lossy(&output.stderr);
+                                app.entries.push(ChatEntry::error(format!(
+                                    "git diff failed: {stderr}"
+                                )));
+                            }
+                            Err(e) => {
+                                app.entries.push(ChatEntry::error(format!(
+                                    "git diff failed: {e}"
+                                )));
+                            }
+                        }
+                        app.scroll_to_bottom();
+                    }
                     CommandAction::Unknown(name) => {
                         // Try skill expansion before giving up
                         if let Some((skill_name, args)) = parse_skill_invocation(&input)
                             && let Some(skill) = skills.get(skill_name)
                         {
-                            let mut prompt = skill.expand(args);
+                            let mut prompt = skill.expand_named(args);
                             if config.disable_skill_shell_execution {
                                 prompt.push_str("\n\nNote: shell command execution (Bash tool) is disabled for skill invocations.");
                             }

@@ -2,6 +2,7 @@
 /// Entry point
 mod api;
 mod autofix;
+mod browser;
 mod commands;
 mod compact;
 mod config;
@@ -24,6 +25,7 @@ mod spawn;
 mod tools;
 mod tui;
 mod voice;
+mod watch;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};

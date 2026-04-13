@@ -2,6 +2,7 @@
 /// Left panel: file listing.  Right panel: chat / welcome.
 /// Uses ratatui + crossterm with alternate screen.
 pub mod app;
+pub mod diff;
 pub mod events;
 pub mod markdown;
 pub mod render;

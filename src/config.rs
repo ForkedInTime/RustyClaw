@@ -127,7 +127,7 @@ pub struct Config {
     pub api_key: String,
 
     /// Model to use for the main loop.
-    /// Use "ollama:<name>" to route to a local Ollama instance instead.
+    /// Use `ollama:<name>` to route to a local Ollama instance instead.
     pub model: String,
 
     /// Max tokens per response (global fallback)
@@ -305,6 +305,23 @@ pub struct Config {
     /// Path to the TTS voice model file or clone sample.
     pub tts_voice_model: Option<String>,
 
+    /// Whether browser automation is enabled.
+    pub browser_enabled: bool,
+    /// Run browser in headless mode (default: true).
+    pub browser_headless: bool,
+    /// Custom Chrome/Chromium binary path (None = auto-detect).
+    pub browser_chrome_path: Option<String>,
+    /// Connect to existing CDP endpoint instead of launching Chrome.
+    pub browser_cdp_endpoint: Option<String>,
+    /// Default browser action timeout in milliseconds.
+    pub browser_timeout_ms: u64,
+
+    /// Watch debounce (ms) — coalesces rapid filesystem events.
+    pub watch_debounce_ms: u64,
+    /// Minimum gap between watch triggers (ms).
+    pub watch_rate_limit_ms: u64,
+    /// Comment markers that fire watch auto-action (e.g. `["AI:", "AGENT:"]`).
+    pub watch_markers: Vec<String>,
     /// Whether desktop notifications (notify-send) + terminal bell fire on task completion.
     pub notifications_enabled: bool,
 
@@ -411,6 +428,14 @@ impl Default for Config {
             voice_api_url: None,
             tts_enabled: false,
             tts_voice_model: None,
+            browser_enabled: true,
+            browser_headless: true,
+            browser_chrome_path: None,
+            browser_cdp_endpoint: None,
+            browser_timeout_ms: 30_000,
+            watch_debounce_ms: 500,
+            watch_rate_limit_ms: 10_000,
+            watch_markers: vec!["AI:".into(), "AGENT:".into()],
             notifications_enabled: false,
             spinner_style: "themed".to_string(),
             sandbox_allow_network: true,
@@ -745,7 +770,7 @@ impl Config {
     /// Load and merge all CLAUDE.md files in priority order:
     ///   ~/.claude/CLAUDE.md (global)
     ///   → parent/CLAUDE.md … (ancestor dirs, outermost first)
-    ///   → <cwd>/CLAUDE.md  (most specific, last = highest priority)
+    ///   → `<cwd>/CLAUDE.md`  (most specific, last = highest priority)
     ///
     /// Returns the concatenated text, with a source comment before each section.
     pub fn load_claude_md(cwd: &Path) -> String {
@@ -974,7 +999,7 @@ impl Config {
     }
 
     /// Build the full system prompt, matching the original rustyclaw prompt structure.
-    /// Includes the dynamic <env> block (cwd, git, platform, shell, OS).
+    /// Includes the dynamic `<env>` block (cwd, git, platform, shell, OS).
     pub fn build_system_prompt(&self) -> String {
         let cwd = self.cwd.display().to_string();
 

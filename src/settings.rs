@@ -124,11 +124,14 @@ pub struct Settings {
     pub env: HashMap<String, String>,
 
     /// MCP server definitions — keyed by server name.
+    ///
     /// Example (settings.json):
-    ///   "mcpServers": {
-    ///     "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"GITHUB_TOKEN": "..."} },
-    ///     "remote": { "url": "http://localhost:3000/mcp" }
-    ///   }
+    /// ```json
+    /// "mcpServers": {
+    ///   "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"GITHUB_TOKEN": "..."} },
+    ///   "remote": { "url": "http://localhost:3000/mcp" }
+    /// }
+    /// ```
     #[serde(rename = "mcpServers", default)]
     pub mcp_servers: HashMap<String, McpServerConfig>,
 

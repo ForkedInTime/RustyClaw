@@ -513,6 +513,28 @@ pub struct PendingUserQuestion {
     pub cursor: usize,
 }
 
+// ── Watcher handle ────────────────────────────────────────────────────────────
+
+/// Handle to an active file watcher. Owns the `RecommendedWatcher` (drop = stop)
+/// and the abort handle for the background task that forwards watch events into
+/// the TUI. Dropping drops both, so `app.watcher = None` fully tears it down.
+///
+/// Field order is deliberate: `forwarder` first so it aborts before `watcher`
+/// drops (which closes the notify channel). Combined with the explicit abort
+/// in `Drop::drop`, the forwarder terminates promptly regardless of whether
+/// the channel close or the abort fires first.
+pub struct WatcherHandle {
+    pub forwarder: tokio::task::AbortHandle,
+    #[allow(dead_code)] // kept alive for its drop side-effect
+    pub watcher: notify::RecommendedWatcher,
+}
+
+impl Drop for WatcherHandle {
+    fn drop(&mut self) {
+        self.forwarder.abort();
+    }
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 pub struct App {
@@ -646,6 +668,16 @@ pub struct App {
     pub router: crate::router::RouterConfig,
     /// Session cost tracker with per-model breakdown.
     pub cost_tracker: crate::cost::CostTracker,
+
+    /// Shared browser session — populated from `SharedToolState::browser_session`
+    /// so `/browser`, `/browse`, `/screenshot` and the `browser_*` tools all
+    /// drive the same Chrome instance. `None` when `browser_enabled == false`.
+    pub browser_session:
+        Option<std::sync::Arc<tokio::sync::Mutex<crate::browser::BrowserSession>>>,
+
+    /// Active file-watch state. `None` when no watcher is running.
+    /// Dropping this stops watching.
+    pub watcher: Option<WatcherHandle>,
 }
 
 /// Format a raw model ID into a human-readable name like "Sonnet 4.6".
@@ -774,6 +806,8 @@ impl App {
             pending_redo_positions: None,
             router: crate::router::RouterConfig::new(model),
             cost_tracker: crate::cost::CostTracker::new(),
+            browser_session: None,
+            watcher: None,
         }
     }
 
@@ -841,6 +875,11 @@ impl App {
         self.history_idx = None;
         if !s.trim().is_empty() {
             self.input_history.push(s.clone());
+            // Cap history to prevent unbounded growth in long sessions
+            if self.input_history.len() > 500 {
+                self.input_history.drain(..self.input_history.len() - 500);
+                self.input_history.shrink_to_fit();
+            }
         }
         s
     }
@@ -1215,13 +1254,24 @@ impl App {
                 let preview = format_tool_preview(&name, &args);
                 self.entries
                     .push(ChatEntry::tool_call(format!("{name}  {preview}")));
-                self.tool_stream_buf.clear();
+                self.tool_stream_buf = String::new(); // drop old capacity
                 self.scroll_to_bottom();
             }
             AppEvent::ToolOutputStream(line) => {
-                // Accumulate live output lines and show as a live status entry
+                // Accumulate live output lines (capped at 4KB — we only display the last 500 chars)
                 self.tool_stream_buf.push_str(&line);
                 self.tool_stream_buf.push('\n');
+                if self.tool_stream_buf.len() > 4096 {
+                    let start = self.tool_stream_buf.len() - 2048;
+                    // Find a safe char boundary
+                    let mut start = start;
+                    while start < self.tool_stream_buf.len()
+                        && !self.tool_stream_buf.is_char_boundary(start)
+                    {
+                        start += 1;
+                    }
+                    self.tool_stream_buf = self.tool_stream_buf[start..].to_string();
+                }
                 // Update or create the live output entry (last entry if it's a tool_stream kind)
                 let display = if self.tool_stream_buf.len() > 500 {
                     format!(
@@ -1338,8 +1388,9 @@ impl App {
     }
 
     pub fn clear(&mut self) {
-        self.entries.clear();
-        self.streaming.clear();
+        self.entries = Vec::new();
+        self.streaming = String::new();
+        self.tool_stream_buf = String::new();
         self.tokens_in = 0;
         self.tokens_out = 0;
         self.cache_read_tokens = 0;
@@ -1347,7 +1398,7 @@ impl App {
         self.scroll = 0;
         self.follow_bottom = true;
         self.show_welcome = true;
-        self.turn_costs.clear();
+        self.turn_costs = Vec::new();
     }
 }
 

@@ -19,6 +19,8 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "banner",
     "branch",
     "brief",
+    "browse",
+    "browser",
     "btw",
     "budget",
     "clear",
@@ -69,6 +71,7 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "rewind",
     "review",
     "sandbox",
+    "screenshot",
     "security-review",
     "session",
     "share",
@@ -90,6 +93,7 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "usage",
     "version",
     "vim",
+    "watch",
     "voice",
     "autofix-pr",
     "issue",
@@ -210,7 +214,7 @@ pub enum CommandAction {
     ReloadSettings,
     /// Reload all plugin MCP servers (re-reads settings.json)
     ReloadPlugins,
-    /// Execute a plugin slash command (<plugin>:<command>)
+    /// Execute a plugin slash command (`<plugin>:<command>`)
     PluginCommand { plugin: String, command: String },
     /// Show interactive model picker (async — needs Ollama query)
     ListModels,
@@ -290,6 +294,22 @@ pub enum CommandAction {
     Redo { n: Option<u32> },
     /// `/autocommit [status]` — print auto-commit state to the chat. v1 only supports `status`.
     AutoCommitStatus,
+    /// Launch browser and optionally navigate to URL
+    BrowseUrl(String),
+    /// Take a screenshot of the current browser page
+    BrowserScreenshot,
+    /// Close the browser session
+    BrowserClose,
+    /// Start / stop / check file watcher.
+    /// `None` = start watching cwd with default settings.
+    /// `Some("off")` or `Some("stop")` = stop the watcher.
+    /// `Some("status")` = report current watch state.
+    /// `Some(path)` = start watching a specific path.
+    Watch(Option<String>),
+    /// Show a diff review overlay.
+    /// `None` = show the full `git diff`.
+    /// `Some(path)` = show `git diff -- <path>`.
+    ShowDiff(Option<String>),
     /// Command not recognised — show error
     Unknown(String),
 }
@@ -349,7 +369,14 @@ pub fn dispatch(input: &str, ctx: &CommandContext) -> CommandAction {
         "doctor" => cmd_doctor(ctx),
         "install-missing" => cmd_install_missing(),
         "init" => cmd_init(ctx),
-        "diff" => cmd_diff(args, ctx),
+        "watch" => {
+            let a = args.trim();
+            CommandAction::Watch(if a.is_empty() { None } else { Some(a.to_string()) })
+        }
+        "diff" => {
+            let a = args.trim();
+            CommandAction::ShowDiff(if a.is_empty() { None } else { Some(a.to_string()) })
+        }
         "permissions" => cmd_permissions(ctx),
         "skills" => cmd_skills(ctx),
         "review" => cmd_review(args),
@@ -359,6 +386,17 @@ pub fn dispatch(input: &str, ctx: &CommandContext) -> CommandAction {
         "undo" => cmd_undo(args),
         "redo" => cmd_redo(args),
         "autocommit" => cmd_autocommit(args),
+        "browser" | "browse" => {
+            let url = args.trim().to_string();
+            if url == "close" {
+                CommandAction::BrowserClose
+            } else if url.is_empty() {
+                CommandAction::BrowseUrl("about:blank".to_string())
+            } else {
+                CommandAction::BrowseUrl(url)
+            }
+        }
+        "screenshot" => CommandAction::BrowserScreenshot,
         "branch" => cmd_branch(ctx),
         "summary" => CommandAction::SendPrompt(
             "Please give a brief summary of our conversation so far — what we've discussed, \
@@ -1276,39 +1314,6 @@ Then add only the sections that have real content. Use terse, actionable languag
     ))
 }
 
-fn cmd_diff(args: &str, ctx: &CommandContext) -> CommandAction {
-    let mut cmd = std::process::Command::new("git");
-    cmd.arg("diff");
-    // Pass the entire args string as a single shell argument to avoid breaking
-    // paths with spaces. Use shell -c so git can interpret flags and paths correctly.
-    if !args.is_empty() {
-        // Prefer passing as separate tokens via shlex-like split to preserve flags.
-        // Simple split on whitespace is sufficient here since git diff paths
-        // are usually passed as unquoted refs/paths in practice.
-        for tok in args.split_whitespace() {
-            cmd.arg(tok);
-        }
-    }
-    cmd.current_dir(&ctx.config.cwd);
-
-    match cmd.output() {
-        Err(e) => CommandAction::Message(format!("git diff failed: {e}")),
-        Ok(out) if !out.status.success() => {
-            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-            CommandAction::Message(format!("git diff error: {stderr}"))
-        }
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            if stdout.trim().is_empty() {
-                CommandAction::Message("No changes (git diff is empty).".into())
-            } else {
-                // Strip ANSI codes for clean display
-                CommandAction::Message(format!("git diff\n\n{stdout}"))
-            }
-        }
-    }
-}
-
 fn cmd_permissions(ctx: &CommandContext) -> CommandAction {
     let _ = ctx; // permissions state lives in PermissionState, not config
     CommandAction::Message(
@@ -1708,74 +1713,6 @@ fn mcp_set_disabled(args: &str, disabled: bool) -> CommandAction {
             }
         }
     }
-}
-
-#[allow(dead_code)]
-fn cmd_memory(ctx: &CommandContext) -> CommandAction {
-    let global_claude_md = Config::claude_dir().join("CLAUDE.md");
-    let local_claude_md = ctx.config.cwd.join("CLAUDE.md");
-
-    let mut lines = vec!["Memory (CLAUDE.md files)\n".to_string()];
-
-    // Active merged content summary
-    if ctx.config.claudemd.is_empty() {
-        lines.push("No CLAUDE.md files loaded — Claude has no custom instructions.".into());
-        lines.push("Run /init to create a project CLAUDE.md.".into());
-    } else {
-        lines.push(format!(
-            "Merged CLAUDE.md loaded ({} chars total)",
-            ctx.config.claudemd.len()
-        ));
-        lines.push("This content is included in every system prompt.".into());
-    }
-
-    lines.push(String::new());
-
-    // Global memory
-    if global_claude_md.exists() {
-        match std::fs::read_to_string(&global_claude_md) {
-            Ok(content) => {
-                lines.push(format!("~/.claude/CLAUDE.md ({} chars):", content.len()));
-                for line in content.lines().take(15) {
-                    lines.push(format!("  {line}"));
-                }
-                if content.lines().count() > 15 {
-                    lines.push(format!(
-                        "  ... ({} more lines)",
-                        content.lines().count() - 15
-                    ));
-                }
-            }
-            Err(e) => lines.push(format!("~/.claude/CLAUDE.md: error reading — {e}")),
-        }
-    } else {
-        lines.push("~/.claude/CLAUDE.md: not found".into());
-    }
-
-    lines.push(String::new());
-
-    // Local memory
-    if local_claude_md.exists() {
-        match std::fs::read_to_string(&local_claude_md) {
-            Ok(content) => {
-                lines.push(format!("CLAUDE.md in cwd ({} chars):", content.len()));
-                for line in content.lines().take(15) {
-                    lines.push(format!("  {line}"));
-                }
-                if content.lines().count() > 15 {
-                    lines.push(format!(
-                        "  ... ({} more lines)",
-                        content.lines().count() - 15
-                    ));
-                }
-            }
-            Err(e) => lines.push(format!("CLAUDE.md: error reading — {e}")),
-        }
-    } else {
-        lines.push("CLAUDE.md in cwd: not found (run /init to create)".into());
-    }
-
-    CommandAction::Message(lines.join("\n"))
 }
 
 /// Dispatch the `/memory` command with subcommands for the persistent MemoryStore.
