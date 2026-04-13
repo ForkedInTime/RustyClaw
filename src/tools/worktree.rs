@@ -112,7 +112,8 @@ impl Tool for EnterWorktreeTool {
 
         let worktree_path = PathBuf::from(&git_root)
             .parent()
-            .unwrap_or(PathBuf::from("/tmp").as_path())
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(std::env::temp_dir)
             .join(format!(
                 "{}-{}",
                 git_root.split('/').next_back().unwrap_or("repo"),

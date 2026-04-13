@@ -7,6 +7,7 @@
 pub mod api;
 pub mod autocommit;
 pub mod autofix;
+pub mod browser;
 pub mod commands;
 pub mod compact;
 pub mod config;
@@ -24,5 +25,13 @@ pub mod settings;
 pub mod skills;
 pub mod tools;
 pub mod voice;
+pub mod watch;
 
 pub mod sdk;
+
+/// Minimal re-export of the `tui::diff` submodule for integration tests.
+/// The rest of `tui` is binary-only and not exposed here.
+pub mod tui {
+    #[path = "diff.rs"]
+    pub mod diff;
+}

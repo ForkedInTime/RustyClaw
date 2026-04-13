@@ -3,6 +3,7 @@ pub mod agent;
 pub mod ask_user;
 pub mod bash;
 pub mod brief_tool;
+pub mod browser_tools;
 pub mod config_tool;
 pub mod cron;
 pub mod discover_skills;
@@ -373,6 +374,10 @@ pub fn default_tools() -> Vec<DynTool> {
 /// All shared state needed by tools that must also be readable by slash commands.
 pub struct SharedToolState {
     pub todo: todo::TodoState,
+    /// Shared across the 8 browser tools and the /browser slash commands.
+    /// None when config.browser_enabled == false.
+    pub browser_session:
+        Option<std::sync::Arc<tokio::sync::Mutex<crate::browser::BrowserSession>>>,
 }
 
 /// Build the full tool set. Returns tools + shared state so slash commands can read it.
@@ -442,6 +447,46 @@ pub fn all_tools_with_state(config: &crate::config::Config) -> (Vec<DynTool>, Sh
     tools.push(Arc::new(sleep::SleepTool));
     tools.push(Arc::new(powershell::PowerShellTool));
     tools.push(Arc::new(web_browser::WebBrowserTool));
+
+    // Browser automation tools (shared session across all browser_* tools AND /browser commands).
+    let browser_session_shared = if config.browser_enabled {
+        let browser_session = std::sync::Arc::new(tokio::sync::Mutex::new(
+            crate::browser::BrowserSession::default(),
+        ));
+        tools.push(Arc::new(browser_tools::BrowserNavigateTool {
+            session: browser_session.clone(),
+            headless: config.browser_headless,
+            chrome_path: config.browser_chrome_path.clone(),
+            cdp_endpoint: config.browser_cdp_endpoint.clone(),
+            timeout_ms: config.browser_timeout_ms,
+        }));
+        tools.push(Arc::new(browser_tools::BrowserSnapshotTool {
+            session: browser_session.clone(),
+        }));
+        tools.push(Arc::new(browser_tools::BrowserClickTool {
+            session: browser_session.clone(),
+        }));
+        tools.push(Arc::new(browser_tools::BrowserFillTool {
+            session: browser_session.clone(),
+        }));
+        tools.push(Arc::new(browser_tools::BrowserScreenshotTool {
+            session: browser_session.clone(),
+        }));
+        tools.push(Arc::new(browser_tools::BrowserGetTextTool {
+            session: browser_session.clone(),
+        }));
+        tools.push(Arc::new(browser_tools::BrowserPressKeyTool {
+            session: browser_session.clone(),
+        }));
+        tools.push(Arc::new(browser_tools::BrowserWaitTool {
+            session: browser_session.clone(),
+            default_timeout_ms: config.browser_timeout_ms,
+        }));
+        Some(browser_session)
+    } else {
+        None
+    };
+
     tools.push(Arc::new(lsp::LSPTool));
     tools.push(Arc::new(discover_skills::DiscoverSkillsTool));
     tools.push(Arc::new(skill_tool::SkillTool));
@@ -475,7 +520,10 @@ pub fn all_tools_with_state(config: &crate::config::Config) -> (Vec<DynTool>, Sh
         tools_snapshot: snapshot,
     }));
 
-    let shared = SharedToolState { todo: todo_state };
+    let shared = SharedToolState {
+        todo: todo_state,
+        browser_session: browser_session_shared,
+    };
     (tools, shared)
 }
 

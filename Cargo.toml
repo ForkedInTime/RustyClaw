@@ -102,6 +102,24 @@ self_update = { version = "0.44.0", default-features = false, features = ["ureq"
 libc = "0.2"
 tempfile = "3.27.0"
 
+# CDP WebSocket client for browser automation
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+
+# Filesystem watcher for watch mode
+notify = "7"
+
+# SHA-256 for loop detector page state fingerprinting
+sha2 = "0.10"
+
+# YAML parsing for enhanced skill frontmatter
+serde_yaml = "0.9"
+
+# Image processing for annotated screenshots
+image = "0.25"
+
+# Base64 encoding for screenshot data
+base64 = "0.22"
+
 [profile.release]
 opt-level = 3
 lto = "fat"
