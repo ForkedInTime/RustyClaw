@@ -122,7 +122,7 @@
     <text x="780" y="540"
           font-size="36"
           font-weight="400"
-          fill="#8B949E">5 MB · 10 ms cold-start · Ollama · local RAG · voice · offline</text>
+          fill="#8B949E">19 MB static binary · sub-50 ms cold-start · Ollama · local RAG · voice · offline</text>
 
     <!-- Prompt flourish along the bottom -->
     <g transform="translate(780 620)"
