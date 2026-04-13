@@ -1,29 +1,175 @@
 <p align="center">
-  <img src="assets/welcome.png" alt="RustyClaw" width="700">
-</p>
-
-<h3 align="center">Grip your codebase.</h3>
-
-<p align="center">
-  Rust-native AI coding CLI · Single binary · No runtime · ~10ms startup
+  <img src="assets/banner.png" alt="RustyClaw — Claude Code, carved in Rust" width="100%">
 </p>
 
 <p align="center">
-  <a href="https://github.com/ForkedInTime/RustyClaw/releases"><img src="https://img.shields.io/github/v/release/ForkedInTime/RustyClaw?style=flat-square&color=blue" alt="Release"></a>
-  <a href="https://github.com/ForkedInTime/RustyClaw/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ForkedInTime/RustyClaw/ci.yml?style=flat-square&label=CI" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="License"></a>
-  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-2024_edition-orange?style=flat-square&logo=rust" alt="Rust"></a>
+  <a href="https://github.com/ForkedInTime/RustyClaw/releases"><img src="https://img.shields.io/github/v/release/ForkedInTime/RustyClaw?style=flat-square&color=B23616" alt="Release"></a>
+  <a href="https://github.com/ForkedInTime/RustyClaw/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ForkedInTime/RustyClaw/ci.yml?style=flat-square&label=CI&color=B23616" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-B23616?style=flat-square" alt="License"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-2024_edition-F08A3E?style=flat-square&logo=rust" alt="Rust"></a>
+  <a href="https://github.com/ForkedInTime/RustyClaw/stargazers"><img src="https://img.shields.io/github/stars/ForkedInTime/RustyClaw?style=flat-square&color=F08A3E" alt="Stars"></a>
 </p>
+
+<h3 align="center">The Claude Code experience — native, offline-capable, and in a single 19 MB binary.</h3>
+
+<p align="center">
+  No Node. No Python. No 80 MB of <code>node_modules</code>. No flickering TUI.<br>
+  Indexes your codebase, routes each task to the cheapest capable model, and runs agents in parallel.
+</p>
+
+<p align="center">
+  <img src="assets/demo.gif" alt="RustyClaw demo" width="100%">
+</p>
+
+---
+
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ForkedInTime/RustyClaw/main/install.sh | bash
+```
+
+<details>
+<summary>Other install methods</summary>
+
+**From source (Rust 2024 edition):**
+```bash
+git clone https://github.com/ForkedInTime/RustyClaw.git
+cd RustyClaw && cargo build --release
+./target/release/rustyclaw
+```
+
+**Specific version:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/ForkedInTime/RustyClaw/main/install.sh | bash -s v0.2.0
+```
+
+Pre-built binaries for `x86_64-linux-gnu`, `aarch64-linux-gnu`, and `x86_64-linux-musl` are attached to every [release](https://github.com/ForkedInTime/RustyClaw/releases).
+</details>
+
+```bash
+echo 'ANTHROPIC_API_KEY=sk-ant-...' >> ~/.env
+rustyclaw
+```
+
+---
+
+## Why RustyClaw?
+
+> **Every other "Rust port" of Claude Code re-implements the CLI and stops there.**
+> RustyClaw takes the Rust advantage and builds the features a native binary makes possible — an on-disk codebase index, a smart router that keeps your bill down, parallel agents in git worktrees, voice I/O, and a `/undo` that actually works.
+
+|  | Claude Code (npm) | [[redacted]](https://github.com/[redacted]) | **RustyClaw** |
+|---|---|---|---|
+| Runtime | Node.js / Bun | Rust | **Rust** |
+| Binary | ~50 MB + `node_modules` | ~15 MB | **19 MB static, zero deps** |
+| Cold start | ~300 ms | ~50 ms | **sub-50 ms** |
+| Memory idle | ~150 MB | ~40 MB | **~10 MB** |
+| Ollama tool-use | No | [Broken (#42)](https://github.com/[redacted]/issues/42) | **Working** |
+| Codebase RAG | No | No | **tree-sitter + FTS5, 8 langs** |
+| Model router | No | No | **Auto-route by task complexity** |
+| Parallel agents | No | No | **Git-worktree isolation** |
+| Voice I/O | No | No | **Whisper + XTTS v2 cloning** |
+| Auto-fix loop | No | No | **Post-edit lint + tests + retry** |
+| `/undo` · `/redo` | No | Partial (pollutes git log) | **Invisible shadow refs** |
+| OpenAI-compat providers | No | Partial | **9 providers, working tools** |
+| Sandbox | No | No | **bwrap / firejail / strict** |
+| CLAUDE.md + AGENTS.md | Partial | No | **Both, with `/reload`** |
+
+---
+
+## Feature tour
+
+### 🧠 &nbsp; Local codebase RAG — zero setup
+
+tree-sitter AST parsing, SQLite FTS5 semantic search. Index your whole repo in seconds. Indexes stay on disk and update incrementally.
+
+```
+> /rag search "TOCTOU"
+HAS match "search TOCTOU" — 10 results
+  src/tools/read.rs:12 (module `search`, rust)
+  src/session/mod.rs:17 (comment, rust)
+  ...
+```
+
+### 💰 &nbsp; Smart model router + live cost dashboard
+
+Simple edits go to Haiku or Ollama. Architecture questions go to Opus. Every token is priced in real time. Cap the bill with `/budget $5` — RustyClaw refuses to go over.
+
+### 🎭 &nbsp; Parallel agents in git worktrees
+
+```bash
+rustyclaw spawn "refactor the auth middleware"
+# runs in an isolated git worktree while you keep working in the main tree
+```
+
+### 🎤 &nbsp; Voice I/O with XTTS v2 cloning
+
+Push-to-talk speech input (Whisper). TTS responses in any voice, including a clone of your own after a 6-second sample. **No competitor ships this.**
+
+### ♻️ &nbsp; Auto-fix loop — [redacted]-style, anti-cheat protected
+
+Every `Write`/`Edit` kicks off a lint + test cycle. Failures feed back into the next turn for up to three retries. The old rollback-on-fail behaviour is gone — RustyClaw fixes forward.
+
+### ↩️ &nbsp; `/undo` and `/redo` on shadow refs
+
+Every assistant turn silently snapshots the working tree to `refs/rustyclaw/sessions/<id>/<n>`. Invisible to `git log`, `git branch`, `git status`. Never pushed. Use the `/undo` picker or skip straight to a turn with `/undo 3`. **[redacted] has undo; it pollutes your history. RustyClaw doesn't.**
+
+### 🔌 &nbsp; Works offline via Ollama — with working tool use
+
+Full tool use over Ollama's native format — [redacted]'s issue #42 is where we started. Auto-falls back to prompt-injected JSON on models that don't support native tools.
+
+### 🦀 &nbsp; Single 19 MB static binary
+
+No runtime. No dependencies. No post-install scripts. `scp` it to a server and run. Cross-compiled for `x86_64-linux-gnu`, `aarch64-linux-gnu`, and `x86_64-linux-musl` on every release.
+
+### 🛡️ &nbsp; Sandbox-first execution
+
+Shell commands can run under `bwrap`, `firejail`, or a `strict` mode (no network, read-only FS). Approvals are per-session, per-command-family.
+
+### 📁 &nbsp; Respects your config like a native tool
+
+XDG Base Directory compliant (`$XDG_CONFIG_HOME/rustyclaw`, `$XDG_DATA_HOME`, `$XDG_CACHE_HOME`). Reads **both** `CLAUDE.md` and `AGENTS.md` (3,518 upvotes on the Claude Code repo). Hot-reload with `/reload` — no restart.
+
+See **[FEATURES.md](FEATURES.md)** for the complete reference (30+ tools, 60+ slash commands, every config knob).
+
+---
+
+## Quick start
+
+```bash
+# First-run setup
+rustyclaw /init         # generates CLAUDE.md from your repo
+rustyclaw /doctor       # verifies API keys, models, and sandbox
+
+# Day-to-day
+rustyclaw               # interactive TUI
+rustyclaw --headless    # NDJSON stdio for editor/CI embedding (see sdk/)
+
+# Inside the TUI
+/help                   # interactive command menu
+/model                  # pick a model (Claude + Ollama + 9 OpenAI-compat providers)
+/rag search <query>     # semantic codebase search
+/budget $5              # cap the bill
+/voice                  # voice I/O + TTS picker
+/spawn <task>           # parallel agent in a git worktree
+/undo                   # step back to any previous turn
+```
+
+`.env` files auto-load from `$CWD/.env`, `~/.env`, or `~/.config/rustyclaw/.env`.
 
 ---
 
 ## What it looks like
 
+<details open>
+<summary>Screenshots</summary>
+<br>
 <table>
 <tr>
 <td width="50%">
 
-**Coding conversation — streaming**
+**Streaming codebase conversation**
 ![Streaming](assets/conversation-streaming.png)
 
 </td>
@@ -43,7 +189,7 @@
 </td>
 <td width="50%">
 
-**Model picker — Claude + Ollama**
+**Model picker — Claude + Ollama + OpenAI-compat**
 ![Model picker](assets/ollama-models.png)
 
 </td>
@@ -91,91 +237,7 @@
 </td>
 </tr>
 </table>
-
----
-
-## Install
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ForkedInTime/RustyClaw/main/install.sh | bash
-```
-
-<details>
-<summary>Other methods</summary>
-
-**From source:**
-```bash
-git clone https://github.com/ForkedInTime/RustyClaw.git
-cd RustyClaw && cargo build --release
-./target/release/rustyclaw
-```
-
-**Specific version:**
-```bash
-curl -fsSL https://raw.githubusercontent.com/ForkedInTime/RustyClaw/main/install.sh | bash -s v0.2.0
-```
 </details>
-
----
-
-## Why RustyClaw?
-
-| | Claude Code (npm) | RustyClaw |
-|---|---|---|
-| Runtime | Node.js / Bun | None (native binary) |
-| Startup | ~300ms | **~10ms** |
-| Memory | ~150MB | **~10MB** |
-| Binary | ~50MB JS bundle | **~8MB stripped** |
-| Ollama | No | **Built-in** |
-| Voice / TTS | No | **XTTS v2 voice cloning** |
-| Codebase RAG | No | **tree-sitter + FTS5** |
-| Model routing | No | **Auto complexity routing** |
-| Cost tracking | No | **Real-time dashboard** |
-| Sandbox | No | **bwrap / firejail** |
-| SDK / Headless | No | **NDJSON stdio** |
-
-Same Claude API. Same tools. Same CLAUDE.md format. Just faster and self-contained.
-
----
-
-## Quick Start
-
-```bash
-# Set your API key
-echo 'ANTHROPIC_API_KEY=sk-ant-...' >> ~/.env
-
-# Run
-rustyclaw
-
-# Explore
-/help              # interactive command menu
-/model             # pick a model (Claude + Ollama)
-/doctor            # verify setup
-```
-
-`.env` files auto-load from `$CWD/.env`, `~/.env`, or `~/.config/rustyclaw/.env`.
-
----
-
-## Highlights
-
-- **30+ tools** — Bash, Read, Write, Edit, Glob, Grep, WebFetch, Agent, LSP, Jupyter, MCP plugins, and more
-- **60+ slash commands** — `/help`, `/model`, `/session`, `/voice`, `/doctor`, `/rag`, `/budget`, `/reload`
-- **Ollama integration** — Local models with automatic tool-use fallback
-- **Voice I/O** — Whisper STT + XTTS v2 TTS with voice cloning
-- **RAG indexing** — tree-sitter AST parsing, 8 languages, SQLite FTS5 search
-- **Smart routing** — Auto-route simple tasks to cheaper models, complex to Opus
-- **Cost dashboard** — Real-time token/cost tracking with budget limits (`/budget $5`)
-- **260+ spinner verbs** — Video games, medicine, cycling, and general whimsy while you wait
-- **SDK mode** — `--headless` NDJSON server for editor/CI embedding ([docs](sdk/))
-- **Session management** — Save, resume, search, export conversations
-- **Parallel agents** — Spawn background agents in isolated git worktrees
-- **Auto-fix loop** — After every Write/Edit, lint + tests run automatically; failures feed back to the model for up to 3 retries. [redacted]-style post-edit feedback, anti-cheat protected.
-- **Auto-commit snapshots with `/undo` and `/redo`** — Every assistant turn silently snapshots the working tree to a private shadow ref (`refs/rustyclaw/sessions/<id>`). Navigate history with a picker (`/undo`, `/redo`) or skip straight to a turn (`/undo 3`). Invisible to normal git tooling; never pushed.
-- **Sandboxing** — bwrap / firejail / strict isolation
-- **XDG compliant** — Respects `$XDG_CONFIG_HOME`, `$XDG_DATA_HOME`, `$XDG_CACHE_HOME`
-
-See **[FEATURES.md](FEATURES.md)** for the full reference.
 
 ---
 
@@ -198,5 +260,6 @@ Apache 2.0 — see [LICENSE](LICENSE).
 ---
 
 <p align="center">
-  <sub>Built on Arch Linux with lots of enthusiasm.</sub>
+  <img src="assets/logo-128.png" alt="" width="48" height="48"><br>
+  <sub>Built on Arch Linux. No rust was harmed in the making of this binary.</sub>
 </p>

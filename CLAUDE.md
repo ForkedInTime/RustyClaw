@@ -41,7 +41,7 @@ You are a 0.1% expert in computer science, systems programming, infrastructure, 
 7. **Phase 2 robustness** — Diff review, loop detection, self-update, shell completions.
 
 ### THE PITCH
-"A single 5MB Rust binary that indexes your codebase, routes tasks to the cheapest model, runs parallel agents in worktrees, speaks in your voice, shows you every token spent, and works offline via Ollama. Sub-50ms startup. Zero dependencies. Zero flickering. XDG-compliant. AGENTS.md + CLAUDE.md."
+"A single 19 MB static Rust binary that indexes your codebase, routes tasks to the cheapest model, runs parallel agents in worktrees, speaks in your voice, shows you every token spent, and works offline via Ollama. Sub-50ms startup. Zero dependencies. Zero flickering. XDG-compliant. AGENTS.md + CLAUDE.md."
 
 No tool in the world offers this combination. That's the salivation.
 
