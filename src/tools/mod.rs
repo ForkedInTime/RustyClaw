@@ -628,7 +628,7 @@ mod sensitive_path_tests {
     // The deny-list is implemented with literal equality (`PRIVATE_KEY_NAMES`,
     // `SECRET_WRITE_BLOCK_NAMES`, `SECRET_DIR_COMPONENTS`) and case-insensitive
     // `ends_with` (`PRIVATE_KEY_SUFFIXES`). It does NOT interpret glob
-    // metacharacters. A past competitor bug ([redacted]-adjacent) was adding
+    // metacharacters. A known bug in another tool in this space was adding
     // entries like `"*.pem"` thinking they'd be globbed, which then silently
     // failed to match anything because literal-equality saw the asterisk as
     // part of the filename. These tests lock in the invariant that every

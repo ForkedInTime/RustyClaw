@@ -59,13 +59,13 @@ rustyclaw
 > **Every other "Rust port" of Claude Code re-implements the CLI and stops there.**
 > RustyClaw takes the Rust advantage and builds the features a native binary makes possible — an on-disk codebase index, a smart router that keeps your bill down, parallel agents in git worktrees, voice I/O, and a `/undo` that actually works.
 
-|  | Claude Code (npm) | [[redacted]](https://github.com/[redacted]) | **RustyClaw** |
+|  | Claude Code (npm) | Other Rust ports | **RustyClaw** |
 |---|---|---|---|
 | Runtime | Node.js / Bun | Rust | **Rust** |
 | Binary | ~50 MB + `node_modules` | ~15 MB | **19 MB static, zero deps** |
 | Cold start | ~300 ms | ~50 ms | **sub-50 ms** |
 | Memory idle | ~150 MB | ~40 MB | **~10 MB** |
-| Ollama tool-use | No | [Broken (#42)](https://github.com/[redacted]/issues/42) | **Working** |
+| Ollama tool-use | No | Broken / partial | **Working** |
 | Codebase RAG | No | No | **tree-sitter + FTS5, 8 langs** |
 | Model router | No | No | **Auto-route by task complexity** |
 | Parallel agents | No | No | **Git-worktree isolation** |
@@ -107,17 +107,17 @@ rustyclaw spawn "refactor the auth middleware"
 
 Push-to-talk speech input (Whisper). TTS responses in any voice, including a clone of your own after a 6-second sample. **No competitor ships this.**
 
-### ♻️ &nbsp; Auto-fix loop — [redacted]-style, anti-cheat protected
+### ♻️ &nbsp; Auto-fix loop — anti-cheat protected
 
 Every `Write`/`Edit` kicks off a lint + test cycle. Failures feed back into the next turn for up to three retries. The old rollback-on-fail behaviour is gone — RustyClaw fixes forward.
 
 ### ↩️ &nbsp; `/undo` and `/redo` on shadow refs
 
-Every assistant turn silently snapshots the working tree to `refs/rustyclaw/sessions/<id>/<n>`. Invisible to `git log`, `git branch`, `git status`. Never pushed. Use the `/undo` picker or skip straight to a turn with `/undo 3`. **[redacted] has undo; it pollutes your history. RustyClaw doesn't.**
+Every assistant turn silently snapshots the working tree to `refs/rustyclaw/sessions/<id>/<n>`. Invisible to `git log`, `git branch`, `git status`. Never pushed. Use the `/undo` picker or skip straight to a turn with `/undo 3`. **Other tools with undo pollute your history. RustyClaw doesn't.**
 
 ### 🔌 &nbsp; Works offline via Ollama — with working tool use
 
-Full tool use over Ollama's native format — [redacted]'s issue #42 is where we started. Auto-falls back to prompt-injected JSON on models that don't support native tools.
+Full tool use over Ollama's native format. Other Rust ports have had this broken or partial for months — ours just works. Auto-falls back to prompt-injected JSON on models that don't support native tools.
 
 ### 🦀 &nbsp; Single 19 MB static binary
 

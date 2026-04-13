@@ -2,7 +2,7 @@
 
 ## Mission
 
-RustyClaw is a Rust-native Claude Code CLI. The goal is to be the **#1 Rust port of Claude Code** — faster, smaller, and more capable than every competitor. The primary target to beat is **[redacted]** (8.3K stars). Full competitive analysis is in `.secret/competitor-analysis-[redacted].md` and `.secret/rust-claude-code-landscape.md`.
+RustyClaw is a Rust-native Claude Code CLI. The goal is to be the **#1 Rust port of Claude Code** — faster, smaller, and more capable than every competitor. Full competitive analysis is in the private `.secret/` folder (not checked into the public repo).
 
 ## Role
 
@@ -33,8 +33,8 @@ You are a 0.1% expert in computer science, systems programming, infrastructure, 
 - **/reload settings** — Hot-reload settings.json + CLAUDE.md + AGENTS.md without restart
 
 ### PHASE 2 (shipping now)
-- **Auto-fix loop (2026-04-10)** — Post-edit lint + tests + feedback-driven retries replace the old rollback revert. [redacted]-style, anti-cheat protected. `autoFixLoop` in settings.json, `autoRollback` alias kept for backward compat.
-- **Auto git commits + /undo + /redo (2026-04-10)** — Per-turn working-tree snapshots on private shadow refs (`refs/rustyclaw/sessions/<id>`). New `/undo`, `/redo`, `/autocommit` slash commands. Keeps 10 newest session refs with startup prune. [redacted] has `/undo` but pollutes history; RustyClaw's shadow refs are invisible to `git log`/`branch`/`status`. No competitor has `/redo`.
+- **Auto-fix loop (2026-04-10)** — Post-edit lint + tests + feedback-driven retries replace the old rollback revert. Anti-cheat protected. `autoFixLoop` in settings.json, `autoRollback` alias kept for backward compat.
+- **Auto git commits + /undo + /redo (2026-04-10)** — Per-turn working-tree snapshots on private shadow refs (`refs/rustyclaw/sessions/<id>`). New `/undo`, `/redo`, `/autocommit` slash commands. Keeps 10 newest session refs with startup prune. Other tools with undo pollute history; RustyClaw's shadow refs are invisible to `git log`/`branch`/`status`. No competitor has `/redo`.
 
 ### NEXT UP
 6. **SDK/headless sidecar** — NDJSON stdio binary for editor embedding. Uncontested.
@@ -45,29 +45,17 @@ You are a 0.1% expert in computer science, systems programming, infrastructure, 
 
 No tool in the world offers this combination. That's the salivation.
 
-## Our Advantages Over [redacted] (updated 2026-04-07)
+## Our Advantages Over Other Rust Ports (updated 2026-04-07)
 
-- XTTS v2 voice cloning + voice model picker ([redacted]: NO TTS)
-- OpenAI-compat providers actually working ([redacted]: stubs for many)
-- Working Ollama tool execution ([redacted]: broken, issue #42 still open)
+- XTTS v2 voice cloning + voice model picker (others: NO TTS)
+- OpenAI-compat providers actually working (others: stubs for many)
+- Working Ollama tool execution (others: broken / partial)
 - Pre-built binaries + install.sh + CI/CD
 - Zero-flicker inline TUI (Claude Code has 676-upvote flicker bug)
 - Interactive pickers (help, model, session, voice)
 - Custom spinner with 260+ themed verbs
 
-## [redacted] Status (updated 2026-04-07)
-
-**They're fixing weaknesses fast:**
-- NOW has CI (8 runs, passing) and releases (v0.0.8)
-- 3 commits today — Wayland auth, output latency, DeepSeek/Gemini fixes
-- 8,680 stars (up 320 in 2 days)
-
-**Still exploitable:**
-- Broken Ollama tool execution (issue #42)
-- 4GB memory leaks (issue #13)
-- Minimal tests (CI green because barely any tests)
-- Solo maintainer, GPL-3.0
-- No RAG, no model routing, no parallel agents, no TTS
+See `.secret/` for detailed competitor status and exploit vectors (private, not in public repo).
 
 ## Architecture
 

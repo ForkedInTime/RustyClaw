@@ -234,7 +234,7 @@ pub(crate) fn read_schema_version(conn: &Connection) -> Result<i64> {
 ///   - If the persisted version is HIGHER than `RAG_SCHEMA_VERSION` (user
 ///     downgraded RustyClaw), we don't fail — we just log and continue
 ///     with the assumption that newer schemas are backward-compatible for
-///     read. This matches the [redacted]/[redacted] behavior and avoids the
+///     read. This matches well-behaved tooling in the space and avoids the
 ///     "downgrade destroys your index" failure mode.
 pub(crate) fn apply_migrations(conn: &Connection) -> Result<()> {
     let current = read_schema_version(conn)?;

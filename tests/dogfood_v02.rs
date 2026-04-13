@@ -226,8 +226,9 @@ fn dogfood_shadow_refs_invisible_to_normal_git() {
     //    Documented limitation: --all walks every ref under refs/, including
     //    refs/rustyclaw/. This is a fundamental git behavior — there is no
     //    refspace outside of refs/ that `for-each-ref` / `update-ref` can
-    //    reach. [redacted] has the identical limitation. The competitive claim is
-    //    about plain `git log` / `git branch` / `git status`, not --all.
+    //    reach. Every other tool in this space has the identical limitation.
+    //    The competitive claim is about plain `git log` / `git branch` /
+    //    `git status`, not --all.
     //
     //    We pin the behavior explicitly so a future change that accidentally
     //    HIDES them from --all (or makes them visible to plain `git log`)
