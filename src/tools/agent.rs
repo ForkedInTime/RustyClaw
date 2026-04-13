@@ -87,7 +87,7 @@ impl Tool for AgentTool {
         // run loop publishes the live provider choice through `ToolContext`
         // each turn — prefer it so sub-agents actually run against the
         // currently-active provider instead of silently falling back to the
-        // startup model. (claurst #78 / #48, opencode #21738)
+        // startup model. (Known regression in multiple competing tools.)
         let mut sub_config = self.config.clone();
         if let Some(ref m) = ctx.live_model {
             sub_config.model = m.clone();

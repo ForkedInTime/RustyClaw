@@ -2,8 +2,8 @@
 //! is dropped without a value (TUI shutdown, terminal close, panic, runtime
 //! tear-down), the awaiting tool-executor MUST interpret that as **Deny**.
 //!
-//! This guards against the "close terminal = auto-approve" bug class (see
-//! codex-cli #17276 and opencode #21743).
+//! This guards against the "close terminal = auto-approve" bug class,
+//! which has shipped as a regression in multiple competing tools.
 
 use rustyclaw::permissions::PermissionDecision;
 use tokio::sync::oneshot;

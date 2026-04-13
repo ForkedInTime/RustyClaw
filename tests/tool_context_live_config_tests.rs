@@ -3,7 +3,8 @@
 //! instead of a stale snapshot.
 //!
 //! These fields exist to fix the "user runs /model foo, then subagent runs
-//! against the OLD model" bug class (claurst #78 #48, opencode #21738).
+//! against the OLD model" bug class (a known regression in multiple
+//! competing tools in this space).
 
 use rustyclaw::tools::ToolContext;
 use std::path::PathBuf;
