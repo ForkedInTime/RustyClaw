@@ -221,7 +221,41 @@ pub fn resolve_profile() -> Option<Resolved> {
 pub struct ProcessAuthEnv;
 
 /// `ant` is a local CLI, but a wedged binary must not hang startup forever.
-const ANT_TIMEOUT: Duration = Duration::from_secs(10);
+const ANT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Directory `ant auth login` writes profiles to.
+///
+/// `$ANTHROPIC_CONFIG_DIR`, else `~/.config/anthropic` on Unix and
+/// `%APPDATA%\Anthropic` on Windows.
+fn anthropic_config_dir() -> Option<std::path::PathBuf> {
+    if let Ok(dir) = std::env::var("ANTHROPIC_CONFIG_DIR")
+        && !dir.trim().is_empty()
+    {
+        return Some(std::path::PathBuf::from(dir));
+    }
+    #[cfg(windows)]
+    {
+        std::env::var("APPDATA")
+            .ok()
+            .map(|d| std::path::PathBuf::from(d).join("Anthropic"))
+    }
+    #[cfg(not(windows))]
+    {
+        dirs::home_dir().map(|h| h.join(".config").join("anthropic"))
+    }
+}
+
+/// Has `ant auth login` ever stored a profile on this machine?
+///
+/// This gate exists because **`ant` is a name collision**: Apache Ant owns that
+/// binary name on many systems, including the Windows CI image. Spawning
+/// whatever `ant` happens to be on PATH is both wrong and slow — running an
+/// unrelated build tool on every startup where no API key is set. Checking for
+/// the credentials directory first means we never execute anything unless the
+/// real CLI has actually been used here.
+fn ant_profile_dir_exists() -> bool {
+    anthropic_config_dir().is_some_and(|d| d.join("credentials").is_dir())
+}
 
 impl AuthEnv for ProcessAuthEnv {
     fn var(&self, key: &str) -> Option<String> {
@@ -229,6 +263,9 @@ impl AuthEnv for ProcessAuthEnv {
     }
 
     fn ant_access_token(&self) -> Option<String> {
+        if !ant_profile_dir_exists() {
+            return None;
+        }
         // `--access-token` is required: the bare form prints the whole
         // credentials JSON, which as an Authorization header yields an empty
         // response or an HTTP/2 protocol error rather than an obvious failure.
@@ -236,7 +273,7 @@ impl AuthEnv for ProcessAuthEnv {
     }
 
     fn ant_profile_present(&self) -> bool {
-        run_ant(&["auth", "status"]).is_some()
+        ant_profile_dir_exists()
     }
 }
 
@@ -428,6 +465,54 @@ mod tests {
             .with("ANTHROPIC_AUTH_TOKEN", "t");
         let r = resolve_with(&env).unwrap();
         assert!(r.warnings.iter().any(|w| w.contains("Both")), "{:?}", r.warnings);
+    }
+
+    /// Regression: `ant` collides with Apache Ant, which ships on the Windows
+    /// CI image. Spawning a bare `ant` from PATH on every credential-less
+    /// startup ran an unrelated build tool and stalled the process long enough
+    /// to fail the headless SDK test. Nothing may be executed unless the real
+    /// CLI has actually stored a profile here.
+    #[test]
+    fn no_subprocess_when_no_profile_directory_exists() {
+        let empty = tempfile::tempdir().unwrap();
+        // SAFETY: single-threaded within this test; the var is restored below.
+        let prev = std::env::var("ANTHROPIC_CONFIG_DIR").ok();
+        unsafe { std::env::set_var("ANTHROPIC_CONFIG_DIR", empty.path()) };
+
+        assert!(
+            !ant_profile_dir_exists(),
+            "a config dir with no credentials/ must not trigger a spawn"
+        );
+        assert!(ProcessAuthEnv.ant_access_token().is_none());
+        assert!(!ProcessAuthEnv.ant_profile_present());
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("ANTHROPIC_CONFIG_DIR", v),
+                None => std::env::remove_var("ANTHROPIC_CONFIG_DIR"),
+            }
+        }
+    }
+
+    #[test]
+    fn config_dir_honours_the_env_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let prev = std::env::var("ANTHROPIC_CONFIG_DIR").ok();
+        unsafe { std::env::set_var("ANTHROPIC_CONFIG_DIR", dir.path()) };
+
+        assert_eq!(anthropic_config_dir().as_deref(), Some(dir.path()));
+        std::fs::create_dir_all(dir.path().join("credentials")).unwrap();
+        assert!(
+            ant_profile_dir_exists(),
+            "credentials/ present ⇒ the real CLI has been used here"
+        );
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("ANTHROPIC_CONFIG_DIR", v),
+                None => std::env::remove_var("ANTHROPIC_CONFIG_DIR"),
+            }
+        }
     }
 
     #[test]
