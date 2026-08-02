@@ -61,14 +61,46 @@ pub struct ClaudeClient {
     client: Client,
     api_key: String,
     base_url: String,
+    /// Betas the credential itself requires, merged into every request's
+    /// `anthropic-beta`. An OAuth bearer token needs `oauth-2025-04-20`.
+    ///
+    /// This is *not* a default header: `RequestBuilder::header` appends rather
+    /// than replaces, so a default `anthropic-beta` plus a per-request one
+    /// would send the field twice. Merging into the single per-request value
+    /// keeps exactly one.
+    credential_betas: Vec<String>,
 }
 
 impl ClaudeClient {
+    /// Construct from a static API key. Retained for callers that already hold
+    /// a raw key; prefer [`ClaudeClient::with_credential`].
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
-        let api_key = api_key.into();
+        Self::with_credential(&crate::auth::Credential::ApiKey(api_key.into()))
+    }
+
+    /// Construct from a resolved credential, selecting the wire format.
+    ///
+    /// A static key authenticates with `x-api-key`; an OAuth access token uses
+    /// `Authorization: Bearer` plus the `oauth-2025-04-20` beta. Sending both
+    /// auth headers is rejected by the API, so exactly one is set.
+    pub fn with_credential(cred: &crate::auth::Credential) -> Result<Self> {
+        let api_key = cred.secret().to_string();
         let mut headers = header::HeaderMap::new();
         headers.insert("anthropic-version", ANTHROPIC_VERSION.parse()?);
-        headers.insert("x-api-key", api_key.parse()?);
+
+        let mut credential_betas = Vec::new();
+        match cred {
+            crate::auth::Credential::ApiKey(k) => {
+                headers.insert("x-api-key", k.parse()?);
+            }
+            crate::auth::Credential::OAuth(token) => {
+                headers.insert(
+                    header::AUTHORIZATION,
+                    format!("Bearer {token}").parse()?,
+                );
+                credential_betas.push(crate::auth::OAUTH_BETA.to_string());
+            }
+        }
         headers.insert(header::CONTENT_TYPE, "application/json".parse()?);
 
         let client = Client::builder()
@@ -86,7 +118,28 @@ impl ClaudeClient {
             client,
             api_key,
             base_url: ANTHROPIC_API_BASE.to_string(),
+            credential_betas,
         })
+    }
+
+    /// Merge the request's betas with any the credential requires.
+    /// Returns `None` when there are none, so the header is omitted entirely.
+    fn beta_header(&self, request_betas: &[String]) -> Option<String> {
+        if request_betas.is_empty() && self.credential_betas.is_empty() {
+            return None;
+        }
+        let mut all: Vec<&str> = Vec::new();
+        for b in request_betas.iter().chain(self.credential_betas.iter()) {
+            let b = b.as_str();
+            if !b.is_empty() && !all.contains(&b) {
+                all.push(b);
+            }
+        }
+        if all.is_empty() {
+            None
+        } else {
+            Some(all.join(","))
+        }
     }
 
     /// Non-streaming API call — mirrors callModel() in services/api/claude.ts
@@ -96,8 +149,8 @@ impl ClaudeClient {
         debug!("POST {url} model={}", request.model);
 
         let mut builder = self.client.post(&url).json(&request);
-        if !request.betas.is_empty() {
-            builder = builder.header("anthropic-beta", request.betas.join(","));
+        if let Some(betas) = self.beta_header(&request.betas) {
+            builder = builder.header("anthropic-beta", betas);
         }
         if let Some(ref sid) = request.session_id {
             builder = builder.header("X-Claude-Code-Session-Id", sid.as_str());
@@ -129,8 +182,8 @@ impl ClaudeClient {
         debug!("POST {url} stream=true model={}", request.model);
 
         let mut builder = self.client.post(&url).json(&request);
-        if !request.betas.is_empty() {
-            builder = builder.header("anthropic-beta", request.betas.join(","));
+        if let Some(betas) = self.beta_header(&request.betas) {
+            builder = builder.header("anthropic-beta", betas);
         }
         if let Some(ref sid) = request.session_id {
             builder = builder.header("X-Claude-Code-Session-Id", sid.as_str());
@@ -304,6 +357,23 @@ pub enum ApiBackend {
 impl ApiBackend {
     /// Create the right backend for `model`.
     /// `api_key` is required for Anthropic; ignored for Ollama/OpenAI-compat.
+    /// `api_key` is the credential secret; `is_oauth` selects the wire format
+    /// (`Authorization: Bearer` + oauth beta, vs `x-api-key`). Ignored for
+    /// Ollama / OpenAI-compat backends, which carry their own auth.
+    pub fn new_with_auth(
+        model: &str,
+        api_key: &str,
+        is_oauth: bool,
+        ollama_host: &str,
+    ) -> Result<Self> {
+        if !is_ollama_model(model) && !is_openai_compat_model(model) && is_oauth {
+            return Ok(Self::Anthropic(ClaudeClient::with_credential(
+                &crate::auth::Credential::OAuth(api_key.to_string()),
+            )?));
+        }
+        Self::new(model, api_key, ollama_host)
+    }
+
     pub fn new(model: &str, api_key: &str, ollama_host: &str) -> Result<Self> {
         if is_ollama_model(model) {
             Ok(Self::Ollama(OllamaClient::new(ollama_host)?))
@@ -389,6 +459,62 @@ impl ApiBackend {
             Self::OpenAiCompat(c) => c.take_tools_notice(),
             Self::Anthropic(_) => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod credential_tests {
+    use super::*;
+    use crate::auth::{Credential, OAUTH_BETA};
+
+    /// An OAuth token must go in `Authorization: Bearer`, never `x-api-key` —
+    /// and the request additionally needs the oauth beta or it is rejected.
+    #[test]
+    fn oauth_credential_adds_the_required_beta() {
+        let c = ClaudeClient::with_credential(&Credential::OAuth("tok".into())).unwrap();
+        assert_eq!(c.beta_header(&[]).as_deref(), Some(OAUTH_BETA));
+    }
+
+    /// A static key needs no extra beta, so the header stays absent when the
+    /// request itself asked for none.
+    #[test]
+    fn api_key_credential_adds_no_beta() {
+        let c = ClaudeClient::with_credential(&Credential::ApiKey("sk-ant-x".into())).unwrap();
+        assert_eq!(c.beta_header(&[]), None);
+    }
+
+    /// The credential beta must be *merged* into the request's betas, not sent
+    /// as a second `anthropic-beta` header — `RequestBuilder::header` appends.
+    #[test]
+    fn request_betas_and_credential_betas_merge_into_one_value() {
+        let c = ClaudeClient::with_credential(&Credential::OAuth("tok".into())).unwrap();
+        let merged = c.beta_header(&["compact-2026-01-12".into()]).unwrap();
+        assert!(merged.contains("compact-2026-01-12"), "{merged}");
+        assert!(merged.contains(OAUTH_BETA), "{merged}");
+        assert_eq!(merged.matches(OAUTH_BETA).count(), 1, "{merged}");
+        assert!(!merged.contains(",,"), "{merged}");
+    }
+
+    #[test]
+    fn duplicate_betas_are_collapsed() {
+        let c = ClaudeClient::with_credential(&Credential::OAuth("tok".into())).unwrap();
+        let merged = c.beta_header(&[OAUTH_BETA.into()]).unwrap();
+        assert_eq!(merged, OAUTH_BETA, "duplicate must collapse: {merged}");
+    }
+
+    #[test]
+    fn api_key_request_betas_pass_through_untouched() {
+        let c = ClaudeClient::with_credential(&Credential::ApiKey("k".into())).unwrap();
+        assert_eq!(c.beta_header(&["a".into(), "b".into()]).as_deref(), Some("a,b"));
+    }
+
+    /// `ClaudeClient::new` is the legacy raw-key entry point — it must stay
+    /// equivalent to an explicit ApiKey credential.
+    #[test]
+    fn legacy_new_is_equivalent_to_an_api_key_credential() {
+        let legacy = ClaudeClient::new("sk-ant-x").unwrap();
+        assert_eq!(legacy.beta_header(&[]), None);
+        assert_eq!(legacy.api_key, "sk-ant-x");
     }
 }
 

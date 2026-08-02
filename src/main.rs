@@ -1,6 +1,7 @@
 /// rustyclaw — Rust-native AI coding CLI
 /// Entry point
 mod api;
+mod auth;
 mod autofix;
 mod browser;
 mod commands;
