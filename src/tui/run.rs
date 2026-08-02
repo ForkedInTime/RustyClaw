@@ -927,6 +927,11 @@ async fn run_loop(mut config: Config, resume_id: Option<String>) -> Result<()> {
         }
 
         // Uses cached term size — no syscall per frame; updated on Resize events.
+        // Bound scrollback before measuring/drawing. Every path that appends to
+        // `app.entries` reaches the renderer through here, so this single call is
+        // sufficient — no need to police ~40 individual push sites.
+        app.trim_entries();
+
         {
             let needed = viewport_height(&app, last_term_cols, last_term_rows);
             if needed != current_vp_h {

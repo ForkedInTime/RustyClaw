@@ -21,6 +21,40 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
 const DEFAULT_MAX_TOKENS: u32 = 8096;
 
+/// Maximum time to wait for the *next* SSE event before declaring the stream dead.
+///
+/// This is deliberately an inter-event budget, not a whole-request timeout: a
+/// legitimate response can stream for many minutes, so `.timeout()` on the request
+/// would truncate valid work. But a healthy connection always delivers *something* —
+/// a content delta, a `ping`, or a keepalive — well inside this window.
+///
+/// Without this bound, a silently dropped TCP connection (NAT idle reaper, laptop
+/// sleep, VPN drop) leaves the read future pending forever: the UI hangs with no
+/// error and no recovery short of killing the process.
+pub(crate) const SSE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Await the next event from an SSE stream, bounded by [`SSE_IDLE_TIMEOUT`].
+///
+/// Returns `Ok(None)` on clean end-of-stream. Shared by the Anthropic backend and
+/// the OpenAI-compatible backend (which also serves Ollama), so every streaming path
+/// gets the same stall detection.
+pub(crate) async fn next_sse_event<S, E>(stream: &mut S) -> Result<Option<eventsource_stream::Event>>
+where
+    S: futures_util::Stream<Item = std::result::Result<eventsource_stream::Event, E>> + Unpin,
+    E: std::fmt::Display,
+{
+    match tokio::time::timeout(SSE_IDLE_TIMEOUT, stream.next()).await {
+        Err(_) => Err(anyhow!(
+            "SSE stream stalled: no data received for {}s — the connection was likely \
+             dropped upstream. Retry the request.",
+            SSE_IDLE_TIMEOUT.as_secs()
+        )),
+        Ok(None) => Ok(None),
+        Ok(Some(Ok(event))) => Ok(Some(event)),
+        Ok(Some(Err(e))) => Err(anyhow!("SSE stream error: {e}")),
+    }
+}
+
 #[derive(Clone)]
 #[allow(dead_code)] // api_key retained for future authenticated-header injection
 pub struct ClaudeClient {
@@ -122,8 +156,7 @@ impl ClaudeClient {
         let mut tool_blocks: HashMap<usize, (String, String, String)> = HashMap::with_capacity(4); // id, name, json
         let mut thinking_blocks: HashMap<usize, (String, String)> = HashMap::with_capacity(4); // thinking, sig
 
-        while let Some(event) = stream.next().await {
-            let event = event.context("SSE stream error")?;
+        while let Some(event) = next_sse_event(&mut stream).await? {
             if event.data == "[DONE]" {
                 break;
             }
@@ -356,5 +389,88 @@ impl ApiBackend {
             Self::OpenAiCompat(c) => c.take_tools_notice(),
             Self::Anthropic(_) => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod sse_idle_tests {
+    use super::*;
+    use eventsource_stream::Event;
+    use std::convert::Infallible;
+
+    fn event(data: &str) -> Event {
+        Event {
+            data: data.to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// A stream that yields nothing and never terminates — models a TCP connection
+    /// that was silently dropped upstream (NAT reaper, laptop sleep, VPN drop).
+    /// Before the idle-timeout guard this hung the caller forever.
+    #[tokio::test(start_paused = true)]
+    async fn stalled_stream_errors_instead_of_hanging_forever() {
+        let mut stream = futures_util::stream::pending::<Result<Event, Infallible>>();
+
+        let err = next_sse_event(&mut stream)
+            .await
+            .expect_err("a stream that never yields must time out, not hang");
+
+        let msg = err.to_string();
+        assert!(msg.contains("stalled"), "diagnostic should say stalled: {msg}");
+        assert!(
+            msg.contains(&SSE_IDLE_TIMEOUT.as_secs().to_string()),
+            "diagnostic should report the budget that elapsed: {msg}"
+        );
+    }
+
+    /// A stream that goes quiet for less than the budget is healthy and must be
+    /// allowed through — long thinking gaps are legitimate, not a stall.
+    #[tokio::test(start_paused = true)]
+    async fn quiet_period_within_budget_is_not_treated_as_a_stall() {
+        let quiet = SSE_IDLE_TIMEOUT - std::time::Duration::from_secs(1);
+        let mut stream = Box::pin(futures_util::stream::once(async move {
+            tokio::time::sleep(quiet).await;
+            Ok::<_, Infallible>(event("late but valid"))
+        }));
+
+        let got = next_sse_event(&mut stream).await.expect("must not time out");
+        assert_eq!(got.map(|e| e.data).as_deref(), Some("late but valid"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn clean_end_of_stream_returns_none() {
+        let mut stream = futures_util::stream::empty::<Result<Event, Infallible>>();
+        assert!(next_sse_event(&mut stream).await.unwrap().is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn events_pass_through_in_order() {
+        let mut stream = futures_util::stream::iter(vec![
+            Ok::<_, Infallible>(event("first")),
+            Ok(event("second")),
+        ]);
+
+        assert_eq!(
+            next_sse_event(&mut stream).await.unwrap().map(|e| e.data),
+            Some("first".into())
+        );
+        assert_eq!(
+            next_sse_event(&mut stream).await.unwrap().map(|e| e.data),
+            Some("second".into())
+        );
+        assert!(next_sse_event(&mut stream).await.unwrap().is_none());
+    }
+
+    /// Transport errors must still surface as errors, not be swallowed by the
+    /// timeout wrapper.
+    #[tokio::test(start_paused = true)]
+    async fn transport_error_is_propagated() {
+        let mut stream = Box::pin(futures_util::stream::once(async {
+            Err::<Event, _>(std::io::Error::other("connection reset"))
+        }));
+
+        let err = next_sse_event(&mut stream).await.unwrap_err();
+        assert!(err.to_string().contains("connection reset"), "{err}");
     }
 }
