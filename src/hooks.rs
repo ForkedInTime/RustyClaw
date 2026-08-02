@@ -591,6 +591,10 @@ mod tests {
     /// `status.code()` is None when a process dies by signal. The old
     /// `unwrap_or(0)` read that as exit 0 — success — so a PreToolUse gate
     /// killed by the OOM killer (or anything else) silently allowed the call.
+    ///
+    /// Unix-only: Windows has no POSIX signal termination and `ExitStatus::code()`
+    /// there always returns `Some`, so neither the bug nor this test applies.
+    #[cfg(unix)]
     #[tokio::test]
     async fn signal_killed_gating_hook_blocks() {
         let r = run_pre_tool_hooks(
@@ -610,6 +614,7 @@ mod tests {
     }
 
     /// The same failure on a non-gating event is still non-blocking.
+    #[cfg(unix)]
     #[tokio::test]
     async fn signal_killed_non_gating_hook_is_tolerated() {
         // Must simply return without blocking anything.
