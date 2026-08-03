@@ -2,8 +2,7 @@
 //! atomic as documented, and result sets must be bounded.
 
 use rustyclaw::tools::{
-    Tool, ToolContext, file_edit::FileEditTool, file_write::FileWriteTool, glob::GlobTool,
-    multi_edit::MultiEditTool,
+    Tool, ToolContext, file_write::FileWriteTool, glob::GlobTool, multi_edit::MultiEditTool,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -140,6 +139,10 @@ async fn multi_edit_later_edits_see_earlier_ones() {
 #[cfg(unix)]
 #[tokio::test]
 async fn atomic_write_preserves_file_permissions() {
+    // Imported here rather than at module scope: this is the only user, and the
+    // test is unix-only, so a top-level import is dead code on Windows and
+    // trips `-D warnings` there.
+    use rustyclaw::tools::file_edit::FileEditTool;
     use std::os::unix::fs::PermissionsExt;
     let td = TempDir::new().unwrap();
     let ctx = ToolContext::new(PathBuf::from(td.path()));
