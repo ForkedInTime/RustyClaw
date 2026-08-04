@@ -706,8 +706,14 @@ mod tests {
             let _ = send_with_retry(|| post(&url), None, "test").await;
         });
 
-        // Let the first attempt land and enter its 1s backoff.
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        // Wait for the first attempt to land rather than assuming a fixed
+        // delay is enough — a loaded CI runner is not that punctual.
+        for _ in 0..100 {
+            if hits.load(Ordering::SeqCst) >= 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
         assert_eq!(hits.load(Ordering::SeqCst), 1, "first attempt should land");
         handle.abort();
 
